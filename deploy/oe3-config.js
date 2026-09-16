@@ -3,6 +3,8 @@ window.__OE3_CONFIG__ = {
   orthancUrl: "/orthanc-proxy",
   brokerUrl: "/broker-api",
   authMode: "none",
+  // No backend proxy in this stack — skip the /oe3-me gate (local admin).
+  authCheck: false,
   features: {
     enableMwlBroker: true,
     enableModalityConfig: true,

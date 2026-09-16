@@ -155,6 +155,29 @@ orthanc-dicommwl-broker/
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
 | `pytest` | 15 Tests grün (inkl. DIMSE-Integration in-process) |
 | `npm run test` / `tsc` / `lint` | 259 Tests, 0 Errors |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 8/8 grün, 0 Console-/Page-/Netzwerk-Fehler |
+
+### Browser-Verifikation (Playwright, Chromium headless)
+
+`e2e/stack/` im Frontend-Repo: `playwright.stack.config.ts` (Desktop- +
+Mobile-Projekt gegen `http://127.0.0.1:18082`) + `stack-viewport.spec.ts`
+(Study-Liste, Broker-Dashboard, Echo-Button, Sidebar-Navigation, DOM-Analyse,
+Screenshots pro Viewport unter `e2e/stack/screenshots/`).
+
+Gefundene und behobene Defekte:
+
+- **`/oe3-me` 404 → App komplett blockiert.** Der AuthGate ruft `/oe3-me`
+  immer ab; ohne Backend-Proxy antwortete Orthanc 404 → "Zugriff
+  verweigert". Fix: explizites Config-Opt-out `authCheck: false`
+  (Default `true`, Prod-Verhalten unverändert) → lokale Admin-Session.
+- **`GET /labels` → 404.** Korrekter Orthanc-Endpoint ist `/tools/labels`
+  (Fork-Bug, betraf jedes Deployment).
+- **Mobile Sidebar ohne `SheetTitle`** → Radix-A11y-Warnung in der Konsole.
+  Fix: `sr-only` SheetHeader/Title/Description in `sidebar.tsx`.
+- **Mobile Broker-Tabelle:** Endpoint-Zellen ohne Umbruch → Echo-Button
+  abgeschnitten; RTT wrappte zweizeilig. Fix: `break-all` auf
+  Endpoint-Zellen, `whitespace-nowrap` auf dem Echo-Badge,
+  Echo-Button min. 36px Touch-Target auf Mobile.
 
 
 ## Phasen

@@ -69,6 +69,12 @@ python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
 ```bash
 cd mwl-broker && python -m pytest tests -q        # 15 Tests (API + DIMSE e2e)
 cd orthanc-explorer-3-usable && npm run test      # 259 Tests
+
+# Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
+# + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
+cd orthanc-explorer-3-usable
+npx playwright test --config=e2e/stack/playwright.stack.config.ts
+# Screenshots + DOM-Reports: e2e/stack/screenshots/
 ```
 
 ## Status
@@ -79,6 +85,7 @@ cd orthanc-explorer-3-usable && npm run test      # 259 Tests
 - [x] OE3: `broker.ts` API-Client + Broker-Dashboard
 - [x] Tests: 15 Backend (inkl. echter DIMSE-Integration), 10 Frontend neu
 - [x] Verifiziert auf Zielhost: C-FIND-Fan-out, Dedupe, Store-Routing, Echo
+- [x] Browser-E2E (Playwright, Desktop+Mobile): 8/8 grün, 0 Console-Errors
 - [ ] OE3: Editoren für Quellen/Ziele/Routing-Regeln
 - [ ] Retention-Job für seen_items, Alerting, TLS am DIMSE
 - [ ] HL7-ORM/ADT-Adapter (Worklist-Einträge ohne Upstream-C-FIND)
