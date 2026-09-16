@@ -1,0 +1,56 @@
+# Demo overlay — two mock RIS worklist sources + a second PACS so the whole
+# broker flow (C-FIND fan-out/dedupe + store routing) can be tested without
+# real hospital systems.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d
+#
+# Variant "b" deliberately contains a duplicate of an item in "a" to exercise
+# broker-side dedupe.
+services:
+
+  # Override the broker seed: mock sources + both store targets
+  mwl-broker:
+    environment:
+      BROKER_SEED_CONFIG_JSON: >-
+        [{"kind":"source","name":"ris-a","aet":"RIS_A","host":"mock-ris-a","port":11114,"calling_aet":"MWLBROKER","charset":"ISO_IR 100","priority":10},
+         {"kind":"source","name":"ris-b","aet":"RIS_B","host":"mock-ris-b","port":11115,"calling_aet":"MWLBROKER","charset":"ISO_IR 100","priority":20},
+         {"kind":"target","name":"orthanc","aet":"ORTHANC","host":"orthanc","port":4242,"is_default":true},
+         {"kind":"target","name":"pacs-peer","aet":"PEER","host":"dicom-peer","port":4242,"is_default":false}]
+
+  mock-ris-a:
+    build: ./mwl-broker
+    command: ["python", "-m", "mwl_broker.mock_ris", "--aet", "RIS_A", "--port", "11114", "--variant", "a"]
+    ports:
+      - "${MOCK_RIS_A_PORT}:11114"
+    restart: unless-stopped
+
+  mock-ris-b:
+    build: ./mwl-broker
+    command: ["python", "-m", "mwl_broker.mock_ris", "--aet", "RIS_B", "--port", "11115", "--variant", "b"]
+    ports:
+      - "${MOCK_RIS_B_PORT}:11115"
+    restart: unless-stopped
+
+  # Second PACS for routing demos
+  dicom-peer:
+    image: orthancteam/orthanc:latest
+    restart: unless-stopped
+    ports:
+      - "${PEER_HTTP_PORT}:8042"
+      - "${PEER_DICOM_PORT}:4242"
+    environment:
+      ORTHANC__NAME: "PACS Peer"
+      ORTHANC__DICOM_AET: "PEER"
+      ORTHANC__REMOTE_ACCESS_ALLOWED: "true"
+      ORTHANC__AUTHENTICATION_ENABLED: "false"
+    volumes:
+      - peer-data:/var/lib/orthanc/db
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8042/system')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+volumes:
+  peer-data:

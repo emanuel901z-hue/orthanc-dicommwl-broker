@@ -1,0 +1,75 @@
+{
+  /**
+   * Orthanc configuration for the mwl-broker stack.
+   *
+   * Mounted at /etc/orthanc/orthanc.json. Credentials are NOT stored here —
+   * Postgres login and (optional) registered users come from ORTHANC__* env
+   * vars in docker-compose.yml / .env, which override this file.
+   */
+
+  "Name": "MWL Broker Orthanc",
+  "DicomAet": "ORTHANC",
+  "DicomPort": 4242,
+  "HttpPort": 8042,
+
+  // Verbose HTTP/DICOM errors in the log; disable on a production host if
+  // log volume becomes an issue.
+  "HttpVerbose": false,
+  "DicomVerbose": false,
+
+  "RemoteAccessAllowed": true,
+  // REST API is bound to localhost / internal network via compose port
+  // binding — authentication stays off. If you expose Orthanc HTTP to the
+  // LAN, set this to true and add RegisteredUsers.
+  "AuthenticationEnabled": false,
+  "RegisteredUsers": {},
+
+  // Modalities/peers configured via REST are stored in Postgres (persistent
+  // across container rebuilds).
+  "DicomModalitiesInDatabase": true,
+  "OrthancPeersInDatabase": true,
+
+  // Ingested objects keep their identifiers — needed so the broker can route
+  // follow-up series by StudyInstanceUID/AccessionNumber.
+  "KeepAlive": false,
+  "StoreDicom": true,
+
+  "HttpTimeout": 300,
+  "HttpRequestTimeout": 300,
+  "NetworkTimeout": 300,
+  "DicomScuTimeout": 300,
+  "DicomScpTimeout": 300,
+  "LogExportedResources": true,
+
+  "HttpHeaders": {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Request-Id"
+  },
+
+  // PostgreSQL index — credentials injected via ORTHANC__POSTGRESQL__*
+  "PostgreSQL": {
+    "EnableIndex": true,
+    "EnableStorage": false,
+    "Host": "postgres",
+    "Port": 5432,
+    "Database": "orthanc",
+    "MaximumConnectionRetries": 10,
+    "ConnectionRetryInterval": 5
+  },
+
+  "DicomWeb": {
+    "Enable": true,
+    "Root": "/dicom-web/",
+    "EnableWado": true,
+    "EnableStow": true,
+    "EnableQido": true,
+    "ChunkedTransfers": true,
+    "Timeout": 300
+  },
+
+  // Worklists plugin stays OFF — MWL is served by the broker, not by Orthanc.
+  "Worklists": {
+    "Enable": false
+  }
+}
