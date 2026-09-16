@@ -84,8 +84,9 @@ def query_source(src: SourceCfg, incoming_identifier: Dataset) -> list[Dataset]:
     assoc = ae.associate(src.host, src.port, ae_title=src.aet)
     answers: list[Dataset] = []
     if not assoc.is_established:
-        log.warning("upstream %s: association rejected", src.name)
-        return answers
+        # Raise so the caller records "error" — an unreachable source must
+        # count as failure, not as "zero answers".
+        raise ConnectionError("association rejected")
     try:
         for status, ds in assoc.send_c_find(ident, ModalityWorklistInformationFind):
             if status is None:
