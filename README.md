@@ -5,9 +5,12 @@ Interface und Monitoring, aufgebaut auf:
 
 | Komponente | Pfad | Zweck |
 |---|---|---|
-| `orthanc-explorer-3-usable/` | Frontend | OE3-Fork (React SPA) — dient als Konfigurations- und Monitoring-UI für den Broker |
+| `orthanc-explorer-3-usable/` | Frontend (Submodule) | OE3-Fork (React SPA) — Konfigurations- und Monitoring-UI für den Broker |
 | `mwl-broker/` | Backend | Python-Service (FastAPI + pynetdicom): MWL-SCP (C-FIND-Proxy/Aggregator), C-STORE-SCP mit Quellen-Routing, Config-API, Query-/Store-Log, Prometheus-Metriken |
-| `docker-compose.yml` | Stack | Orthanc + Postgres-Index + Broker + OE3 + zwei Mock-RIS-Quellen |
+| `docker-compose.yml` | Stack | Orthanc + Postgres-Index + Broker + OE3 (produktionsfähige Basis) |
+| `docker-compose.demo.yml` | Overlay | Zwei Mock-RIS-Quellen + zweites PACS zum Testen des Routings |
+| `bootstrap.sh` | Setup | Plug-and-play-Installer für Ubuntu Server |
+| `.env.example` | Config | Alle Ports/Credentials — nach `.env` kopieren |
 
 ## Konzept in einem Satz
 
@@ -21,37 +24,61 @@ Orthanc als Index/Archiv).
 Details zur Architektur: [`project.md`](project.md)
 Konventionen für Coding-Agents: [`agents.md`](agents.md)
 
-## Quickstart (Dev-Stack)
+## Quickstart (Ubuntu Server, Plug-and-play)
 
 ```bash
-docker compose up -d --build
+git clone --recurse-submodules <repo-url> orthanc-dicommwl-broker
+cd orthanc-dicommwl-broker
+./bootstrap.sh            # prüft Docker, .env, Port-Kollisionen; startet Stack
+./bootstrap.sh --demo     # inkl. Mock-RIS-Quellen + zweitem PACS
+./bootstrap.sh --check    # nur Preflight, startet nichts
 ```
 
-| Service | Endpoint |
-|---|---|
-| OE3 UI | http://localhost:8082/oe3/ |
-| Orthanc REST | http://localhost:8042 |
-| Broker REST-API | http://localhost:8081/api/v1 (`/docs` = OpenAPI) |
-| Broker Metrics | http://localhost:8081/metrics |
-| Orthanc DICOM | AET `ORTHANC`, Port 4242 |
-| Broker DICOM | AET `MWLBROKER`, Port 11113 (MWL C-FIND + C-STORE) |
-| Mock-RIS A | AET `RIS_A`, Port 11114 |
-| Mock-RIS B | AET `RIS_B`, Port 11115 |
+`bootstrap.sh` installiert Docker falls nötig, legt `.env` aus
+`.env.example` an, warnt bei Port-Kollisionen (wichtig auf Hosts mit anderen
+Docker-Projekten) und wartet auf die Healthchecks.
 
-Smoke-Test von außen (C-FIND gegen den Broker):
+### Default-Ports (in `.env` anpassbar)
+
+Der Referenz-Host belegt die üblichen DICOM-Ports bereits — deshalb liegen
+die Defaults auf freien Ports:
+
+| Service | Host-Port | Bemerkung |
+|---|---|---|
+| OE3 UI | 18082 | http://host:18082/oe3/ |
+| Orthanc REST | 18042 | nur `127.0.0.1` (`ORTHANC_HTTP_BIND`) |
+| Orthanc DICOM | 14242 | AET `ORTHANC` |
+| Broker REST + Metriken | 18081 | nur `127.0.0.1` (`BROKER_API_BIND`) |
+| Broker DICOM | 11113 | AET `MWLBROKER` — **der Port für Modalitäten** |
+| Postgres | — | intern, nicht exponiert |
+| Mock-RIS A / B (demo) | 18114 / 18115 | |
+| Peer-PACS (demo) | 18043 / 14243 | |
+
+### Smoke-Tests
 
 ```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install pynetdicom pydicom
-python mwl-broker/scripts/cfind_smoke.py   # fragt Broker auf 127.0.0.1:11113 ab
+# C-FIND gegen den Broker (liefert gemergte Antworten der Mock-RIS):
+python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
+
+# Oder nach dem Boot im Browser: http://<host>:18082/oe3/ → "MWL Broker"
+# zeigt Echo-Matrix, Zähler und das Live-Query-Log.
+```
+
+## Tests
+
+```bash
+cd mwl-broker && python -m pytest tests -q        # 15 Tests (API + DIMSE e2e)
+cd orthanc-explorer-3-usable && npm run test      # 259 Tests
 ```
 
 ## Status
 
 - [x] Architektur & Projektstruktur (README/project/agents)
-- [x] mwl-broker Scaffold: MWL-Proxy-SCP, Store-Routing, Config-API, Metriken
-- [x] Dev-Stack mit 2 Mock-RIS-Quellen
+- [x] mwl-broker: MWL-Proxy-SCP, Store-Routing, Config-API, Metriken, Echo-Monitoring
+- [x] Dev-/Demo-Stack, .env-basierte Konfiguration, bootstrap.sh
 - [x] OE3: `broker.ts` API-Client + Broker-Dashboard
+- [x] Tests: 15 Backend (inkl. echter DIMSE-Integration), 10 Frontend neu
+- [x] Verifiziert auf Zielhost: C-FIND-Fan-out, Dedupe, Store-Routing, Echo
 - [ ] OE3: Editoren für Quellen/Ziele/Routing-Regeln
+- [ ] Retention-Job für seen_items, Alerting, TLS am DIMSE
 - [ ] HL7-ORM/ADT-Adapter (Worklist-Einträge ohne Upstream-C-FIND)
-- [ ] Alerting (Webhook bei Source-/Target-Ausfall)

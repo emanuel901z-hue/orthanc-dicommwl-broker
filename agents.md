@@ -16,13 +16,17 @@
 ## Commands
 
 ```bash
-# Gesamtstack
+# Setup / Gesamtstack (Basis = produktionsfähig, Demo = + Mock-RIS + Peer)
+./bootstrap.sh              # Docker-Check, .env anlegen, Port-Check, up -d
+./bootstrap.sh --demo       # inkl. docker-compose.demo.yml
+./bootstrap.sh --check      # nur Preflight
 docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d
 
-# Broker-Tests (ohne Docker, nutzt SQLite-freie Unit-Tests)
+# Broker-Tests (ohne Docker; DIMSE-Tests nutzen ephemere Ports + sqlite)
 cd mwl-broker && python -m pytest tests -q
 
-# Broker lokal (Postgres via Docker, sonst DATABASE_URL setzen)
+# Broker lokal (Postgres via Docker, sonst BROKER_DATABASE_URL setzen)
 cd mwl-broker && uvicorn mwl_broker.main:app --port 8081
 
 # Frontend
@@ -32,6 +36,18 @@ npm run dev                 # Vite-Proxy: /orthanc-proxy, /broker-api
 npm run test && npm run lint
 npx tsc --noEmit -p tsconfig.app.json
 ```
+
+## Deployment-Konventionen
+
+- `.env` nie committen (steht in `.gitignore`); Änderungen an
+  Konfigurations-Defaults immer in `.env.example` + README-Tabelle pflegen.
+- Neue Host-Ports nur über `.env`-Variablen — auf dem Zielhost laufen andere
+  Docker-Projekte, hartcodierte Standardports kollidieren.
+- Postgres bleibt intern (kein `ports:`-Mapping); Orthanc-REST/Broker-API
+  binden per Default an `127.0.0.1` — externer Zugriff läuft über den
+  oe3-nginx-Proxy.
+- Demo-Services (mock-ris, dicom-peer) gehören ausschließlich in
+  `docker-compose.demo.yml`, nie in die Basis.
 
 ## Regeln für den Broker (`mwl-broker/`)
 

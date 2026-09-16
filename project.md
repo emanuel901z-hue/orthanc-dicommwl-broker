@@ -106,15 +106,56 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
 
 ```
 orthanc-dicommwl-broker/
-├── orthanc-explorer-3-usable/   # OE3-Fork (Frontend, eigenes Git-Repo)
+├── orthanc-explorer-3-usable/   # OE3-Fork (Frontend, Git-Submodule)
 ├── mwl-broker/                  # FastAPI + pynetdicom Service
 │   ├── mwl_broker/              # Package: api, dimse, db, metrics, echo
-│   ├── tests/                   # pytest (API + Merge-Logik)
+│   ├── tests/                   # pytest (API, Merge, DIMSE-Integration)
 │   ├── scripts/cfind_smoke.py   # manueller C-FIND-Smoke-Test
 │   └── Dockerfile
-├── deploy/postgres-init.sh      # erstellt DB `mwl`
-└── docker-compose.yml           # Gesamtstack
+├── deploy/
+│   ├── orthanc/orthanc.json     # Orthanc-Config (Credentials via env)
+│   ├── oe3-stack.nginx.conf     # SPA + /orthanc-proxy + /broker-api
+│   ├── oe3-config.js            # __OE3_CONFIG__ (orthancUrl, brokerUrl, flags)
+│   └── postgres-init.sh         # erstellt DB `mwl`
+├── docker-compose.yml           # Basis-Stack (produktionsfähig)
+├── docker-compose.demo.yml      # Overlay: Mock-RIS ×2 + Peer-PACS
+├── bootstrap.sh                 # Plug-and-play Ubuntu-Setup
+└── .env.example                 # alle Ports/Credentials konfigurierbar
 ```
+
+## Deployment / Konfiguration
+
+- **`.env` steuert alles**: Ports, Bind-Adressen, AETs, Postgres-Credentials,
+  Broker-Parameter (Echo-Intervall, Timeouts, erlaubte Calling-AETs, Strict-
+  Store-Status, seen_items-Retention) und den JSON-Seed.
+- **Isolation auf Multi-Projekt-Hosts**: `COMPOSE_PROJECT_NAME=mwl-broker`
+  → eigene Container-Namen und eigenes Netzwerk; Postgres wird **nicht** auf
+  dem Host exponiert; Orthanc-REST und Broker-API binden per Default an
+  `127.0.0.1` (Zugriff über den OE3-nginx-Proxy, gleicher Origin → kein CORS).
+- **Default-Ports 18xxx/14xxx** statt der üblichen 4242/8042 — der Referenz-
+  Host belegt die Standardports bereits. `bootstrap.sh --check` meldet
+  Kollisionen vor dem Start.
+- **Orthanc-Config** in `deploy/orthanc/orthanc.json` (statische Optionen);
+  Secrets über `ORTHANC__*` Env-Variablen aus `.env` (env überschreibt JSON).
+- **Demo-Overlay** `docker-compose.demo.yml`: zwei Mock-RIS-SCPs (Variante b
+  enthält absichtlich ein Duplikat → Dedupe-Demo) + zweites PACS (`PEER`) als
+  Routing-Ziel. Seed setzt Quellen/Ziele automatisch.
+
+## Verifikation (auf dem Referenz-Host durchgeführt)
+
+| Check | Ergebnis |
+|---|---|
+| `docker compose config` (base + demo) | valide |
+| Stack hochgefahren | alle Container healthy |
+| C-FIND an `MWLBROKER:11113` | 3 gemergte Antworten aus 2 Quellen (Dedupe) |
+| `seen_items` + `query_log` | geschrieben, PHI-frei (kein PatientName) |
+| C-STORE `ACC-A-001` | per Regel ris-a → pacs-peer geroutet |
+| C-STORE unbekannte Accession | Default-Target orthanc |
+| C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
+| OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
+| `pytest` | 15 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 259 Tests, 0 Errors |
+
 
 ## Phasen
 
@@ -123,9 +164,10 @@ orthanc-dicommwl-broker/
 | 1 | Broker-Scaffold: Config-API, MWL-Proxy, Store-Forwarding, Logs, Metriken | ✅ |
 | 2 | Dev-Stack + Mock-RIS A/B + Smoke-Skript | ✅ |
 | 3 | OE3: Broker-Dashboard read-only | ✅ |
-| 4 | OE3: Editoren für Quellen/Ziele/Regeln + Audit-Events | ☐ |
-| 5 | Härtung: TLS, Allowed-Calling-AETs, Retention-Job, Alerting | ☐ |
-| 6 | HL7-Adapter (ORM/ADT → lokale MWL-Quelle) | ☐ |
+| 4 | Plug-and-play: .env, orthanc.json, bootstrap.sh, Tests, Host-Verifikation | ✅ |
+| 5 | OE3: Editoren für Quellen/Ziele/Regeln + Audit-Events | ☐ |
+| 6 | Härtung: TLS, Retention-Job (seen_items), Alerting | ☐ |
+| 7 | HL7-Adapter (ORM/ADT → lokale MWL-Quelle) | ☐ |
 
 ## Offene Punkte / Risiken
 
