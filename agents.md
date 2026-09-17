@@ -73,6 +73,29 @@ außerhalb des Repos zeigt (mode 600):
 Token rotieren = nur die Store-Datei neu schreiben:
 `printf 'https://<user>:<token>@github.com\n' > ~/.config/git/credentials-broker && chmod 600 …`
 
+## Regeln für den OHIF-Viewer (`ohif-viewer/`, `extension-radiology-advanced/`)
+
+- **Build-Context ist das Repo-Root** (`context: .`, `dockerfile:
+  ohif-viewer/Dockerfile`) — der Dockerfile kopiert zusätzlich
+  `extension-radiology-advanced/`. Diese Extension hat (noch) kein Git-Remote,
+  liegt deshalb als normaler Ordner im Repo; sobald sie ein Remote hat,
+  kann sie als Submodule herausgezogen werden.
+- **`ohif-viewer/default.js` ist generiert** (`build-config.js` aus
+  `protocols/*.js` + `static-config.js`) → nicht editieren, nicht committen
+  (steht in `.gitignore`). Änderungen an der App-Config gehören in
+  `static-config.js` (Build-Default) bzw. `deploy/ohif-config.js` (Runtime).
+- Der Viewer läuft hinter dem Compose-Profil **`viewer`** und wird über den
+  OE3-nginx unter `/ohif/` ausgeliefert (Docker-DNS-Resolver pro Request,
+  damit der Stack auch ohne Viewer startet). OE3 ruft ihn same-origin als
+  `/ohif/viewer?StudyInstanceUIDs=…` auf.
+- DICOMweb-Pfade zeigen auf `/orthanc-proxy/dicom-web` (mitgelieferter
+  Orthanc). Die Carestream-Spezifika des Vorgängerprojekts (pacs-proxy,
+  metadata-bridge, X-API-Key, Accession-Resolver) sind **nicht** Teil dieses
+  Stacks — nicht wieder einführen.
+- Das Image wird **nicht** in `test-stack.sh`/`ci-local.sh` gebaut (Build
+  dauert 5-10 min). Änderungen am Viewer manuell verifizieren:
+  `docker compose --profile viewer up -d --build ohif`.
+
 ## Deployment-Konventionen
 
 - `.env` nie committen (steht in `.gitignore`); Änderungen an

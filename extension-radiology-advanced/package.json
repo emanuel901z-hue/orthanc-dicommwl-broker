@@ -1,0 +1,8 @@
+{
+  "name": "@ohif/extension-radiology-advanced",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "description": "OHIF extension for advanced radiological tools: TIC, Mismatch, Vessel Tracking, sameAs HP-Attribute",
+  "dependencies": {}
+}

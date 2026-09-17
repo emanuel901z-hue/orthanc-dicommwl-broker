@@ -3,6 +3,7 @@
 #
 #   ./bootstrap.sh            base stack (orthanc + postgres + broker + OE3)
 #   ./bootstrap.sh --demo     additionally starts mock RIS sources + peer PACS
+#   ./bootstrap.sh --viewer   additionally builds/starts the OHIF viewer
 #   ./bootstrap.sh --check    only run preflight checks, don't start anything
 #
 # Idempotent: safe to re-run (docker compose up -d is a no-op when up-to-date).
@@ -10,10 +11,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 DEMO=0
+VIEWER=0
 CHECK_ONLY=0
 for arg in "$@"; do
   case "$arg" in
     --demo) DEMO=1 ;;
+    --viewer) VIEWER=1 ;;
     --check) CHECK_ONLY=1 ;;
     -h|--help) grep '^#' "$0" | head -8; exit 0 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
@@ -68,9 +71,12 @@ done
 # ── 4. Start stack ───────────────────────────────────────────────────────────
 COMPOSE_FILES=(-f docker-compose.yml)
 [ "$DEMO" = 1 ] && COMPOSE_FILES+=(-f docker-compose.demo.yml)
+COMPOSE_PROFILES=()
+# OHIF is behind a profile: the image build clones and compiles OHIF (~5-10 min)
+[ "$VIEWER" = 1 ] && COMPOSE_PROFILES+=(--profile viewer)
 
 info "Building + starting stack…"
-docker compose "${COMPOSE_FILES[@]}" up -d --build --remove-orphans
+docker compose "${COMPOSE_FILES[@]}" "${COMPOSE_PROFILES[@]}" up -d --build --remove-orphans
 
 # ── 5. Wait for health ───────────────────────────────────────────────────────
 info "Waiting for services to become healthy…"

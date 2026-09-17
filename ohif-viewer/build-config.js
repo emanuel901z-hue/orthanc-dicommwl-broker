@@ -26,6 +26,17 @@ const staticConfig = require(path.join(DIR, 'static-config.js'));
 // --- Protokoll-Module in definierter Reihenfolge laden ---
 const MODULE_FILES = [
   'generic.js',
+  'ct-cranial.js',
+  'ct-angio.js',
+  'ct-body-trauma.js',
+  'dx-skeleton.js',
+  'dx-extremity.js',
+  'mr.js',
+  'mr-neuro.js',
+  'mr-msk.js',
+  'mr-abdomen.js',
+  'mr-bba.js',
+  'xa-dsa.js',
   'lung-screening.js',
 ];
 

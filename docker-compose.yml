@@ -117,6 +117,34 @@ services:
         max-size: "20m"
         max-file: "3"
 
+  # ── OHIF viewer (optional: --profile viewer) ───────────────────────────────
+  # Hardened OHIF v3.12.5 build (ohif-viewer/Dockerfile) with the custom
+  # extension-radiology-advanced panels. The build context is the repo root
+  # because the Dockerfile also copies extension-radiology-advanced/.
+  #
+  # The browser loads the viewer through the OE3 nginx under /ohif/, so OE3's
+  # "Open in OHIF" button works same-origin; DICOMweb comes from the bundled
+  # Orthanc via /orthanc-proxy/dicom-web.
+  #
+  #   docker compose --profile viewer up -d --build ohif
+  ohif:
+    build:
+      context: .
+      dockerfile: ohif-viewer/Dockerfile
+    restart: unless-stopped
+    profiles: ["viewer"]
+    ports:
+      # Direct access for debugging only — OE3 uses the nginx proxy.
+      - "${OHIF_BIND:-127.0.0.1}:${OHIF_PORT:-18083}:8080"
+    volumes:
+      # Runtime config, same pattern as deploy/oe3-config.js.
+      - ./deploy/ohif-config.js:/usr/share/nginx/html/config/default.js:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
 volumes:
   pgdata:
   orthanc-data:

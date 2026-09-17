@@ -53,6 +53,28 @@ die Defaults auf freien Ports:
 | Postgres | — | intern, nicht exponiert |
 | Mock-RIS A / B (demo) | 18114 / 18115 | |
 | Peer-PACS (demo) | 18043 / 14243 | |
+| OHIF Viewer | 18083 | optional (`--profile viewer`), nur `127.0.0.1` — OE3 nutzt `/ohif/` über den Proxy |
+
+### OHIF-Viewer (optional)
+
+Der gehärtete OHIF v3.12.5-Build (`ohif-viewer/`) inklusive der eigenen
+Extension-Panels (`extension-radiology-advanced/`) ist als Compose-Profil
+angebunden. Er läuft **same-origin** unter `/ohif/` hinter dem OE3-nginx —
+damit funktioniert der „In OHIF öffnen"-Button der Studienansicht direkt,
+und DICOMweb kommt aus dem mitgelieferten Orthanc (`/orthanc-proxy/dicom-web`).
+
+```bash
+# baut OHIF aus dem Quelltext (Clone + Install + Build, ~5-10 min beim ersten Mal)
+docker compose --profile viewer up -d --build ohif
+# oder beim Bootstrap: ./bootstrap.sh --viewer
+
+# Aufruf:  http://<host>:18082/ohif/viewer?StudyInstanceUIDs=<UID>
+#          bzw. aus OE3 heraus über den Button in der Studienansicht
+```
+
+Die Viewer-Config liegt in `deploy/ohif-config.js` (ins Image gemountet,
+änderbar ohne Rebuild). Ohne das Profil startet der Stack unverändert —
+`/ohif/` liefert dann nur einen Fehler.
 
 ### Smoke-Tests
 

@@ -1,11 +1,16 @@
 /**
- * static-config.js - Statische OHIF-App-Konfiguration fuer Pulmopath
+ * static-config.js - Statische OHIF-App-Konfiguration
  *
- * Angepasst fuer Orthanc DICOMweb (TEMP-PACS) mit JWT-Auth via Backend-Proxy.
- * DICOMweb-Pfade zeigen auf /api/v1/pacs/orthanc/dicom-web (authentifiziert).
+ * Angepasst fuer den mwl-broker-Stack: DICOMweb kommt aus dem mitgelieferten
+ * Orthanc (DICOMweb-Plugin), same-origin ueber den OE3-nginx
+ * (/orthanc-proxy/dicom-web). Kein pacs-proxy, keine metadata-bridge,
+ * kein API-Key — der Stack laeuft in einem isolierten Docker-Netz.
  *
- * Multi-Tenant-Isolation wird durch den Backend-Proxy gewaehrleistet
- * (enforcePatientPacsAccess / enforceStaffPacsAccess Middleware).
+ * Der Viewer wird unter /ohif/ ausgeliefert (routerBasename) und ist damit
+ * direkt aus OE3 erreichbar ("Open in OHIF" -> /ohif/viewer?StudyInstanceUIDs=).
+ *
+ * Zur Laufzeit kann die Config ueber eine gemountete Datei ersetzt werden
+ * (siehe deploy/ohif-config.js im Workspace-Root).
  */
 module.exports = {
   "routerBasename": "/ohif/",
@@ -35,11 +40,11 @@ module.exports = {
       "namespace": "@ohif/extension-default.dataSourcesModule.dicomweb",
       "sourceName": "dicomweb",
       "configuration": {
-        "friendlyName": "Orthanc DICOMweb (Pulmopath)",
+        "friendlyName": "Orthanc DICOMweb",
         "name": "dicomweb",
-        "qidoRoot": "/api/v1/pacs/orthanc/dicom-web",
-        "wadoRoot": "/api/v1/pacs/orthanc/dicom-web",
-        "wadoUriRoot": "/api/v1/pacs/orthanc/dicom-web",
+        "qidoRoot": "/orthanc-proxy/dicom-web",
+        "wadoRoot": "/orthanc-proxy/dicom-web",
+        "wadoUriRoot": "/orthanc-proxy/dicom-web",
         "qidoSupportsIncludeField": false,
         "qidoSupportsFuzzyMatching": false,
         "supportsFuzzyMatching": false,

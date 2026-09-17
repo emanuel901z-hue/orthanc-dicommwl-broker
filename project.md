@@ -108,6 +108,54 @@ die Instanz wird trotzdem weitergeleitet. Die angewendeten Regelnamen landen
 im `store_log.applied_transforms` (Audit-Trail). Validierung gegen
 `pydicom.datadict`; UID-Tags sind gesperrt.
 
+### OHIF-Viewer (optional, Compose-Profil `viewer`)
+
+Der gehärtete OHIF-v3.12.5-Build aus dem Vorgängerprojekt ist angebunden:
+
+- **Build-Context ist das Repo-Root**, weil der Dockerfile neben
+  `ohif-viewer/` auch `extension-radiology-advanced/` kopiert (Extension
+  wird per `pluginConfig.json` mit `default: true` registriert und liefert
+  u.a. PACS-Browser, TIC, Mismatch, Vessel Tracking, ROI-Statistik,
+  Tag-Browser, Cine, MPR/Slab-Steuerung).
+- **Build-Patches** (`ohif-viewer/patch-*.js`) härten SR-Bulkdata,
+  Encapsulated-PDF-Frames, VTK-Shader-Nulls, Dynamic-Volume-Metadaten und
+  den StudyBrowser; `check-patches.js` verifiziert sie nach dem Build.
+- **Auslieferung same-origin**: Der OE3-nginx proxied `/ohif/` auf den
+  Viewer-Container (Docker-DNS-Resolver pro Request → der Stack startet auch
+  ohne laufenden Viewer). Damit funktioniert OE3s „In OHIF öffnen" direkt
+  (`/ohif/viewer?StudyInstanceUIDs=…`).
+- **DICOMweb** kommt aus dem mitgelieferten Orthanc über
+  `/orthanc-proxy/dicom-web` — kein pacs-proxy, keine metadata-bridge,
+  kein API-Key nötig (die Carestream-Spezifika des Vorgängerprojekts
+  entfallen).
+- **Config zur Laufzeit**: `deploy/ohif-config.js` wird über die im Image
+  eingebaute `config/default.js` gemountet — Änderungen brauchen keinen
+  Rebuild. `ohif-viewer/default.js` ist ein generiertes Artefakt
+  (`build-config.js` aus `protocols/` + `static-config.js`) und wird nicht
+  versioniert.
+
+**Verifiziert** (Image `mwl-broker-ohif`, Stack mit Demo-Overlay):
+
+| Check | Ergebnis |
+|---|---|
+| Image-Build | erfolgreich (83 Hanging Protocols assemblieren, alle Build-Patches applied) |
+| Auslieferung | `http://host:18082/ohif/` → 200 über den OE3-nginx (direkt: 18083) |
+| Asset-Pfade | `/ohif/...` (`PUBLIC_URL=/ohif/` im Dockerfile) |
+| Runtime-Config | gemountete `deploy/ohif-config.js` aktiv (`Orthanc DICOMweb`, `/orthanc-proxy/dicom-web`) |
+| Studie laden | Metadaten + Bildabruf über DICOMweb, alle Requests 200 |
+| Rendering | Canvas gerendert, W/L aus Pixeldaten (W 1772 / L 1086), **0 Console-Errors** |
+
+Hinweis: Der Viewer braucht Instanzen **mit PixelData** — die synthetischen
+C-STORE-Smoke-Instanzen (nur zum Routing-Test) liefern bei WADO-RS 400.
+
+**Offen (Entscheidung)**: Der Dockerfile patcht 7 der 12 von der Extension
+registrierten Panels in die Mode-Layouts (`dicomTagBrowserPanel`,
+`hotkeyHelpPanel`, `measurementExportPanel`, `mprSlabPanel`, `roiStatsPanel`,
+`studyComparePanel`, `wlPresetsPanel`). Nicht im Layout: `pacsBrowserPanel`,
+`cineNavPanel`, `ticPanel`, `mismatchPanel`, `vesselTrackingPanel` — sie sind
+im Bundle vorhanden, erscheinen aber nicht als Tabs (der ältere Dockerfile-
+Stand hatte alle 12).
+
 ### Laufzeit-Settings (ENV-Default + DB-Override)
 
 `broker_setting`-Tabelle (Key/Value). Auflösung: DB-Wert schlägt ENV,
@@ -160,10 +208,18 @@ orthanc-dicommwl-broker/
 │   ├── tests/                   # pytest (API, Merge, DIMSE-Integration)
 │   ├── scripts/cfind_smoke.py   # manueller C-FIND-Smoke-Test
 │   └── Dockerfile
+├── ohif-viewer/                 # gehärteter OHIF-v3.12.5-Build (Dockerfile + Patches)
+│   ├── Dockerfile               # Multi-Stage: OHIF-Clone + Patches → nginx
+│   ├── static-config.js         # App-Config (DICOMweb-Root, routerBasename /ohif/)
+│   ├── protocols/*.js           # modulare Hanging Protocols → default.js
+│   ├── patch-*.js               # Build-Patches (SR, PDF, VTK, StudyBrowser, …)
+│   └── viewer-nginx.conf        # Container-interner nginx (Port 8080)
+├── extension-radiology-advanced/ # eigene OHIF-Extension (12 Panels, Hanging Protocols)
 ├── deploy/
 │   ├── orthanc/orthanc.json     # Orthanc-Config (Credentials via env)
-│   ├── oe3-stack.nginx.conf     # SPA + /orthanc-proxy + /broker-api
+│   ├── oe3-stack.nginx.conf     # SPA + /orthanc-proxy + /broker-api + /ohif
 │   ├── oe3-config.js            # __OE3_CONFIG__ (orthancUrl, brokerUrl, flags)
+│   ├── ohif-config.js           # OHIF-Runtime-Config (gemountet, ohne Rebuild änderbar)
 │   └── postgres-init.sh         # erstellt DB `mwl`
 ├── docker-compose.yml           # Basis-Stack (produktionsfähig)
 ├── docker-compose.demo.yml      # Overlay: Mock-RIS ×2 + Peer-PACS

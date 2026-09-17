@@ -1,0 +1,27 @@
+# Build context for the OHIF viewer is the repo root (the Dockerfile also
+# needs extension-radiology-advanced/). Everything else is irrelevant and
+# would only bloat the context — the other images build from their own
+# subdirectories.
+.git
+.gitmodules
+.github
+.githooks
+.env
+.env.*
+*.md
+*.db
+test-results
+e2e
+
+# Not needed by the OHIF build
+orthanc-explorer-3-usable
+mwl-broker
+deploy
+
+# Never send build artefacts or dependencies
+**/node_modules
+**/.venv
+**/__pycache__
+**/dist
+**/.pytest_cache
+ohif-viewer/default.js
