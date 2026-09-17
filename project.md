@@ -92,6 +92,7 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
 - `GET /audit/config` — Änderungsprotokoll (Before/After je Konfigurationsmutation)
 - `GET /config/export`, `POST /config/import?dry_run=`, `POST /config/rollback/{audit_id}`
 - `POST /simulate/route`, `POST /simulate/transform` — Dry-Run von Routing und Modify-Regeln
+- `GET /cache/stats`, `GET /cache/items`, `DELETE /cache[/sources/{id}]` — Worklist-Cache
 - `GET /logs/queries`, `GET /logs/stores` (paged, Filter: aet, source, status, since)
 - `GET /status` — SCP-Listener, Echo-Matrix (Quellen+Ziele inkl. `breaker_state`), Zähler
 - `GET /healthz`, `GET /metrics` (Prometheus)
@@ -183,6 +184,22 @@ Produktionsfehler (kein Default-Ziel, Regeln auf deaktivierten Knoten, tote
 Quellen, offene Breaker, leere AET-Allowlist, AET-Kollision mit dem Broker
 selbst) und liefert Findings mit stabilem `code` — die UI übersetzt sie und
 verlinkt direkt ins betroffene Formular.
+
+### Worklist-Cache mit Stale-Fallback
+
+Der Upstream ist die Wahrheit: eine erfolgreiche Antwort **ersetzt** den
+Snapshot der Quelle vollständig, abgeschlossene Aufträge verschwinden also
+sofort (Medavis-Semantik; dcm4chee steuert dasselbe über HL7 ORM/MPPS und
+blendet `COMPLETED` per `dcmHideSPSWithStatusFromMWL` aus). Der Cache greift
+**nur** bei Fehlern oder offenem Breaker, höchstens `cache_stale_max_s`
+(Default 120 s), filtert erledigte Schritte (`(0040,0020)`) und wird über
+`cache_max_items` begrenzt. Erledigte Queries werden im Query-Log als
+`served_stale` geführt und der Gesamtstatus wird `partial`.
+
+Der Payload enthält PHI (das ist der Zweck einer Worklist) → nur interne DB,
+keine Logs, API liefert nur Metadaten, automatischer Purge und ein expliziter
+„Cache leeren"-Knopf. Details und die Recherche-Grundlage:
+[docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md).
 
 ### Simulation (Dry-Run) — Routing und Modify-Regeln
 
@@ -304,9 +321,9 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 163 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 378 Tests, 0 Errors |
-| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 31/31 grün, 0 Console-/Page-/Netzwerk-Fehler |
+| `pytest` | 198 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 386 Tests, 0 Errors |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 35/35 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
 
@@ -325,8 +342,8 @@ regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
 
 `ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
 Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
-backend pytest (163) → frontend tsc → lint → vitest (378) → docker-e2e
-(31 Browser-Tests + DIMSE-Smokes + Breaker-Szenario). Verifiziert: alle Stages grün.
+backend pytest (198) → frontend tsc → lint → vitest (386) → docker-e2e
+(35 Browser-Tests + DIMSE-Smokes + Breaker-/Cache-Szenario). Verifiziert: alle Stages grün.
 `--quick` überspringt die Docker-Stage.
 
 #### Coverage-Audit (2026-09)
@@ -335,8 +352,8 @@ Gemessen mit `pytest-cov` bzw. `vitest --coverage`:
 
 | Bereich | Statements | Anmerkung |
 |---|---|---|
-| Backend `mwl_broker/` | **97 %** | api 96 %, main 100 %, settings_service/schemas/models/metrics 100 %, routing 100 %, breaker 99 %, audit 97 %, config_io 96 %, health_checks 98 %, echo 96 %, dimse 93 % |
-| Frontend Broker-UI | **98 %** | `api/broker.ts` 100 %, Diff-Helfer/Panels 100 %, Seiten 95-100 % |
+| Backend `mwl_broker/` | **97 %** | cache 99 %, api 97 %, main 100 %, settings_service/schemas/models/metrics 100 %, routing 100 %, breaker 99 %, audit 97 %, config_io 96 %, health_checks 98 %, echo 96 %, dimse 93 % |
+| Frontend Broker-UI | **98.1 %** | `api/broker.ts` 100 %, Diff-Helfer/Panels 100 %, Seiten 95-100 % |
 
 Ergänzte Tests für zuvor ungedeckte Pfade: Rules-Update/Delete, Target-Echo,
 Log-Filter + Pagination-Validierung, `/metrics`, Lifespan (Seed + SCP-Bind),
@@ -402,6 +419,7 @@ Gefundene und behobene Defekte:
 | 7 | HL7-Adapter (ORM/ADT → lokale MWL-Quelle) | ☐ |
 | 8 | Sprint 1 der Roadmap: Circuit Breaker + Health-Panel + `/healthz/ready` | ✅ |
 | 9 | Sprint 2 der Roadmap: Simulation + Config-Audit/Export/Rollback | ✅ |
+| 10 | Sprint 3 der Roadmap: Worklist-Cache mit Stale-Fallback | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert

@@ -19,6 +19,21 @@ ECHO_UP = Gauge(
     "mwl_echo_up", "Last C-ECHO result (1=ok, 0=fail)", ["kind", "name"]
 )
 SEEN_ITEMS = Gauge("mwl_seen_items", "Rows in seen_items table")
+CACHE_ENTRIES = Gauge(
+    "mwl_cache_entries", "Cached worklist items per source", ["source"]
+)
+CACHE_AGE = Gauge(
+    "mwl_cache_age_seconds", "Age of the newest cached answer at serve time", ["source"]
+)
+CACHE_SERVED = Counter(
+    "mwl_cache_served_total", "Queries answered from the worklist cache", ["source"]
+)
+CACHE_REFRESH = Counter(
+    "mwl_cache_refresh_total", "Cache snapshot refreshes", ["source", "result"]
+)
+CACHE_DROPPED = Counter(
+    "mwl_cache_dropped_total", "Cached items dropped from the snapshot", ["source", "reason"]
+)
 CONFIG_FINDINGS = Gauge(
     "mwl_config_findings",
     "Configuration consistency findings by severity",

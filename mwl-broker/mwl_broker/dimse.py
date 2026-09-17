@@ -13,7 +13,7 @@ from pynetdicom.presentation import build_context
 from pynetdicom.sop_class import ModalityWorklistInformationFind, Verification
 from sqlalchemy import select
 
-from . import breaker, metrics, routing, settings_service, transforms
+from . import breaker, cache, metrics, routing, settings_service, transforms
 from .config import Settings
 from .db import session_factory
 from .models import QueryLog, RoutingRule, SeenItem, StoreLog, MwlSource, PacsTarget
@@ -128,12 +128,22 @@ class BrokerSCP:
         sources = self._enabled_sources()
         per_source: dict[str, int | str] = {}
         collected: list[tuple[SourceCfg, list[Dataset]]] = []
+        served_stale: list[str] = []
 
         # Circuit breaker: skip sources that are known to be down instead of
         # paying their timeout on every single query.
         active = [src for src in sources if breaker.is_available(src.id)]
         for src in sources:
-            if src not in active:
+            if src in active:
+                continue
+            # Known to be down: skip the timeout — but serve the snapshot if we
+            # have one, because that is exactly the outage case the cache is for.
+            cached, _age = cache.stale_answers(src.id)
+            if cached:
+                per_source[src.name] = len(cached)
+                served_stale.append(src.name)
+                collected.append((src, cached))
+            else:
                 per_source[src.name] = breaker.SKIPPED
 
         if active:
@@ -148,11 +158,20 @@ class BrokerSCP:
                         per_source[src.name] = len(answers)
                         metrics.UPSTREAM_ANSWERS.labels(source=src.name).inc(len(answers))
                         breaker.record_success(src.id)
+                        # a live answer replaces the cached snapshot — completed
+                        # orders disappear with it (the RIS is the truth)
+                        cache.store_snapshot(src.id, answers)
                         collected.append((src, answers))
                     except Exception as exc:  # dead RIS must not break the query
                         log.warning("upstream %s query failed: %s", src.name, exc)
-                        per_source[src.name] = "error"
                         breaker.record_failure(src.id, str(exc))
+                        cached, age = cache.stale_answers(src.id)
+                        if cached:
+                            per_source[src.name] = len(cached)
+                            served_stale.append(src.name)
+                            collected.append((src, cached))
+                        else:
+                            per_source[src.name] = "error"
 
         # restore priority order for deterministic merge
         order = {src.id: i for i, src in enumerate(sources)}
@@ -167,13 +186,14 @@ class BrokerSCP:
         bad = [v for v in per_source.values() if isinstance(v, str)]
         answered = [v for v in per_source.values() if isinstance(v, int)]
         status = (
-            "success" if not bad
+            "success" if not bad and not served_stale
             else "partial" if answered
             else "failed"
         )
         metrics.CFIND_REQUESTS.labels(result=status).inc()
         metrics.CFIND_DURATION.observe(duration_ms / 1000)
-        self._write_query_log(calling, identifier, len(merged), per_source, duration_ms, status)
+        self._write_query_log(calling, identifier, len(merged), per_source, duration_ms,
+                              status, served_stale)
 
         for ds, _src in merged:
             yield S_PENDING, ds
@@ -201,7 +221,8 @@ class BrokerSCP:
         except Exception as exc:
             log.error("seen_items write failed: %s", exc)
 
-    def _write_query_log(self, calling, identifier, answers, per_source, duration_ms, status):
+    def _write_query_log(self, calling, identifier, answers, per_source, duration_ms, status,
+                         served_stale: list[str] | None = None):
         try:
             with session_factory()() as s:
                 s.add(
@@ -212,6 +233,7 @@ class BrokerSCP:
                         per_source=per_source,
                         duration_ms=duration_ms,
                         status=status,
+                        served_stale=served_stale or None,
                     )
                 )
                 s.commit()

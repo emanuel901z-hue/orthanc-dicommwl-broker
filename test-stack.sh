@@ -106,6 +106,55 @@ ready=$(curl -s -o /dev/null -w '%{http_code}' "$BROKER_API_URL/healthz/ready")
 echo "   /healthz/ready -> $ready"
 [ "$ready" = "200" ] || { echo "FAIL: readiness probe not ready" >&2; exit 1; }
 
+echo "── Worklist cache: outage bridge ──"
+ris_a_id=$(curl -sf "$BROKER_API_URL/api/v1/sources" | python3 -c "
+import json, sys
+print(next(s['id'] for s in json.load(sys.stdin) if s['name'] == 'ris-a'))
+")
+# 1. a live query fills the snapshot
+python3 mwl-broker/scripts/cfind_smoke.py "$BROKER_DICOM_HOST" "$BROKER_DICOM_PORT" MWLBROKER > /dev/null 2>&1 || true
+cached=$(curl -sf "$BROKER_API_URL/api/v1/cache/stats" | python3 -c "
+import json, sys
+print(sum(row['entries'] for row in json.load(sys.stdin)))
+")
+echo "   cached worklist items: $cached"
+[ "$cached" -ge 3 ] || { echo "FAIL: the cache was not filled by the live query" >&2; exit 1; }
+
+# 2. the RIS becomes unreachable (dead port) — the query must still be answered
+curl -sf -X PUT "$BROKER_API_URL/api/v1/sources/$ris_a_id" -H 'Content-Type: application/json' \
+  -d "$(curl -sf "$BROKER_API_URL/api/v1/sources" | python3 -c "
+import json, sys
+row = next(s for s in json.load(sys.stdin) if s['name'] == 'ris-a')
+row['port'] = 1
+print(json.dumps(row))
+")" > /dev/null
+python3 mwl-broker/scripts/cfind_smoke.py "$BROKER_DICOM_HOST" "$BROKER_DICOM_PORT" MWLBROKER > /dev/null 2>&1 || true
+served_stale=$(curl -sf "$BROKER_API_URL/api/v1/logs/queries?limit=1" | python3 -c "
+import json, sys
+rows = json.load(sys.stdin)
+print(','.join(rows[0].get('served_stale') or []))
+")
+echo "   served from cache: ${served_stale:-none}"
+case "$served_stale" in
+  *ris-a*) ;;
+  *) echo "FAIL: the outage was not bridged from the cache" >&2; exit 1 ;;
+esac
+stale_status=$(curl -sf "$BROKER_API_URL/api/v1/logs/queries?limit=1" | python3 -c "
+import json, sys
+print(json.load(sys.stdin)[0]['status'])
+")
+echo "   query status while degraded: $stale_status"
+[ "$stale_status" = "partial" ] || { echo "FAIL: a stale answer must be 'partial'" >&2; exit 1; }
+
+# 3. restore the source so the Playwright suite sees a healthy stack
+curl -sf -X PUT "$BROKER_API_URL/api/v1/sources/$ris_a_id" -H 'Content-Type: application/json' \
+  -d "$(curl -sf "$BROKER_API_URL/api/v1/sources" | python3 -c "
+import json, sys
+row = next(s for s in json.load(sys.stdin) if s['name'] == 'ris-a')
+row['port'] = 11114
+print(json.dumps(row))
+")" > /dev/null
+
 echo "── Playwright (desktop + mobile) ──"
 (cd orthanc-explorer-3-usable && OE3_BASE="$OE3_BASE" \
   npx playwright test --config=e2e/stack/playwright.stack.config.ts)

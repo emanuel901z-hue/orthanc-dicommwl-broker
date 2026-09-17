@@ -60,9 +60,10 @@ def echo_loop(interval_s: int, stop: threading.Event) -> None:
 
     The interval is re-read from the effective settings each tick (UI override
     wins over the ENV default). Roughly once an hour a retention purge removes
-    expired seen_items.
+    expired seen_items; sources with `cache_refresh_s > 0` get their worklist
+    snapshot refreshed so the cache is warm when a RIS goes down.
     """
-    from . import settings_service
+    from . import cache, settings_service
 
     ticks = 0
     while not stop.is_set():
@@ -74,9 +75,12 @@ def echo_loop(interval_s: int, stop: threading.Event) -> None:
                 echo_one("source", r)
             for r in targets:
                 echo_one("target", r)
+            for source_cfg in cache.sources_due_for_refresh():
+                cache.refresh(source_cfg)
             ticks += 1
             if ticks % 60 == 0:
                 settings_service.purge_seen_items()
+                cache.purge()
         except Exception:
             pass  # DB not ready yet — next tick retries
         try:

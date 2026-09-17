@@ -89,8 +89,8 @@ python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 163 Tests (API + DIMSE e2e + Breaker/Health/Audit/Simulation)
-cd orthanc-explorer-3-usable && npm run test      # 378 Tests
+cd mwl-broker && python -m pytest tests -q        # 198 Tests (API + DIMSE e2e + Breaker/Health/Cache/Audit/Simulation)
+cd orthanc-explorer-3-usable && npm run test      # 386 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -141,7 +141,9 @@ Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
 - [x] Sprint 2 (Roadmap): Simulation/Dry-Run (Routing + Modify-Regeln),
       serverseitiges Änderungsprotokoll mit Rollback sowie Config-Export/-Import
       — Details im [Umsetzungs-Log](docs/roadmap-worklist-broker.md#sprint-2--simulation--config-auditexportimportrollback-umgesetzt)
+- [x] Sprint 3 (Roadmap): Worklist-Cache mit Stale-Fallback (Snapshot-Semantik
+      wie Medavis/dcm4chee — der Upstream bleibt die Wahrheit) — Details im
+      [Umsetzungs-Log](docs/roadmap-worklist-broker.md#sprint-3--worklist-cache-mit-stale-fallback-umgesetzt)
 - [ ] Nächste Ausbaustufen: [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md)
-      (Sprint 3: Worklist-Cache mit Stale-Fallback; Sprint 4: C-STORE-Spool;
-      Sprint 5: Alerting/Webhooks)
+      (Sprint 4: C-STORE-Spool mit Retry/Dead-Letter; Sprint 5: Alerting/Webhooks)
 - [ ] HL7-ORM/ADT-Adapter (Worklist-Einträge ohne Upstream-C-FIND)

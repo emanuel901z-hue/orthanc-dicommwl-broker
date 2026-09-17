@@ -465,6 +465,103 @@ def test_cfind_increments_metrics(broker):
     assert after == before + 1
 
 
+# ── Worklist cache (outage bridge) ─────────────────────────────────────
+
+
+def test_cfind_serves_a_stale_snapshot_when_the_source_dies(broker, mwl_scp):
+    """RIS outage: the modality still gets the worklist, marked as stale."""
+    from mwl_broker import cache
+
+    settings_service.set_value("cache_stale_max_s", "300")
+    source_id = _seed_source(mwl_scp)
+
+    # 1. a live query fills the snapshot
+    assert len(_cfind(broker, _wildcard_query())) == 2
+    assert len(cache.items()) == 2
+    assert _last_query_log().served_stale is None
+
+    # 2. the RIS becomes unreachable → the answer comes from the cache
+    with session_factory()() as s:
+        s.get(MwlSource, source_id).port = 1
+        s.commit()
+
+    answers = _cfind(broker, _wildcard_query())
+
+    assert len(answers) == 2, "the cached worklist must be served"
+    log_row = _last_query_log()
+    assert log_row.served_stale == ["ris-a"]
+    assert log_row.status == "partial", "serving stale is degraded, not success"
+    assert log_row.per_source["ris-a"] == 2
+
+
+def test_cfind_serves_the_snapshot_while_the_breaker_is_open(broker, mwl_scp):
+    """A source that is known to be down is skipped — but still served from cache."""
+    from mwl_broker import breaker, cache
+
+    settings_service.set_value("cache_stale_max_s", "300")
+    settings_service.set_value("breaker_fail_threshold", "1")
+    source_id = _seed_source(mwl_scp)
+    _cfind(broker, _wildcard_query())          # fills the cache
+    breaker.record_failure(source_id, "down")  # and now the breaker is open
+
+    answers = _cfind(broker, _wildcard_query())
+
+    assert len(answers) == 2
+    log_row = _last_query_log()
+    assert log_row.served_stale == ["ris-a"]
+    assert log_row.per_source["ris-a"] == 2
+    assert log_row.status == "partial"
+    assert cache.items(), "the snapshot stays for the next query"
+
+
+def test_cfind_returns_nothing_when_the_snapshot_is_expired(broker, mwl_scp):
+    from datetime import datetime, timedelta, timezone
+
+    from mwl_broker import cache
+    from mwl_broker.models import WorklistCache
+
+    settings_service.set_value("cache_stale_max_s", "60")
+    source_id = _seed_source(mwl_scp)
+    _cfind(broker, _wildcard_query())
+    with session_factory()() as s:
+        for row in s.query(WorklistCache).filter_by(source_id=source_id):
+            row.fetched_at = datetime.now(timezone.utc) - timedelta(seconds=600)
+        s.commit()
+        s.get(MwlSource, source_id).port = 1
+        s.commit()
+
+    answers = _cfind(broker, _wildcard_query())
+
+    assert answers == []
+    log_row = _last_query_log()
+    assert log_row.per_source["ris-a"] == "error"
+    assert log_row.status == "failed"
+    assert log_row.served_stale is None
+    assert cache.items(), "the expired rows are still there until the purge"
+
+
+def test_cfind_drops_finished_steps_from_the_snapshot(broker, mwl_scp):
+    """A step completed in the RIS must not come back from the cache."""
+    from mwl_broker import cache
+    from mwl_broker.models import WorklistCache
+
+    settings_service.set_value("cache_stale_max_s", "300")
+    source_id = _seed_source(mwl_scp)
+    _cfind(broker, _wildcard_query())
+    with session_factory()() as s:
+        rows = s.query(WorklistCache).filter_by(source_id=source_id).all()
+        rows[0].sps_status = "COMPLETED"
+        completed_accession = rows[0].accession
+        s.get(MwlSource, source_id).port = 1
+        s.commit()
+
+    answers = _cfind(broker, _wildcard_query())
+
+    assert len(answers) == 1
+    assert str(answers[0].AccessionNumber) != completed_accession
+    assert _last_query_log().served_stale == ["ris-a"]
+
+
 # ── Circuit breaker in the C-FIND fan-out ──────────────────────────────
 
 

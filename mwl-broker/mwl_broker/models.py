@@ -5,7 +5,7 @@ seen_items (needed for store routing) and subject to retention purge.
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -31,7 +31,11 @@ class MwlSource(Base):
     charset: Mapped[str] = mapped_column(String(32), default="ISO_IR 100")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     timeout_s: Mapped[int] = mapped_column(Integer, default=10)
-    priority: Mapped[int] = mapped_column(Integer, default=100)  # lower = queried first
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    # May this source be answered from the cache when it is unreachable?
+    cache_stale_on_error: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Optional background refresh of the cached snapshot (0 = off, seconds).
+    cache_refresh_s: Mapped[int] = mapped_column(Integer, default=0)  # lower = queried first
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -116,6 +120,37 @@ class SourceBreaker(Base):
     )
 
 
+class WorklistCache(Base):
+    """Cached worklist answers per source — the outage bridge.
+
+    The upstream RIS stays the source of truth: a successful query *replaces*
+    the whole snapshot for that source, so completed orders disappear
+    immediately (they are simply no longer in the answer). The cache is only
+    served when the upstream fails, and only for a bounded window.
+
+    `payload` holds the answer dataset as DICOM JSON — **this contains PHI**
+    (that is the point of a worklist). It is never logged and never exposed
+    through the API; see docs/roadmap-worklist-broker.md for the deletion
+    concept (TTL + purge + explicit clear).
+    """
+
+    __tablename__ = "worklist_cache"
+    __table_args__ = (UniqueConstraint("source_id", "dedupe_key", name="uq_cache_source_item"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("mwl_source.id"), index=True)
+    dedupe_key: Mapped[str] = mapped_column(String(512))
+    accession: Mapped[str] = mapped_column(String(64), default="")
+    study_uid: Mapped[str] = mapped_column(String(128), default="")
+    modality: Mapped[str] = mapped_column(String(16), default="")
+    station_aet: Mapped[str] = mapped_column(String(16), default="")
+    sps_status: Mapped[str] = mapped_column(String(16), default="")
+    payload: Mapped[dict] = mapped_column(JSON)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+
+
 class ConfigAudit(Base):
     """Server-side change log for every configuration mutation.
 
@@ -177,7 +212,9 @@ class QueryLog(Base):
     answers: Mapped[int] = mapped_column(Integer, default=0)
     per_source: Mapped[dict] = mapped_column(JSON, default=dict)  # {source_name: count|"error"}
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
-    status: Mapped[str] = mapped_column(String(16), default="success")  # success|partial|failed
+    status: Mapped[str] = mapped_column(String(16), default="success")
+    # sources that had to be answered from the worklist cache (JSON list)
+    served_stale: Mapped[list | None] = mapped_column(JSON, nullable=True)  # success|partial|failed
 
 
 class StoreLog(Base):

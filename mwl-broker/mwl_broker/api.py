@@ -22,6 +22,8 @@ from .models import (
 from .schemas import (
     AuditEntryOut,
     BreakerStateOut,
+    CacheItemOut,
+    CacheSourceOut,
     ConfigExportOut,
     ConfigImportIn,
     ImportPlanOut,
@@ -46,7 +48,7 @@ from .schemas import (
     TransformIn,
     TransformOut,
 )
-from . import audit, breaker, config_io, health_checks, settings_service, simulate, transforms
+from . import audit, breaker, cache, config_io, health_checks, settings_service, simulate, transforms
 from .models import BrokerSetting, ConfigAudit, SeenItem, SourceBreaker, TransformRule
 
 router = APIRouter(prefix="/api/v1")
@@ -464,6 +466,64 @@ def reset_setting(
     audit.record(s, _actor(request), "reset.setting", "setting", None, before,
                  None, _correlation(request))
     s.commit()
+
+
+# ── Worklist cache ─────────────────────────────────────────────────────
+
+
+@router.get(
+    "/cache/stats", response_model=list[CacheSourceOut], tags=["cache"],
+    summary="Worklist cache state",
+    description="Cached worklist snapshots per source. The cache bridges an "
+                "unreachable RIS; a live answer always replaces the snapshot, "
+                "so completed orders disappear immediately.",
+    response_description="One entry per source with item count, age and state.",
+)
+def cache_stats(s: Session = _db_dep):
+    return cache.stats()
+
+
+@router.get(
+    "/cache/items", response_model=list[CacheItemOut], tags=["cache"],
+    summary="Cached worklist items",
+    description="Metadata of the cached items (source, accession, study UID, "
+                "modality, station, SPS status, age). Patient identifiers are "
+                "deliberately not exposed.",
+    response_description="Cached items, newest first.",
+)
+def cache_items(
+    s: Session = _db_dep,
+    source_id: int | None = Query(default=None, description="Only items of this source."),
+    limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of items."),
+):
+    return cache.items(source_id, limit)
+
+
+@router.delete(
+    "/cache", tags=["cache"], status_code=204,
+    summary="Clear the whole worklist cache",
+    description="Removes every cached snapshot. The next queries go to the "
+                "upstream again; an outage can no longer be bridged until then.",
+    response_description="The cache was cleared.",
+)
+def clear_cache(s: Session = _db_dep):
+    cache.clear()
+
+
+@router.delete(
+    "/cache/sources/{source_id}", tags=["cache"], status_code=204,
+    summary="Clear one source's cache",
+    description="Removes the cached snapshot of a single source.",
+    response_description="The source's cache was cleared.",
+    responses={404: {"description": "No source with this ID."}},
+)
+def clear_source_cache(
+    source_id: Annotated[int, Path(description="ID of the source whose cache is cleared.")],
+    s: Session = _db_dep,
+):
+    if s.get(MwlSource, source_id) is None:
+        raise HTTPException(404, "not found")
+    cache.clear(source_id)
 
 
 # ── Change log, export/import, rollback ────────────────────────────────

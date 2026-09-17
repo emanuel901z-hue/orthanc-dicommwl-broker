@@ -1,3 +1,4 @@
+import json
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -677,6 +678,82 @@ def test_simulate_transform_endpoint(client):
     assert client.get("/api/v1/logs/stores").json() == []
 
 
+def test_cache_endpoints(client):
+    src_row = client.post("/api/v1/sources", json=SOURCE).json()
+
+    # empty cache
+    stats = client.get("/api/v1/cache/stats").json()
+    entry = next(row for row in stats if row["source_id"] == src_row["id"])
+    assert entry["entries"] == 0 and entry["state"] == "empty" and entry["age_s"] is None
+    assert entry["stale_on_error"] is True and entry["refresh_s"] == 0
+    assert client.get("/api/v1/cache/items").json() == []
+
+    # fill it through the internal API (the DIMSE path is covered elsewhere)
+    from pydicom.dataset import Dataset
+
+    from mwl_broker import cache
+
+    ds = Dataset()
+    ds.AccessionNumber = "ACC-1"
+    ds.PatientID = "P1"
+    ds.PatientName = "Mueller^Hans"
+    ds.StudyInstanceUID = "1.2.3"
+    sps = Dataset()
+    sps.ScheduledProcedureStepID = "SPS-1"
+    sps.ScheduledProcedureStepStatus = "SCHEDULED"
+    sps.ScheduledStationAETitle = "CT_01"
+    sps.Modality = "CT"
+    ds.ScheduledProcedureStepSequence = [sps]
+    cache.store_snapshot(src_row["id"], [ds])
+
+    stats = client.get("/api/v1/cache/stats").json()
+    entry = next(row for row in stats if row["source_id"] == src_row["id"])
+    assert entry["entries"] == 1 and entry["state"] == "available"
+    assert entry["age_s"] is not None
+
+    items = client.get("/api/v1/cache/items").json()
+    assert len(items) == 1
+    assert items[0]["accession"] == "ACC-1"
+    assert items[0]["sps_status"] == "SCHEDULED"
+    # no patient identifiers in the operator view
+    assert "patient" not in json.dumps(items).lower()
+
+    assert client.get(f"/api/v1/cache/items?source_id={src_row['id']}").json()
+    assert client.get("/api/v1/cache/items?source_id=999").json() == []
+    assert client.get("/api/v1/cache/items?limit=0").status_code == 422
+
+    # clearing one source, then everything
+    assert client.delete(f"/api/v1/cache/sources/{src_row['id']}").status_code == 204
+    assert client.get("/api/v1/cache/items").json() == []
+    assert client.delete("/api/v1/cache").status_code == 204
+    assert client.delete("/api/v1/cache/sources/999").status_code == 404
+
+
+def test_source_cache_fields_round_trip(client):
+    created = client.post("/api/v1/sources", json={
+        **SOURCE, "cache_stale_on_error": False, "cache_refresh_s": 300,
+    }).json()
+
+    assert created["cache_stale_on_error"] is False
+    assert created["cache_refresh_s"] == 300
+
+    updated = client.put(f"/api/v1/sources/{created['id']}", json={
+        **SOURCE, "cache_stale_on_error": True, "cache_refresh_s": 0,
+    }).json()
+    assert updated["cache_stale_on_error"] is True and updated["cache_refresh_s"] == 0
+
+
+def test_cache_settings_are_validated(client):
+    assert client.put("/api/v1/settings/cache_stale_max_s",
+                      json={"value": "0"}).status_code == 200
+    assert client.put("/api/v1/settings/cache_stale_max_s",
+                      json={"value": "99999"}).status_code == 422
+    assert client.put("/api/v1/settings/cache_enabled",
+                      json={"value": "nope"}).status_code == 422
+    rows = {s["key"]: s for s in client.get("/api/v1/settings").json()}
+    assert rows["cache_hide_completed"]["default"] == "True"
+
+
 def test_openapi_documents_all_endpoints(client):
     """Every path operation carries a summary/tag, query params and schema
     fields carry descriptions — keeps Swagger UI usable for integrators."""
@@ -686,7 +763,7 @@ def test_openapi_documents_all_endpoints(client):
     assert len(spec["info"]["description"]) > 100
     tag_names = {t["name"] for t in spec["tags"]}
     assert {"sources", "targets", "rules", "transforms", "settings",
-            "logs", "monitoring", "audit", "config", "simulation"} <= tag_names
+            "logs", "monitoring", "audit", "config", "simulation", "cache"} <= tag_names
 
     for path, ops in spec["paths"].items():
         for method, op in ops.items():
@@ -739,6 +816,7 @@ def test_openapi_documents_all_endpoints(client):
         "ImportPlanOut", "ImportChangeOut", "SimulateRouteIn", "SimulateRouteOut",
         "SimulateTransformIn", "SimulateTransformOut", "TagChangeOut",
         "RuleByNameIn", "TransformImportIn",
+        "CacheSourceOut", "CacheItemOut",
     ]:
         schema = spec["components"]["schemas"][schema_name]
         for field, prop in schema["properties"].items():

@@ -33,7 +33,7 @@ auditierbar.
 
 | Prio | Funktion | Nutzen | Aufwand | Status |
 |---|---|---|---|---|
-| **P0** | Worklist-Cache mit Stale-Fallback | RIS-Ausfall legt den Modalitätenbetrieb nicht lahm | mittel | offen (Sprint 3) |
+| **P0** | Worklist-Cache mit Stale-Fallback | RIS-Ausfall legt den Modalitätenbetrieb nicht lahm | mittel | **✅ Sprint 3** |
 | **P0** | C-STORE-Spool mit Retry/Dead-Letter | kein Bildverlust bei PACS-Ausfall | hoch | offen (Sprint 4) |
 | **P0** | Circuit Breaker pro Upstream | tote Quelle kostet keine Timeouts mehr | klein | **✅ Sprint 1** |
 | **P1** | Config-Audit + Export/Import/Rollback | Nachvollziehbarkeit, Staging→Prod, Notfall-Rollback | mittel | **✅ Sprint 2** |
@@ -53,57 +53,79 @@ auditierbar.
 
 **Wert in der Produktion.** Fällt ein RIS aus oder antwortet es langsam, sieht
 die Modalität eine leere oder verzögerte Arbeitsliste — die Untersuchung kann
-nicht gestartet werden. Ein Cache, der zuletzt erfolgreich abgefragte
-Worklist-Items kurzzeitig weiterliefert, überbrückt RIS-Neustarts, Backups und
+nicht gestartet werden. Ein Cache, der die zuletzt erfolgreich abgefragte
+Worklist kurz weiterliefert, überbrückt RIS-Neustarts, Backups und
 Netzstörungen.
+
+**Wie andere Systeme es handhaben** (recherchiert, siehe Umsetzungs-Log):
+
+| System | Verhalten |
+|---|---|
+| **Medavis RIS** (Kundenbeobachtung) | Ein Eintrag wird geliefert, **bis der Auftrag im RIS abgeschlossen ist** — danach ist er aus der Warteschlange und damit weg. Präsenz ist die Wahrheit, keine TTL. |
+| **dcm4chee** | MWL-Einträge werden vom ORM-Service (HL7 `ORM^O01`) angelegt/geändert/**gelöscht**; der Status läuft `SCHEDULED → ARRIVED → STARTED → COMPLETED/DISCONTINUED` über **MPPS**. `dcmHideSPSWithStatusFromMWL: COMPLETED` blendet erledigte Schritte aus; zusätzlich kann der Status gesetzt werden, sobald eine Studie vollständig empfangen wurde. |
+| **DICOM-Standard** | `(0040,0020) Scheduled Procedure Step Status` ist ein Return-Key der MWL-SOP-Klasse — der standardisierte „Auftrag offen/erledigt"-Mechanismus. |
+| **IHE Scheduled Workflow** | MWL (pull) und MPPS (push) sind ein Paar: **das RIS schließt Aufträge**, der Broker liefert nur aus. |
+| **Flux Capacitor** (Worklist-Proxy) | Cached Snapshots je Query, **ersetzt** sie bei jedem Refresh (Snapshot-Vergleich erkennt neue Einträge), `ServeStaleForSeconds` für die Überbrückung, danach Zustand „Degraded"; `0` deaktiviert das Stale-Serving. |
+| **Laurel Bridge Compass** | Worklist-Reader + Study Rules mit lokaler Pufferung/Warteschlange — gleiche Grundidee. |
+
+**Daraus abgeleitetes Design.** Der Broker übernimmt die
+Snapshot-Semantik und **verzichtet bewusst auf eine „für N Minuten
+aufbewahren"-TTL**:
+
+1. **Der Upstream ist die Wahrheit.** Eine erfolgreiche Antwort *ersetzt* den
+   Snapshot der Quelle vollständig — abgeschlossene/stornierte Aufträge
+   verschwinden sofort, weil sie einfach nicht mehr in der Antwort sind.
+2. **Stale nur im Fehlerfall** (Quelle antwortet nicht *oder* ihr Breaker ist
+   offen), begrenzt durch `cache_stale_max_s` (Default **120 s**, `0` = aus).
+3. **Erledigte Schritte kommen nie aus dem Cache**: `cache_hide_completed`
+   (Default an) filtert `(0040,0020)` = COMPLETED/DISCONTINUED aus
+   Cache-Antworten. Live-Antworten werden durchgelassen — dort entscheidet das
+   RIS (viele Häuser filtern selbst per `dcmHideSPSWithStatusFromMWL`).
+4. **Begrenzt**: `cache_max_items` (Default 5000) plus automatischer Purge
+   (2× Stale-Fenster).
+5. **Optionaler Hintergrund-Refresh** je Quelle (`cache_refresh_s`, Default 0)
+   für einen warmen Cache, damit die Überbrückung ab der ersten Sekunde greift.
+6. **Sichtbar**: `served_stale` im Query-Log, Warnbanner im Dashboard,
+   Health-Finding `cache_serving_stale`, Prometheus-Metriken.
+7. **Löschkonzept (PHI)**: Der Payload enthält PHI (das ist der Zweck einer
+   Worklist). Deshalb: nur in der internen DB, nie in Logs, die API liefert
+   ausschließlich Metadaten (Accession, Study-UID, Modalität, Station,
+   SPS-Status, Alter), automatischer Purge plus expliziter „Cache leeren"-Knopf.
 
 **Backend.**
 
-- Neue Tabelle `worklist_cache`: `dedupe_key` (PatientID+Accession+SPS-ID,
-  wie in `upstream.dedupe_key`), `source_id`, `payload` (JSON des Datasets),
-  `fetched_at`, `expires_at`, `last_served_at`.
-- Im C-FIND-Pfad (`dimse.handle_find`): je Quelle zuerst Cache prüfen; nur bei
-  Miss oder abgelaufener TTL real abfragen. Bei Fehler der Quelle und
-  `cache_stale_on_error` die letzte Antwort bis `cache_max_stale_s` liefern.
-- Pro Quelle konfigurierbar: `cache_ttl_s`, `cache_stale_on_error`,
-  `cache_max_stale_s` (Felder auf `MwlSource`).
-- Antwort-Marker: konfigurierbarer privater Tag (z. B. `(0021,00A0)`
-  `MWLBROKER_SOURCE_STATE` = `fresh|stale|live`) — optional, weil manche PACS
-  private Tags verwerfen; Default aus. In jedem Fall Metrik + Log.
-- Invalidation bei Cancel/Update: `DELETE /api/v1/cache/items/{dedupe_key}`
-  und `DELETE /api/v1/cache` (alle).
-- API: `GET /api/v1/cache/stats`, `GET /api/v1/cache/items?source=&limit=`,
-  die beiden DELETE-Routen; alles mit Summary, Response-Description und
-  Schema-Feldbeschreibungen (bestehender OpenAPI-Vertrag).
-- Metriken: `mwl_cache_hits_total{source,state}`, `mwl_cache_entries`,
-  `mwl_cache_stale_served_total{source}`.
-- Settings: `cache_enabled` (Default an), `cache_default_ttl_s` (Default 120).
+- Tabelle `worklist_cache` (Quelle, Dedupe-Key, Metadaten, DICOM-JSON-Payload,
+  `fetched_at`), `cache.py` als einzige Schnittstelle.
+- C-FIND-Pfad: Erfolg → `store_snapshot` (Snapshot-Ersetzung, Zähler für
+  entfernte Einträge); Fehler oder offener Breaker → `stale_answers`, Ergebnis
+  als `served_stale` im Query-Log, Status `partial`.
+- Per-Quelle: `cache_stale_on_error`, `cache_refresh_s`. Global:
+  `cache_enabled`, `cache_stale_max_s`, `cache_hide_completed`,
+  `cache_max_items`.
+- API: `GET /cache/stats`, `GET /cache/items`, `DELETE /cache`,
+  `DELETE /cache/sources/{id}`.
+- Metriken: `mwl_cache_entries`, `mwl_cache_age_seconds`, `mwl_cache_served_total`,
+  `mwl_cache_refresh_total{result}`, `mwl_cache_dropped_total{reason}`.
 
 **Frontend (OE3).**
 
-- Monitoring-Seite: Karte „Worklist-Cache" (Einträge, Hit-Rate, stale-Anteil).
-- Quellen-Dialog: Gruppe „Cache" mit TTL, Stale-Fallback-Schalter, maximalem
-  Stale-Fenster — jeweils mit Hilfetext, was das fachlich bedeutet.
-- Query-Log: Badge `stale`, wenn eine Antwort aus dem Cache kam; Warnbanner
-  auf `/broker`, solange eine Quelle stale bedient.
-- DAU-Sicherheit: Cache ist per Default an (Verfügbarkeit vor Aktualität),
-  aber die Wirkung ist **sichtbar** (Badge/Banner); „Cache leeren" nur mit
-  Bestätigungsdialog; kein stilles Verhalten.
+- Cache-Karte im Dashboard: Einträge/Alter/Zustand je Quelle, Fallback-Flag,
+  „Cache leeren" mit Bestätigung (auditiert).
+- Warnbanner, solange der jüngste Query aus dem Cache bedient wurde.
+- Query-Log markiert die betroffene Quelle als „aus Cache".
+- Quellen-Dialog: Cache-Gruppe (Fallback-Schalter, Refresh-Intervall);
+  die globalen Schalter erscheinen automatisch auf der Settings-Seite.
 
-**Tests & Verifikation.**
+**Tests & Verifikation.** Snapshot-Ersetzung (Auftrag verlässt die Worklist →
+Eintrag verschwindet), Stale-Fenster/Deaktivierung, Filter erledigter Schritte,
+korrupte Payloads, Purge, Hintergrund-Refresh, DIMSE-Integration
+(Quelle stirbt → Antwort aus dem Cache, `served_stale`, Status `partial`;
+Breaker offen → Cache), API, UI (Karte, Banner, Dialog), E2E-Szenario im
+Test-Stack (Quelle auf toten Port → Smoke liefert weiterhin Antworten).
 
-- pytest: TTL-Ablauf, Hit/Miss, Stale-Fenster, Invalidation, Parallelzugriff.
-- DIMSE-Integration (in-process): Quelle antwortet → Quelle abgeschaltet →
-  C-FIND liefert weiterhin die gecachte Liste, `status=partial`, `stale`-Metrik.
-- vitest: Cache-Karte, Formularfelder, Badge.
-- Playwright (Desktop+Mobile): Badge nach simuliertem Quellenausfall sichtbar,
-  „Cache leeren" mit Bestätigung; `verify-ui.cjs` um den Fall erweitern.
-- Lasttest: 100 parallele C-FINDs gegen eine Quelle mit Cache.
-
-**Risiken.** Der Cache enthält **PHI** (Patientenname/Geburtsdatum der
-Worklist). Deshalb: TTL begrenzt, keine Logs des Inhalts, Zugriff nur über die
-DB im internen Netz, Löschfunktion, Aufnahme ins Löschkonzept (siehe
-Querschnittsthemen). Das ist die zentrale offene Entscheidung des Betreibers.
+**Risiken.** Der Cache enthält PHI → siehe Löschkonzept; ein zu langes
+Stale-Fenster könnte erledigte Aufträge kurz wieder zeigen (deshalb Default
+120 s + Filter); ein Hintergrund-Refresh erzeugt zusätzliche C-FIND-Last.
 
 ### P0-2 C-STORE-Spool mit Retry und Dead-Letter
 
@@ -438,7 +460,7 @@ ATNA-Schema.
 |---|---|---|---|
 | 1 | Circuit Breaker (P0-3) + Health-Panel (P1-3) | keine — schneller Nutzen, kleine Eingriffe | **✅ umgesetzt** |
 | 2 | Simulation (P1-2) + Config-Audit/Export/Rollback (P1-1) | keine | **✅ umgesetzt** |
-| 3 | Worklist-Cache (P0-1) | Löschkonzept/PHI-Entscheidung | offen |
+| 3 | Worklist-Cache (P0-1) | Löschkonzept/PHI-Entscheidung | **✅ umgesetzt** |
 | 4 | C-STORE-Spool (P0-2) | Alembic-Migration, Speicherkonzept | offen |
 | 5 | Alerting (P1-4), dann P2 nach fachlicher Priorisierung | Betriebsentscheidung | offen |
 
@@ -547,11 +569,55 @@ Quellen mitbringen, fälschlich „übersprungen“; Operations wurden beim Impo
 mit `None`-Feldern normalisiert und damit nicht idempotent; `resourceId` im
 Audit-Hook warf bei Dokumenten ohne Arrays.
 
+### Sprint 3 — Worklist-Cache mit Stale-Fallback (umgesetzt)
+
+**Recherche-Grundlage** (siehe Abschnitt P0-1): Medavis liefert Einträge bis
+zum Abschluss im RIS; dcm4chee steuert den Lebenszyklus über HL7 ORM/MPPS und
+blendet COMPLETED aus; der SPS-Status `(0040,0020)` ist der Standardmechanismus;
+IHE trennt MWL (pull) und MPPS (push); kommerzielle Proxys (Flux Capacitor,
+Laurel Bridge) cachen **Snapshots** mit begrenztem `ServeStaleForSeconds`.
+
+**Umgesetzt.**
+
+- `worklist_cache` + `cache.py`: Snapshot je Quelle, **ersetzt** bei jeder
+  erfolgreichen Antwort (abgeschlossene Aufträge verschwinden sofort),
+  DICOM-JSON-Payload via pydicom-Roundtrip.
+- Stale-Fallback nur bei Fehler **oder offenem Breaker**, begrenzt durch
+  `cache_stale_max_s` (Default 120 s); erledigte Schritte werden gefiltert.
+- `served_stale` im Query-Log (neue Spalte + Migration), Status `partial`.
+- Optionale Hintergrund-Aktualisierung (`cache_refresh_s` je Quelle) im
+  Echo-Loop, automatischer Purge, `cache_max_items` als Schutz.
+- API `GET /cache/stats|items`, `DELETE /cache[/sources/{id}]`; Metriken
+  `mwl_cache_*`; Health-Finding `cache_serving_stale`.
+- UI: Cache-Karte, Stale-Banner, Log-Badge, Cache-Gruppe im Quellen-Dialog,
+  globale Schalter auf der Settings-Seite, i18n en/de.
+
+**Tests & Verifikation.**
+
+| Ebene | Umfang |
+|---|---|
+| pytest | 198 Tests, 97 % Coverage (+35: Snapshot-Semantik, Stale-Fenster, COMPLETED-Filter, korrupte Payloads, Purge, Refresh, DIMSE-Integration, API, Migration-Guard) |
+| vitest | 386 Tests, 98 % Broker-UI-Coverage (+8: Cache-Karte, Stale-Banner, Dialog-Felder, Client) |
+| Playwright | 35 Tests (Desktop + Mobile), inkl. Cache-Karte und Stale-Anzeige |
+| test-stack.sh | Szenario „Quelle auf toten Port → Antwort aus dem Cache, Status partial" |
+| verify-ui.cjs | 69 Checks (Desktop 1400×900 + Mobile 375×812) |
+
+**Nebenbefund und behoben (produktionsrelevant):** Die neuen Spalten
+(`mwl_source.cache_stale_on_error`, `cache_refresh_s`, `query_log.served_stale`)
+fehlten in der Mini-Migration. Auf einer **bestehenden Postgres-Datenbank**
+antwortete die API danach mit 500 — die SQLite-Tests erzeugen das Schema frisch
+und konnten das nicht sehen; aufgefallen ist es beim Deep-Audit gegen den
+echten Stack. Ergänzt, plus ein Test, der erzwingt, dass jede nachträglich
+ergänzte Modellspalte eine Migration hat.
+
 ## Offene Entscheidungen (an den Betreiber)
 
-1. **Cache und PHI:** Ist ein kurzlebiger Worklist-Cache datenschutzrechtlich
-   zulässig (TTL, Löschkonzept, Zugriffsschutz) — oder soll der Broker im
-   Fehlerfall bewusst leer antworten?
+1. **Cache und PHI — entschieden, aber bestätigen lassen:** Der Cache speichert
+   Worklist-Daten (inkl. Patientennamen) für höchstens `cache_stale_max_s`
+   (Default 120 s) in der internen DB. Kein Log, keine API-Exposition von
+   Patientendaten, automatischer Purge, „Cache leeren" im UI, Stale nur im
+   Fehlerfall. Wer das nicht möchte, setzt `cache_enabled = false` (dann
+   antwortet der Broker im Fehlerfall leer) oder `cache_stale_max_s = 0`.
 2. **Spool:** erlaubte Größe/Speicherort und maximale Aufbewahrung nach
    erfolgreichem Versand.
 3. **Audit-Actor:** kommt der Benutzerkontext aus einem vorgelagerten Proxy

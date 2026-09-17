@@ -168,6 +168,47 @@ def test_open_breaker_is_reported():
     assert 0 < finding["details"]["retry_in_s"] <= 45
 
 
+def test_stale_serving_is_reported(monkeypatch):
+    from datetime import datetime, timezone
+
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import QueryLog
+
+    src = _source()
+    _target()
+
+    assert "cache_serving_stale" not in _codes(_findings())
+
+    with session_factory()() as s:
+        s.add(QueryLog(calling_aet="CT_01", answers=2, per_source={"ris-a": 2},
+                       duration_ms=12, status="partial", served_stale=["ris-a"],
+                       ts=datetime.now(timezone.utc)))
+        s.commit()
+
+    finding = next(f for f in _findings() if f["code"] == "cache_serving_stale")
+    assert finding["severity"] == "warning"
+    assert "ris-a" in finding["message"]
+    assert finding["details"]["sources"] == "ris-a"
+    assert src  # silence linters
+
+
+def test_old_stale_serving_is_not_reported():
+    from datetime import datetime, timedelta, timezone
+
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import QueryLog
+
+    _source()
+    _target()
+    with session_factory()() as s:
+        s.add(QueryLog(calling_aet="CT_01", answers=1, per_source={"ris-a": 1},
+                       duration_ms=9, status="partial", served_stale=["ris-a"],
+                       ts=datetime.now(timezone.utc) - timedelta(hours=2)))
+        s.commit()
+
+    assert "cache_serving_stale" not in _codes(_findings())
+
+
 def test_findings_are_sorted_by_severity_and_summarised():
     _source(enabled=False)                        # warning: no_enabled_source
     _transform(target_id=_target(enabled=False))  # error: no_default_target

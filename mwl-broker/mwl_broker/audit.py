@@ -29,6 +29,8 @@ def _source(row: MwlSource) -> dict:
         "name": row.name, "aet": row.aet, "host": row.host, "port": row.port,
         "calling_aet": row.calling_aet, "charset": row.charset,
         "enabled": row.enabled, "timeout_s": row.timeout_s, "priority": row.priority,
+        "cache_stale_on_error": row.cache_stale_on_error,
+        "cache_refresh_s": row.cache_refresh_s,
     }
 
 

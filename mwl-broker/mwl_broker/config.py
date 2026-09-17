@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # Config audit: header that carries the operator identity (empty = "api")
     audit_actor_header: str = "X-OE3-User"
 
+    # Worklist cache (outage bridge) — conservative defaults
+    cache_enabled: bool = True          # serve cached answers when a source fails
+    cache_stale_max_s: int = 120        # hard cap for stale serving (0 = never)
+    cache_hide_completed: bool = True   # never resurrect COMPLETED/DISCONTINUED steps
+    cache_max_items: int = 5000         # safety cap per source snapshot
+
     # Circuit breaker per upstream source (C-FIND fan-out)
     breaker_fail_threshold: int = 3   # consecutive failures before opening
     breaker_open_seconds: int = 60    # how long an open breaker stays open

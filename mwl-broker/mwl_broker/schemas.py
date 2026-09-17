@@ -49,6 +49,16 @@ class SourceIn(BaseModel):
         default=100,
         description="Merge order: lower values are queried first and win during deduplication.",
     )
+    cache_stale_on_error: bool = Field(
+        default=True,
+        description="Answer this source from the worklist cache while it is "
+                    "unreachable (bounded by the stale window).",
+    )
+    cache_refresh_s: int = Field(
+        default=0, ge=0, le=86400,
+        description="Background refresh interval for the cached snapshot in "
+                    "seconds (0 = off, refreshed only by live queries).",
+    )
 
 
 class SourceOut(SourceIn):
@@ -334,6 +344,43 @@ class SettingUpdateIn(BaseModel):
     )
 
 
+class CacheSourceOut(BaseModel):
+    """Cache state of one upstream source."""
+
+    source_id: int = Field(description="Row ID of the source.")
+    source_name: str = Field(description="Display name of the source.")
+    entries: int = Field(description="Number of cached worklist items.")
+    age_s: int | None = Field(
+        default=None, description="Age of the newest cached answer in seconds (null = empty).",
+    )
+    state: str = Field(
+        description="empty | available | expired — 'expired' means an outage could "
+                    "no longer be bridged (older than the stale window).",
+    )
+    stale_on_error: bool = Field(description="Whether this source may be served stale.")
+    refresh_s: int = Field(description="Background refresh interval (0 = off).")
+    newest_fetched_at: datetime | None = Field(
+        default=None, description="Timestamp of the newest cached answer (UTC).",
+    )
+
+
+class CacheItemOut(BaseModel):
+    """One cached worklist item — metadata only, deliberately without PHI."""
+
+    source_id: int = Field(description="Row ID of the source the item came from.")
+    source_name: str = Field(description="Name of that source.")
+    accession: str = Field(description="Accession number (allowed by the PHI policy).")
+    study_uid: str = Field(description="Study Instance UID.")
+    modality: str = Field(description="Modality of the scheduled step.")
+    station_aet: str = Field(description="Scheduled station AE title.")
+    sps_status: str = Field(
+        description="SPS status (0040,0020) — COMPLETED/DISCONTINUED items are never "
+                    "served from the cache.",
+    )
+    age_s: int = Field(description="Age of the cached item in seconds.")
+    fetched_at: datetime = Field(description="When the item was cached (UTC).")
+
+
 class QueryLogOut(BaseModel):
     """One incoming C-FIND request (audit log, PHI-free)."""
 
@@ -351,7 +398,11 @@ class QueryLogOut(BaseModel):
                     "when a source could not be reached.",
     )
     duration_ms: int = Field(description="End-to-end duration across all upstreams (ms).")
-    status: str = Field(description="success | partial | failed.")
+    status: str = Field(description="success | partial (a source failed, was skipped or served stale) | failed.")
+    served_stale: list[str] | None = Field(
+        default=None,
+        description="Sources that had to be answered from the worklist cache.",
+    )
 
 
 class StoreLogOut(BaseModel):

@@ -49,6 +49,11 @@ def get_session() -> Session:
 # new columns on existing tables are added here. `create_all` only creates
 # missing *tables*, never alters existing ones.
 _COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
+    # columns added after the first release — an existing (Postgres) database
+    # needs these ALTERs, a fresh one gets them from create_all()
+    ("query_log", "served_stale", "JSON"),
+    ("mwl_source", "cache_stale_on_error", "BOOLEAN DEFAULT TRUE"),
+    ("mwl_source", "cache_refresh_s", "INTEGER DEFAULT 0"),
     ("store_log", "applied_transforms", "JSON"),
 ]
 

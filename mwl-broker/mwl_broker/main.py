@@ -78,6 +78,7 @@ def create_app() -> FastAPI:
             {"name": "rules", "description": "Routing rules: worklist source → store target."},
             {"name": "transforms", "description": "DICOM attribute modifications applied before forwarding (tag set/remove/prefix/suffix/replace/copy)."},
             {"name": "settings", "description": "Runtime settings — UI override over the deployment ENV default."},
+            {"name": "cache", "description": "Worklist cache: snapshots that bridge an unreachable RIS, with a bounded stale window."},
             {"name": "audit", "description": "Configuration change log (before/after snapshots)."},
             {"name": "config", "description": "Configuration export, import (dry-run) and rollback."},
             {"name": "simulation", "description": "Dry-run simulation of routing and modify rules — same code as the live path."},

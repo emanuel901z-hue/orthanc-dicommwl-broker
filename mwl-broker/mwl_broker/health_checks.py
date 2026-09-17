@@ -9,11 +9,12 @@ to the English `message`. `entity` points at the affected object so the UI can
 deep-link into the right form.
 """
 import logging
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
 from . import breaker, echo, metrics, settings_service
-from .models import MwlSource, PacsTarget, RoutingRule, TransformRule
+from .models import MwlSource, PacsTarget, QueryLog, RoutingRule, TransformRule
 
 log = logging.getLogger("mwl_broker.health")
 
@@ -118,6 +119,22 @@ def config_findings(session, settings) -> list[dict]:
                 details={"retry_in_s": state["retry_in_s"], "failures": state["failures"],
                          "last_error": state["last_error"]},
             ))
+
+    # ── worklist cache ─────────────────────────────────────────────────────
+    stale_since = datetime.now(timezone.utc) - timedelta(minutes=5)
+    recent = session.scalars(
+        select(QueryLog).where(QueryLog.ts >= stale_since).order_by(QueryLog.ts.desc())
+    ).all()
+    stale_sources = sorted({
+        name for row in recent for name in (row.served_stale or [])
+    })
+    if stale_sources:
+        findings.append(_finding(
+            "cache_serving_stale", "warning",
+            "Worklist queries were answered from the cache because these sources "
+            f"failed: {', '.join(stale_sources)}.",
+            details={"sources": ", ".join(stale_sources)},
+        ))
 
     # ── global settings ────────────────────────────────────────────────────
     if not settings_service.get_aets():

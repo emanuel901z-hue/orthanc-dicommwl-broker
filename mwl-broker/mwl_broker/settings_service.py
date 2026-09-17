@@ -34,6 +34,22 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "Interval of the C-ECHO monitoring loop in seconds.",
     ),
+    "cache_enabled": (
+        "bool",
+        "Serve cached worklist answers when an upstream source is unreachable.",
+    ),
+    "cache_stale_max_s": (
+        "int",
+        "Hard cap for serving cached answers after the last successful query (0 = never).",
+    ),
+    "cache_hide_completed": (
+        "bool",
+        "Never return COMPLETED/DISCONTINUED steps from the cache.",
+    ),
+    "cache_max_items": (
+        "int",
+        "Maximum number of worklist items cached per source.",
+    ),
     "breaker_fail_threshold": (
         "int",
         "Consecutive C-FIND failures per source before its circuit breaker opens.",
@@ -47,6 +63,24 @@ KNOWN: dict[str, tuple[str, str]] = {
 _INT_RANGES = {
     "seen_item_ttl_days": (1, 3650),
     "echo_interval_s": (5, 3600),
+    "cache_enabled": (
+        "bool",
+        "Serve cached worklist answers when an upstream source is unreachable.",
+    ),
+    "cache_stale_max_s": (
+        "int",
+        "Hard cap for serving cached answers after the last successful query (0 = never).",
+    ),
+    "cache_hide_completed": (
+        "bool",
+        "Never return COMPLETED/DISCONTINUED steps from the cache.",
+    ),
+    "cache_max_items": (
+        "int",
+        "Maximum number of worklist items cached per source.",
+    ),
+    "cache_stale_max_s": (0, 86400),
+    "cache_max_items": (1, 100000),
     "breaker_fail_threshold": (1, 100),
     "breaker_open_seconds": (5, 3600),
 }

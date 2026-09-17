@@ -31,6 +31,11 @@ cd mwl-broker && python -m pytest tests -q
 # …mit Coverage (aktuell 96 %)
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 
+# Worklist-Cache (laufender Stack)
+curl -s http://127.0.0.1:18081/api/v1/cache/stats | python3 -m json.tool
+curl -s 'http://127.0.0.1:18081/api/v1/cache/items?limit=5' | python3 -m json.tool
+curl -X DELETE http://127.0.0.1:18081/api/v1/cache
+
 # Simulation + Änderungsprotokoll (laufender Stack)
 curl -s -X POST http://127.0.0.1:18081/api/v1/simulate/route \
   -H 'Content-Type: application/json' -d '{"accession":"ACC-A-001"}' | python3 -m json.tool
@@ -149,6 +154,14 @@ Token rotieren = nur die Store-Datei neu schreiben:
 - **Konfigurationsmutationen werden protokolliert** (`audit.record` in der
   API-Schicht, Before/After-Snapshot). Neue Mutationen ohne Audit-Eintrag sind
   unvollständig.
+- **Cache-Semantik nicht aufweichen.** Eine erfolgreiche Quell-Antwort
+  *ersetzt* den Snapshot (`cache.store_snapshot`), sie wird nie gemergt — sonst
+  bleiben abgeschlossene Aufträge liegen. Stale nur bei Fehler/offenem Breaker,
+  erledigte Schritte (`(0040,0020)`) nie aus dem Cache. Der Payload enthält PHI:
+  nie loggen, nie über die API ausgeben (nur `cache.items()`-Metadaten).
+- **Nachträglich ergänzte Modellspalten brauchen einen Eintrag in
+  `_COLUMN_MIGRATIONS`** (`db.py`) — bestehende Postgres-Instanzen bekommen sie
+  sonst nicht und die API antwortet mit 500. `tests/test_db.py` erzwingt das.
 - **Import ist Upsert-only** (`config_io`): nie implizit löschen; Referenzen im
   Export laufen über Namen, nicht IDs.
 - **Neue Endpunkte brauchen den vollen OpenAPI-Vertrag** (Summary, Tag,
