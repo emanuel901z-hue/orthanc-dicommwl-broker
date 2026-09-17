@@ -13,7 +13,7 @@ from pynetdicom.presentation import build_context
 from pynetdicom.sop_class import ModalityWorklistInformationFind, Verification
 from sqlalchemy import select
 
-from . import metrics
+from . import metrics, settings_service, transforms
 from .config import Settings
 from .db import session_factory
 from .models import QueryLog, RoutingRule, SeenItem, StoreLog, MwlSource, PacsTarget
@@ -87,7 +87,7 @@ class BrokerSCP:
 
     # ------------------------------------------------------------------
     def _calling_allowed(self, calling_aet: str) -> bool:
-        allowed = [a.strip() for a in self.settings.allowed_calling_aets.split(",") if a.strip()]
+        allowed = settings_service.get_aets()
         return not allowed or calling_aet in allowed
 
     def _enabled_sources(self) -> list[SourceCfg]:
@@ -224,12 +224,15 @@ class BrokerSCP:
         study_uid = str(getattr(ds, "StudyInstanceUID", "") or "")
         sop_uid = str(getattr(ds, "SOPInstanceUID", "") or "")
 
+        strict = settings_service.get_bool("strict_store_status")
         source_id, target = self._resolve_target(accession, study_uid)
         if target is None:
             self._write_store_log(calling, sop_uid, study_uid, accession, source_id, None, "unrouted", "no target")
             metrics.CSTORE_TOTAL.labels(target="none", status="unrouted").inc()
             log.warning("C-STORE unrouted: acc=%s study=%s", accession, study_uid)
-            return S_OUT_OF_RESOURCES if self.settings.strict_store_status else S_SUCCESS
+            return S_OUT_OF_RESOURCES if strict else S_SUCCESS
+
+        applied = self._apply_transforms(ds, source_id, target.id)
 
         error = ""
         try:
@@ -239,11 +242,28 @@ class BrokerSCP:
             log.error("forward to %s failed: %s", target.name, exc)
 
         status_str = "success" if not error else "failed"
-        self._write_store_log(calling, sop_uid, study_uid, accession, source_id, target.id, status_str, error)
+        self._write_store_log(calling, sop_uid, study_uid, accession, source_id, target.id,
+                              status_str, error, applied)
         metrics.CSTORE_TOTAL.labels(target=target.name, status=status_str).inc()
         if error:
-            return S_OUT_OF_RESOURCES if self.settings.strict_store_status else S_SUCCESS
+            return S_OUT_OF_RESOURCES if strict else S_SUCCESS
         return S_SUCCESS
+
+    @staticmethod
+    def _apply_transforms(ds: Dataset, source_id: int | None, target_id: int) -> list[str]:
+        """Apply all matching transform rules before forwarding."""
+        try:
+            with session_factory()() as s:
+                rules = transforms.applicable(s, source_id, target_id)
+        except Exception as exc:
+            log.error("transform lookup failed: %s", exc)
+            return []
+        applied, errors = transforms.apply_transforms(ds, rules)
+        if applied:
+            log.info("transforms applied (acc=%s): %s%s",
+                     getattr(ds, "AccessionNumber", ""), ", ".join(applied),
+                     f" — {len(errors)} op(s) failed" if errors else "")
+        return applied
 
     def _resolve_target(self, accession: str, study_uid: str):
         """seen_items lookup → routing rule → target; else default target."""
@@ -304,7 +324,8 @@ class BrokerSCP:
             assoc.release()
 
     @staticmethod
-    def _write_store_log(calling, sop_uid, study_uid, accession, source_id, target_id, status, error):
+    def _write_store_log(calling, sop_uid, study_uid, accession, source_id, target_id,
+                         status, error, applied_transforms=None):
         try:
             with session_factory()() as s:
                 s.add(
@@ -312,6 +333,7 @@ class BrokerSCP:
                         calling_aet=calling, sop_instance_uid=sop_uid, study_uid=study_uid,
                         accession=accession, source_id=source_id, target_id=target_id,
                         status=status, error=error[:512],
+                        applied_transforms=list(applied_transforms or []),
                     )
                 )
                 s.commit()

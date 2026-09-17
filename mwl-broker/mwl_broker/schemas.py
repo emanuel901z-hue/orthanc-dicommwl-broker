@@ -4,6 +4,7 @@ Field descriptions feed the generated OpenAPI documentation — keep them
 up to date (Swagger UI at /docs, spec at /openapi.json).
 """
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -114,6 +115,91 @@ class RuleOut(RuleIn):
     id: int = Field(description="Row ID.")
 
 
+class TransformOperation(BaseModel):
+    """One DICOM attribute modification.
+
+    `tag` must be a real DICOM keyword (validated against the data
+    dictionary). SOP/Study/Series UIDs are rejected — rewriting them would
+    break PACS linkage.
+    """
+
+    op: Literal["set", "remove", "prefix", "suffix", "replace", "copy"] = Field(
+        description="set = replace value · remove = delete tag · prefix/suffix = "
+                    "wrap the existing value · replace = regex substitution · "
+                    "copy = take the value of another tag.",
+        examples=["prefix"],
+    )
+    tag: str = Field(
+        description="DICOM keyword to modify.", examples=["PatientID"],
+    )
+    value: str | None = Field(
+        default=None,
+        description="Value for set/prefix/suffix; replacement for replace.",
+        examples=["KH_"],
+    )
+    pattern: str | None = Field(
+        default=None,
+        description="Regular expression searched in the existing value (op=replace).",
+        examples=["^ALT"],
+    )
+    from_tag: str | None = Field(
+        default=None,
+        description="Source keyword to copy from (op=copy).",
+        examples=["RequestedProcedureDescription"],
+    )
+
+
+class TransformIn(BaseModel):
+    """DICOM attribute modifications applied before forwarding a C-STORE.
+
+    Scope: `source_id` / `target_id` may be null (= any). All applicable,
+    enabled rules are applied in priority order.
+    """
+
+    name: str = Field(
+        min_length=1, max_length=64, examples=["kh-accession-prefix"],
+        description="Unique rule name (also recorded in the store log).",
+    )
+    enabled: bool = Field(default=True, description="Disabled rules are not applied.")
+    priority: int = Field(
+        default=100, description="Application order — lower values run first.",
+    )
+    source_id: int | None = Field(
+        default=None, description="Only apply to stores from this source (null = any).",
+    )
+    target_id: int | None = Field(
+        default=None, description="Only apply to stores forwarded to this target (null = any).",
+    )
+    operations: list[TransformOperation] = Field(
+        description="Operations applied in order; a failing operation is logged "
+                    "and skipped (the instance is still forwarded).",
+    )
+
+
+class TransformOut(TransformIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: int = Field(description="Row ID.")
+    created_at: datetime = Field(description="Creation timestamp (UTC).")
+
+
+class SettingOut(BaseModel):
+    """One runtime setting: DB override if present, otherwise the ENV default."""
+
+    key: str = Field(description="Setting key (mirrors the ENV variable name).")
+    value: str = Field(description="Currently effective value.")
+    default: str = Field(description="Value from the deployment ENV (fallback).")
+    source: str = Field(description="'db' = UI override active, 'env' = deployment default.")
+    kind: str = Field(description="Value type: bool | int | aets.")
+    description: str = Field(description="What the setting does.")
+
+
+class SettingUpdateIn(BaseModel):
+    value: str = Field(
+        description="New value (validated per key).",
+        examples=["CT_01,MR_01"],
+    )
+
+
 class QueryLogOut(BaseModel):
     """One incoming C-FIND request (audit log, PHI-free)."""
 
@@ -152,6 +238,10 @@ class StoreLogOut(BaseModel):
     )
     status: str = Field(description="success | failed | unrouted.")
     error: str = Field(default="", description="Forward error detail, if any.")
+    applied_transforms: list[str] = Field(
+        default_factory=list,
+        description="Names of the transform rules applied to this instance.",
+    )
 
 
 class EchoResult(BaseModel):

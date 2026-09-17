@@ -33,8 +33,28 @@ def get_session() -> Session:
     return session_factory()()
 
 
+# Idempotent column additions — this project intentionally has no Alembic;
+# new columns on existing tables are added here. `create_all` only creates
+# missing *tables*, never alters existing ones.
+_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
+    ("store_log", "applied_transforms", "JSON"),
+]
+
+
+def _apply_column_migrations(engine) -> None:
+    for table, column, ddl_type in _COLUMN_MIGRATIONS:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+            log.info("migration: added %s.%s", table, column)
+        except Exception:
+            pass  # column already exists (fresh DB or previously migrated)
+
+
 def init_db() -> None:
-    Base.metadata.create_all(get_engine())
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    _apply_column_migrations(engine)
 
 
 def reset_for_tests() -> None:
@@ -48,6 +68,9 @@ def seed_from_json(payload: list[dict]) -> None:
 
     Items: {"kind": "source"|"target", ...model fields...}
     Rules:  {"kind": "rule", "source": "<name>", "target": "<name>", ...}
+    Transforms: {"kind": "transform", "name": ..., "operations": [...],
+                 "source": "<name>"?, "target": "<name>"?}
+    Settings:   {"kind": "setting", "key": ..., "value": ...}
     """
     kind_model = {"source": MwlSource, "target": PacsTarget}
     with get_session() as s:
@@ -56,6 +79,12 @@ def seed_from_json(payload: list[dict]) -> None:
             kind = item.pop("kind", "")
             if kind == "rule":
                 _seed_rule(s, item)
+                continue
+            if kind == "transform":
+                _seed_transform(s, item)
+                continue
+            if kind == "setting":
+                _seed_setting(s, item)
                 continue
             model = kind_model.get(kind)
             if model is None:
@@ -67,6 +96,46 @@ def seed_from_json(payload: list[dict]) -> None:
                 for k, v in item.items():
                     setattr(existing, k, v)
         s.commit()
+
+
+def _seed_transform(s, item: dict) -> None:
+    """Upsert a transform rule; optional source/target referenced by name."""
+    from .models import TransformRule
+
+    def _id_by_name(model, name):
+        if not name:
+            return None
+        row = s.scalar(select(model).where(model.name == name))
+        if row is None:
+            log.warning("seed transform: unknown %s %r", model.__name__, name)
+        return row.id if row else None
+
+    fields = {
+        "enabled": item.get("enabled", True),
+        "priority": item.get("priority", 100),
+        "operations": item.get("operations", []),
+        "source_id": _id_by_name(MwlSource, item.get("source")),
+        "target_id": _id_by_name(PacsTarget, item.get("target")),
+    }
+    existing = s.scalar(select(TransformRule).where(TransformRule.name == item["name"]))
+    if existing is None:
+        s.add(TransformRule(name=item["name"], **fields))
+    else:
+        for k, v in fields.items():
+            setattr(existing, k, v)
+
+
+def _seed_setting(s, item: dict) -> None:
+    """Upsert a runtime setting (validated against the known keys)."""
+    from .settings_service import set_value, validate_value
+
+    key = item.get("key", "")
+    value = str(item.get("value", ""))
+    errors = validate_value(key, value)
+    if errors:
+        log.warning("seed setting %r skipped: %s", key, "; ".join(errors))
+        return
+    set_value(key, value, session=s)
 
 
 def _seed_rule(s, item: dict) -> None:

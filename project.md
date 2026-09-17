@@ -81,9 +81,41 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
 - `GET/POST/PUT/DELETE /sources`, `POST /sources/{id}/echo`
 - `GET/POST/PUT/DELETE /targets`, `POST /targets/{id}/echo`
 - `GET/POST/PUT/DELETE /rules`
+- `GET/POST/PUT/DELETE /transforms` — Modify-Regeln; `operations` werden gegen
+  das DICOM-Datenlexikon validiert (unbekanntes Keyword → 422 mit Detail-Liste),
+  SOP/Study/Series-UIDs sind gesperrt (PACS-Linkage)
+- `GET /settings` — effektiver Wert + ENV-Default + Quelle (`db`|`env`);
+  `PUT /settings/{key}` (Override, typvalidiert), `DELETE /settings/{key}` (Reset)
 - `GET /logs/queries`, `GET /logs/stores` (paged, Filter: aet, source, status, since)
 - `GET /status` — SCP-Listener, Echo-Matrix (Quellen+Ziele), Zähler
 - `GET /healthz`, `GET /metrics` (Prometheus)
+
+### Modify-Regeln (Tag-Transformation beim Weiterleiten)
+
+`transform_rule`-Tabelle: Name, Scope (`source_id`/`target_id`, NULL = beliebig),
+Priorität, `operations` (JSON). Angewendet im C-STORE-Pfad **vor** dem Forward:
+
+| Op | Wirkung |
+|---|---|
+| `set` | Tag auf Wert setzen (pydicom konvertiert per VR) |
+| `remove` | Tag entfernen |
+| `prefix` / `suffix` | bestehenden Wert umrahmen |
+| `replace` | Regex-Ersetzung im bestehenden Wert |
+| `copy` | Wert eines anderen Tags übernehmen |
+
+Fehlertoleranz: eine fehlschlagende Operation wird geloggt und übersprungen —
+die Instanz wird trotzdem weitergeleitet. Die angewendeten Regelnamen landen
+im `store_log.applied_transforms` (Audit-Trail). Validierung gegen
+`pydicom.datadict`; UID-Tags sind gesperrt.
+
+### Laufzeit-Settings (ENV-Default + DB-Override)
+
+`broker_setting`-Tabelle (Key/Value). Auflösung: DB-Wert schlägt ENV,
+`DELETE /settings/{key}` fällt auf ENV zurück. Gültige Keys:
+`allowed_calling_aets`, `strict_store_status`, `seen_item_ttl_days`,
+`echo_interval_s`. Die DIMSE-Handler und der Echo-Loop lesen die effektiven
+Werte zur Laufzeit → Änderungen wirken ohne Container-Neustart. Der
+Echo-Loop führt zusätzlich stündlich den `seen_items`-Retention-Purge aus.
 
 **OpenAPI/Swagger**: vollständig dokumentiert — App-Description, Tags
 (sources/targets/rules/logs/monitoring), Summary + Response-Description pro
@@ -103,11 +135,20 @@ Endpoint und Descriptions für die Kern-Schemas.
 ## OE3-Frontend
 
 - `src/api/broker.ts` — `brokerFetch` (Base-URL `config.brokerUrl`), typed API
+  inkl. Transforms + Settings; 404/409/422-Details werden durchgereicht
+  (Konfigurationsmeldungen, PHI-frei), alle anderen Status bleiben gescrubbt
 - `src/config/runtime.ts` — optionales `brokerUrl` im `__OE3_CONFIG__`
 - Feature-Flag `mwlBroker` (Alias `enableMwlBroker`)
-- `src/features/broker/` — Dashboard (Status + Echo-Matrix + Live-Query-Log);
-  später: Source/Target-Editoren, Routing-Matrix
-- Route `/broker`, Sidebar-Eintrag, i18n (en/de; Rest per fallbackLng)
+- `src/features/broker/` — **komplette Konfigurationsoberfläche**:
+  - `pages/BrokerPage` — Monitoring (Status, Echo-Matrix, Live-Query-Log)
+  - `pages/SourcesPage` — Upstream-Quellen CRUD (+ Enable, C-ECHO)
+  - `pages/TargetsPage` — Store-Ziele CRUD (+ Default, C-ECHO)
+  - `pages/RulesPage` — Routing-Regeln (Quelle → Ziel, Priorität, Toggle)
+  - `pages/TransformsPage` — Modify-Regeln (Tag-Operationen, Scope, Priorität)
+  - `pages/BrokerSettingsPage` — Laufzeit-Settings (ENV-Default + Override/Reset)
+  - `hooks/use-broker-writes` — auditierte Writes (BEFORE+AFTER, wie `src/actions/`)
+- Routen `/broker{,/sources,/targets,/rules,/transforms,/settings}` als
+  Sidebar-Untergruppe; i18n en/de (Rest per fallbackLng)
 
 ## Repo-Layout
 
@@ -160,9 +201,9 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 30 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 264 Tests, 0 Errors |
-| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 8/8 grün, 0 Console-/Page-/Netzwerk-Fehler |
+| `pytest` | 60 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 298 Tests, 0 Errors |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 22/22 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
 
@@ -176,13 +217,13 @@ pro Viewport unter `e2e/stack/screenshots/`).
 
 `test-stack.sh` + `.env.test`: isolierte Stack-Kopie (Projekt `mwl-test`,
 Ports `19xxx`/`14xxx`, eigene Volumes). Ablauf: `up -d --build` → Health-Wait
-→ C-FIND-Smoke → C-FIND-Smoke → C-STORE-Routing-Check (Regel→Peer, Default→Orthanc) → Playwright (8 Tests) → `down -v`. Läuft parallel zum
+→ C-FIND-Smoke → C-FIND-Smoke → C-STORE-Routing-Check (Regel→Peer, Default→Orthanc) → Playwright (22 Tests) → `down -v`. Läuft parallel zum
 regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
 
 `ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
 Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
-backend pytest (30) → frontend tsc → lint → vitest (264) → docker-e2e
-(8 Browser-Tests + DIMSE-Smoke). Verifiziert: alle Stages grün.
+backend pytest (60) → frontend tsc → lint → vitest (298) → docker-e2e
+(22 Browser-Tests + DIMSE-Smokes). Verifiziert: alle Stages grün.
 `--quick` überspringt die Docker-Stage.
 
 Gefundene und behobene Defekte:
@@ -208,8 +249,8 @@ Gefundene und behobene Defekte:
 | 2 | Dev-Stack + Mock-RIS A/B + Smoke-Skript | ✅ |
 | 3 | OE3: Broker-Dashboard read-only | ✅ |
 | 4 | Plug-and-play: .env, orthanc.json, bootstrap.sh, Tests, Host-Verifikation | ✅ |
-| 5 | OE3: Editoren für Quellen/Ziele/Regeln + Audit-Events | ☐ |
-| 6 | Härtung: TLS, Retention-Job (seen_items), Alerting | ☐ |
+| 5 | OE3: Editoren für Quellen/Ziele/Regeln/Modify/Settings + Audit-Events | ✅ |
+| 6 | Härtung: TLS, Alerting (Retention-Purge ist implementiert) | ☐ |
 | 7 | HL7-Adapter (ORM/ADT → lokale MWL-Quelle) | ☐ |
 
 ## Offene Punkte / Risiken

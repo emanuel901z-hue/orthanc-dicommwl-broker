@@ -49,7 +49,15 @@ def snapshot() -> dict[str, list[dict]]:
 
 
 def echo_loop(interval_s: int, stop: threading.Event) -> None:
-    """Background loop: echo every enabled source/target every interval."""
+    """Background loop: echo every enabled source/target.
+
+    The interval is re-read from the effective settings each tick (UI override
+    wins over the ENV default). Roughly once an hour a retention purge removes
+    expired seen_items.
+    """
+    from . import settings_service
+
+    ticks = 0
     while not stop.is_set():
         try:
             with session_factory()() as s:
@@ -59,6 +67,13 @@ def echo_loop(interval_s: int, stop: threading.Event) -> None:
                 echo_one("source", r)
             for r in targets:
                 echo_one("target", r)
+            ticks += 1
+            if ticks % 60 == 0:
+                settings_service.purge_seen_items()
         except Exception:
             pass  # DB not ready yet — next tick retries
-        stop.wait(interval_s)
+        try:
+            wait_s = settings_service.get_int("echo_interval_s")
+        except Exception:
+            wait_s = interval_s
+        stop.wait(wait_s)

@@ -10,6 +10,7 @@ from pynetdicom import AE, evt
 from pynetdicom.sop_class import ModalityWorklistInformationFind, Verification
 from sqlalchemy import select
 
+from mwl_broker import settings_service
 from mwl_broker.config import Settings
 from mwl_broker.db import session_factory
 from mwl_broker.dimse import BrokerSCP
@@ -21,6 +22,7 @@ from mwl_broker.models import (
     RoutingRule,
     SeenItem,
     StoreLog,
+    TransformRule,
 )
 from mwl_broker.upstream import c_echo
 
@@ -227,8 +229,13 @@ def test_echo_endpoint_helper(mwl_scp):
 
 @pytest.fixture()
 def restricted_broker():
-    """Broker that only accepts calling AET 'CT_01'."""
-    scp = BrokerSCP(Settings(dicom_port=0, allowed_calling_aets="CT_01"))
+    """Broker that only accepts calling AET 'CT_01'.
+
+    Restrictions come from the runtime settings service (DB override over the
+    ENV default) — the same path the UI writes to.
+    """
+    settings_service.set_value("allowed_calling_aets", "CT_01")
+    scp = BrokerSCP(Settings(dicom_port=0))
     scp.start()
     yield _port(scp.server)
     scp.shutdown()
@@ -236,8 +243,9 @@ def restricted_broker():
 
 @pytest.fixture()
 def lenient_broker():
-    """Broker with strict_store_status=False (store failures → success)."""
-    scp = BrokerSCP(Settings(dicom_port=0, strict_store_status=False))
+    """Broker with strict_store_status=false (store failures → success)."""
+    settings_service.set_value("strict_store_status", "false")
+    scp = BrokerSCP(Settings(dicom_port=0))
     scp.start()
     yield _port(scp.server)
     scp.shutdown()
@@ -329,6 +337,117 @@ def test_query_log_never_stores_patient_name(broker, mwl_scp):
         row = s.scalars(select(QueryLog)).one()
         assert "PatientName" not in row.query_keys
         assert "Müller" not in str(row.query_keys)
+
+
+# ── Transform rules in the C-STORE path ────────────────────────────────
+
+
+def _seed_transform(name="t1", ops=None, source_id=None, target_id=None,
+                    priority=100, enabled=True) -> int:
+    with session_factory()() as s:
+        row = TransformRule(
+            name=name, operations=ops or [], source_id=source_id,
+            target_id=target_id, priority=priority, enabled=enabled,
+        )
+        s.add(row)
+        s.commit()
+        return row.id
+
+
+def _route_to(source_id: int, target_id: int) -> None:
+    with session_factory()() as s:
+        s.add(RoutingRule(source_id=source_id, target_id=target_id))
+        s.commit()
+
+
+def test_store_applies_transform_rules(broker, mwl_scp, store_scp):
+    received, store_port = store_scp
+    source_id = _seed_source(mwl_scp)
+    target_id = _seed_target(store_port)
+    _route_to(source_id, target_id)
+    _seed_transform(
+        "kh-modify",
+        [
+            {"op": "prefix", "tag": "PatientID", "value": "KH_"},
+            {"op": "set", "tag": "InstitutionName", "value": "Klinikum"},
+            {"op": "remove", "tag": "PatientBirthDate"},
+        ],
+        source_id=source_id,
+    )
+
+    _cfind(broker, _wildcard_query())
+    ds = _ct_dataset(VARIANTS["a"][0].AccessionNumber, VARIANTS["a"][0].StudyInstanceUID)
+    ds.PatientID = "P1001"
+    ds.PatientBirthDate = "19800101"
+
+    assert _cstore(broker, ds) == 0x0000
+    got = received[0]
+    assert got.PatientID == "KH_P1001"
+    assert got.InstitutionName == "Klinikum"
+    assert not hasattr(got, "PatientBirthDate")
+    # the UIDs must survive untouched (linkage)
+    assert got.StudyInstanceUID == ds.StudyInstanceUID
+    with session_factory()() as s:
+        assert s.scalars(select(StoreLog)).one().applied_transforms == ["kh-modify"]
+
+
+def test_transform_scope_excludes_other_targets(broker, mwl_scp, store_scp):
+    received, store_port = store_scp
+    source_id = _seed_source(mwl_scp)
+    target_id = _seed_target(store_port)
+    other_target = _seed_target(1, name="other-pacs")
+    _route_to(source_id, target_id)
+    _seed_transform(
+        "only-other-target",
+        [{"op": "set", "tag": "InstitutionName", "value": "X"}],
+        target_id=other_target,
+    )
+
+    _cfind(broker, _wildcard_query())
+    ds = _ct_dataset(VARIANTS["a"][0].AccessionNumber, VARIANTS["a"][0].StudyInstanceUID)
+    assert _cstore(broker, ds) == 0x0000
+    assert not hasattr(received[0], "InstitutionName")
+    with session_factory()() as s:
+        assert s.scalars(select(StoreLog)).one().applied_transforms == []
+
+
+def test_broken_transform_op_does_not_lose_instance(broker, mwl_scp, store_scp):
+    """A failing operation is logged and skipped — the instance is still
+    forwarded and later operations still run."""
+    received, store_port = store_scp
+    source_id = _seed_source(mwl_scp)
+    target_id = _seed_target(store_port)
+    _route_to(source_id, target_id)
+    _seed_transform(
+        "partly-broken",
+        [
+            # copy from an empty tag → raises inside the op
+            {"op": "copy", "tag": "InstitutionName", "from_tag": "RequestedProcedureDescription"},
+            {"op": "set", "tag": "InstitutionName", "value": "OK"},
+        ],
+        source_id=source_id,
+    )
+
+    _cfind(broker, _wildcard_query())
+    ds = _ct_dataset(VARIANTS["a"][0].AccessionNumber, VARIANTS["a"][0].StudyInstanceUID)
+    assert _cstore(broker, ds) == 0x0000
+    assert received[0].InstitutionName == "OK"
+
+
+def test_disabled_transform_not_applied(broker, mwl_scp, store_scp):
+    received, store_port = store_scp
+    source_id = _seed_source(mwl_scp)
+    target_id = _seed_target(store_port)
+    _route_to(source_id, target_id)
+    _seed_transform(
+        "off",
+        [{"op": "set", "tag": "InstitutionName", "value": "X"}],
+        source_id=source_id, enabled=False,
+    )
+    _cfind(broker, _wildcard_query())
+    ds = _ct_dataset(VARIANTS["a"][0].AccessionNumber, VARIANTS["a"][0].StudyInstanceUID)
+    assert _cstore(broker, ds) == 0x0000
+    assert not hasattr(received[0], "InstitutionName")
 
 
 def test_cfind_increments_metrics(broker):

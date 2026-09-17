@@ -22,13 +22,19 @@ from .schemas import (
     QueryLogOut,
     RuleIn,
     RuleOut,
+    SettingOut,
+    SettingUpdateIn,
     SourceIn,
     SourceOut,
     StatusOut,
     StoreLogOut,
     TargetIn,
     TargetOut,
+    TransformIn,
+    TransformOut,
 )
+from . import settings_service, transforms
+from .models import TransformRule
 
 router = APIRouter(prefix="/api/v1")
 
@@ -168,6 +174,146 @@ def delete_rule(rule_id: int, s: Session = _db_dep):
         raise HTTPException(404, "not found")
     s.delete(row)
     s.commit()
+
+
+# ── Transform rules (DICOM attribute modify on forward) ────────────────
+
+
+def _ops_payload(body: TransformIn) -> list[dict]:
+    """Validate the operations and return them as plain JSON-ready dicts."""
+    ops = [op.model_dump(exclude_none=True) for op in body.operations]
+    errors = transforms.validate_operations(ops)
+    if errors:
+        raise HTTPException(422, detail=errors)
+    return ops
+
+
+def _check_scope(s: Session, body: TransformIn) -> None:
+    for mid, model, label in (
+        (body.source_id, MwlSource, "source"), (body.target_id, PacsTarget, "target"),
+    ):
+        if mid is not None and s.get(model, mid) is None:
+            raise HTTPException(404, f"{label} {mid} not found")
+
+
+@router.get(
+    "/transforms", response_model=list[TransformOut], tags=["transforms"],
+    summary="List transform rules",
+    response_description="All rules ordered by priority, then ID.",
+)
+def list_transforms(s: Session = _db_dep):
+    return s.scalars(
+        select(TransformRule).order_by(TransformRule.priority, TransformRule.id)
+    ).all()
+
+
+@router.post(
+    "/transforms", response_model=TransformOut, status_code=201, tags=["transforms"],
+    summary="Create a transform rule",
+    response_description="The created rule.",
+    responses={
+        404: {"description": "Referenced source or target does not exist."},
+        409: {"description": "A rule with this name already exists."},
+        422: {"description": "Invalid DICOM keyword / operation (details in `detail`)."},
+    },
+)
+def create_transform(body: TransformIn, s: Session = _db_dep):
+    if s.scalar(select(TransformRule).where(TransformRule.name == body.name)):
+        raise HTTPException(409, f"{body.name} already exists")
+    _check_scope(s, body)
+    row = TransformRule(
+        name=body.name, enabled=body.enabled, priority=body.priority,
+        source_id=body.source_id, target_id=body.target_id,
+        operations=_ops_payload(body),
+    )
+    s.add(row)
+    s.commit()
+    s.refresh(row)
+    return row
+
+
+@router.put(
+    "/transforms/{rule_id}", response_model=TransformOut, tags=["transforms"],
+    summary="Update a transform rule",
+    response_description="The updated rule.",
+    responses={
+        404: {"description": "No rule with this ID (or scope row missing)."},
+        422: {"description": "Invalid DICOM keyword / operation."},
+    },
+)
+def update_transform(rule_id: int, body: TransformIn, s: Session = _db_dep):
+    row = s.get(TransformRule, rule_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    _check_scope(s, body)
+    row.name = body.name
+    row.enabled = body.enabled
+    row.priority = body.priority
+    row.source_id = body.source_id
+    row.target_id = body.target_id
+    row.operations = _ops_payload(body)
+    s.commit()
+    s.refresh(row)
+    return row
+
+
+@router.delete(
+    "/transforms/{rule_id}", status_code=204, tags=["transforms"],
+    summary="Delete a transform rule",
+    responses={404: {"description": "No rule with this ID."}},
+)
+def delete_transform(rule_id: int, s: Session = _db_dep):
+    row = s.get(TransformRule, rule_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    s.delete(row)
+    s.commit()
+
+
+# ── Runtime settings (DB override over ENV default) ────────────────────
+
+
+@router.get(
+    "/settings", response_model=list[SettingOut], tags=["settings"],
+    summary="List runtime settings",
+    description="Effective value, the deployment ENV default and which one is "
+                "currently active (`source`).",
+    response_description="All known settings.",
+)
+def list_settings():
+    return settings_service.list_all()
+
+
+@router.put(
+    "/settings/{key}", response_model=SettingOut, tags=["settings"],
+    summary="Override a setting",
+    description="Stores a runtime override; the ENV value stays the fallback "
+                "and is restored by DELETE.",
+    response_description="The setting with its new effective value.",
+    responses={
+        404: {"description": "Unknown setting key."},
+        422: {"description": "Invalid value for this setting type."},
+    },
+)
+def update_setting(key: str, body: SettingUpdateIn):
+    if key not in settings_service.KNOWN:
+        raise HTTPException(404, f"unknown setting {key!r}")
+    errors = settings_service.validate_value(key, body.value)
+    if errors:
+        raise HTTPException(422, detail=errors)
+    settings_service.set_value(key, body.value)
+    return next(s for s in settings_service.list_all() if s["key"] == key)
+
+
+@router.delete(
+    "/settings/{key}", status_code=204, tags=["settings"],
+    summary="Reset a setting to the ENV default",
+    responses={404: {"description": "Unknown setting key."}},
+)
+def reset_setting(key: str):
+    if key not in settings_service.KNOWN:
+        raise HTTPException(404, f"unknown setting {key!r}")
+    settings_service.reset(key)
 
 
 # ── Logs ───────────────────────────────────────────────────────────────

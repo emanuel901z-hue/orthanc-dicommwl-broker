@@ -75,6 +75,8 @@ def create_app() -> FastAPI:
             {"name": "sources", "description": "Upstream MWL sources (RIS/KIS) queried via C-FIND."},
             {"name": "targets", "description": "PACS targets that receive forwarded C-STORE traffic."},
             {"name": "rules", "description": "Routing rules: worklist source → store target."},
+            {"name": "transforms", "description": "DICOM attribute modifications applied before forwarding (tag set/remove/prefix/suffix/replace/copy)."},
+            {"name": "settings", "description": "Runtime settings — UI override over the deployment ENV default."},
             {"name": "logs", "description": "C-FIND and C-STORE audit logs (PHI-free)."},
             {"name": "monitoring", "description": "Health, status snapshot, C-ECHO and Prometheus metrics."},
         ],

@@ -1,0 +1,20 @@
+/* Custom CSS overrides for OHIF SidePanel.
+   Injected via nginx into the built index.html.
+   Fixes tab overflow when many panels are registered. */
+
+/* Thin scrollbar for the side panel tab grid */
+.overflow-x-auto::-webkit-scrollbar {
+  height: 4px;
+}
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 2px;
+}
+.overflow-x-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+.overflow-x-auto {
+  scrollbar-width: thin;
+  scrollbar-color: #4b5563 transparent;
+  -webkit-overflow-scrolling: touch;
+}
