@@ -162,5 +162,9 @@ git push -u origin "$BRANCH"
 
 REPO_PATH="$(echo "$ORIGIN_URL" | sed -E 's#(git@|https://)github.com[:/]##; s#\.git$##')"
 echo ""
-echo "pushed. open the PR:"
-echo "   https://github.com/$REPO_PATH/compare/main...$BRANCH?expand=1"
+if [ "$BRANCH" = "main" ]; then
+  echo "pushed: https://github.com/$REPO_PATH"
+else
+  echo "pushed. open the PR:"
+  echo "   https://github.com/$REPO_PATH/compare/main...$BRANCH?expand=1"
+fi
