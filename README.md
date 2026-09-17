@@ -136,5 +136,8 @@ Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
 - [x] OE3: vollständige Konfigurations-UI — Quellen, Ziele, Routing-Regeln,
       Modify-Regeln (DICOM-Tag-Transformationen), Laufzeit-Settings (Audit-Events)
 - [x] Retention-Purge für seen_items (Settings-gesteuert)
-- [ ] Alerting, TLS am DIMSE
+- [ ] Nächste Ausbaustufen: siehe [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md)
+      (P0: Worklist-Cache mit Stale-Fallback, C-STORE-Spool mit Retry,
+      Circuit Breaker; P1: Config-Audit/Export/Rollback, Simulation,
+      Health-Panel, Alerting)
 - [ ] HL7-ORM/ADT-Adapter (Worklist-Einträge ohne Upstream-C-FIND)

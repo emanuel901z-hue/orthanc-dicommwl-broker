@@ -361,6 +361,12 @@ Gefundene und behobene Defekte:
 | 6 | Härtung: TLS, Alerting (Retention-Purge ist implementiert) | ☐ |
 | 7 | HL7-Adapter (ORM/ADT → lokale MWL-Quelle) | ☐ |
 
+Die nächsten Ausbaustufen sind in
+[docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert
+und je Funktion mit Backend-/API-Entwurf, DAU-sicherem OE3-Frontend und
+Teststrategie beschrieben (P0: Worklist-Cache mit Stale-Fallback,
+C-STORE-Spool mit Retry/Dead-Letter, Circuit Breaker pro Upstream).
+
 ## Offene Punkte / Risiken
 
 - **Charset** je Quelle testen (deutsche Namen, `ISO_IR 100` vs `ISO_IR 192`).
