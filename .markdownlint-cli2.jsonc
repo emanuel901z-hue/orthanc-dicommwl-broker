@@ -1,0 +1,16 @@
+{
+  // Workspace markdownlint config — used by the CI markdownlint job.
+  "globs": ["**/*.md"],
+  "ignores": [
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/dist/**",
+    "orthanc-explorer-3-usable/**"
+  ],
+  "config": {
+    // German prose legitimately exceeds 80 chars; tables stay readable.
+    "MD013": false,
+    // Table-column-style is overly pedantic for hand-maintained docs.
+    "MD060": false
+  }
+}

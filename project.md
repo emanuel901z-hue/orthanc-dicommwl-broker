@@ -26,7 +26,7 @@ Nicht-Ziele (v1): MPPS, HL7-Listener, TLS am DIMSE (später via `tls-args`).
 
 ## Datenflüsse
 
-```
+```text
  RIS_A (MWL SCP) ──┐                          ┌──> PACS_KH (C-STORE)
  RIS_B (MWL SCP) ──┤   C-FIND   ┌──────────┐  │
  KIS   (MWL SCP) ──┼───────────>│ mwl-     │──┼──> PACS_ANDERES
@@ -104,7 +104,7 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
 
 ## Repo-Layout
 
-```
+```text
 orthanc-dicommwl-broker/
 ├── orthanc-explorer-3-usable/   # OE3-Fork (Frontend, Git-Submodule)
 ├── mwl-broker/                  # FastAPI + pynetdicom Service
@@ -192,7 +192,6 @@ Gefundene und behobene Defekte:
   abgeschnitten; RTT wrappte zweizeilig. Fix: `break-all` auf
   Endpoint-Zellen, `whitespace-nowrap` auf dem Echo-Badge,
   Echo-Button min. 36px Touch-Target auf Mobile.
-
 
 ## Phasen
 

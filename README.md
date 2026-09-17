@@ -45,7 +45,7 @@ die Defaults auf freien Ports:
 
 | Service | Host-Port | Bemerkung |
 |---|---|---|
-| OE3 UI | 18082 | http://host:18082/oe3/ |
+| OE3 UI | 18082 | `http://host:18082/oe3/` |
 | Orthanc REST | 18042 | nur `127.0.0.1` (`ORTHANC_HTTP_BIND`) |
 | Orthanc DICOM | 14242 | AET `ORTHANC` |
 | Broker REST + Metriken | 18081 | nur `127.0.0.1` (`BROKER_API_BIND`) |
@@ -83,7 +83,15 @@ npx playwright test --config=e2e/stack/playwright.stack.config.ts
 # Lokale CI-Pipeline (alle Stages: backend pytest → tsc → lint → vitest →
 # docker-e2e auf dem Test-Stack; gleiche Images/Code-Basis wie Produktion):
 ./ci-local.sh            # alles; --quick ohne Docker-Stage
+
+# Optionaler pre-push-Hook (Quick-Stages lokal, da CI nur bei PRs läuft):
+git config core.hooksPath .githooks
 ```
+
+GitHub-CI (`.github/workflows/ci.yml`) läuft als PR-Gate auf `main`/`develop`
+sowie manuell: pytest, lint+tsc+vitest, Docker-E2E-Stack, audit-ci+pip-audit,
+Gitleaks, Semgrep-SAST, Trivy-Container-Scan, License-Check, Markdownlint.
+Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
 
 ## Status
 

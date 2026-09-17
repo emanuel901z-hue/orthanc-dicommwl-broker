@@ -1,0 +1,290 @@
+name: MWL Broker CI Pipeline
+
+# CI laeuft nur bei Pull Requests (PR-Gate) + manuell — wie LKS-Suite.
+# Bei direktem Push auf main laeuft CI NICHT; lokal vorher `./ci-local.sh`
+# ausfuehren (optional als pre-push Hook via `git config core.hooksPath .githooks`).
+#
+# Hinweise:
+# - Das Frontend liegt als Git-Submodule (orthanc-explorer-3-usable).
+#   Ist das Submodule-Repo privat, muss ein Secret SUBMODULE_PAT (read access
+#   auf das OE3-Repo) hinterlegt werden; public repos laufen mit GITHUB_TOKEN.
+# - Der stack-e2e Job baut die echten Images und testet den kompletten
+#   DICOM-Fluss (C-FIND Fan-out, Store-Routing) + Browser-UI headless.
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  backend-test:
+    runs-on: ubuntu-latest
+    name: Backend — pytest (API + DIMSE integration)
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install broker + dev deps
+      run: pip install -e "./mwl-broker[dev]"
+
+    - name: Run pytest
+      working-directory: ./mwl-broker
+      run: python -m pytest tests -q
+      # In-process DIMSE integration (real C-FIND/C-STORE/C-ECHO over
+      # loopback sockets + SQLite) — no postgres service needed.
+
+  frontend-test:
+    runs-on: ubuntu-latest
+    name: Frontend — lint + tsc + vitest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        token: ${{ secrets.SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+    - name: Use Node.js 20
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install dependencies
+      working-directory: ./orthanc-explorer-3-usable
+      run: npm ci
+
+    - name: ESLint
+      working-directory: ./orthanc-explorer-3-usable
+      run: npm run lint
+
+    - name: TypeScript Check
+      working-directory: ./orthanc-explorer-3-usable
+      run: npx tsc --noEmit -p tsconfig.app.json
+
+    - name: Unit Tests
+      working-directory: ./orthanc-explorer-3-usable
+      run: npm run test
+
+  stack-e2e:
+    runs-on: ubuntu-latest
+    name: Stack E2E — docker stack + C-FIND smoke + Playwright (desktop/mobile)
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        token: ${{ secrets.SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+    - name: Use Node.js 20
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install dependencies (playwright CLI)
+      working-directory: ./orthanc-explorer-3-usable
+      run: npm ci
+
+    - name: Install Playwright Chromium (headless)
+      working-directory: ./orthanc-explorer-3-usable
+      run: npx playwright install --with-deps chromium
+
+    - name: Full-stack e2e (isolated mwl-test project, auto teardown)
+      run: ./test-stack.sh
+      # up --build -> health wait -> C-FIND smoke -> 8 Playwright tests
+      # -> down -v. Same Dockerfiles/config as production deployment.
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    name: Dependency Audit (npm audit-ci + pip-audit)
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        token: ${{ secrets.SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+    - name: Use Node.js 20
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Frontend — audit-ci (high+critical blocking, allowlist)
+      working-directory: ./orthanc-explorer-3-usable
+      run: |
+        npm ci
+        npm run audit
+
+    - name: Use Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Backend — pip-audit
+      run: |
+        python -m venv /tmp/audit-venv
+        /tmp/audit-venv/bin/pip install -e ./mwl-broker pip-audit
+        /tmp/audit-venv/bin/pip-audit --local
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    name: Gitleaks (Secret Scanning)
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Vollstaendige Historie fuer Commit-Scan
+
+    - name: Gitleaks — Detect hardcoded secrets
+      uses: gitleaks/gitleaks-action@v3.0.0
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_ENABLE_COMMENTS: true
+        GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+
+  sast-scan:
+    runs-on: ubuntu-latest
+    name: Semgrep (SAST — Python + TypeScript/React)
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        token: ${{ secrets.SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+    - name: Run Semgrep via pipx (replaces deprecated returntocorp action)
+      run: |
+        pipx run semgrep scan \
+          --config p/default \
+          --config p/owasp-top-ten \
+          --config p/python \
+          --config p/nodejs \
+          --config p/typescript \
+          --config p/react \
+          --config p/sql-injection \
+          --config p/command-injection \
+          --config p/xss \
+          --config p/jwt \
+          --sarif --output semgrep-results.sarif \
+          --exclude .venv --exclude node_modules --exclude dist
+
+    - name: Upload Semgrep SARIF to GitHub Security Tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: semgrep-results.sarif
+
+  container-scan:
+    runs-on: ubuntu-latest
+    name: Trivy (Container Image Scan — broker + oe3)
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        token: ${{ secrets.SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build broker image
+      uses: docker/build-push-action@v6
+      with:
+        context: ./mwl-broker
+        load: true
+        tags: mwl-broker:scan
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Trivy Scan — broker image
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        image-ref: mwl-broker:scan
+        format: sarif
+        output: trivy-broker.sarif
+        severity: HIGH,CRITICAL
+        exit-code: '1'
+
+    - name: Upload broker SARIF
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: trivy-broker.sarif
+        category: mwl-broker
+
+    - name: Build oe3 image
+      uses: docker/build-push-action@v6
+      with:
+        context: ./orthanc-explorer-3-usable
+        load: true
+        tags: oe3:scan
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Trivy Scan — oe3 image
+      uses: aquasecurity/trivy-action@v0.36.0
+      with:
+        image-ref: oe3:scan
+        format: sarif
+        output: trivy-oe3.sarif
+        severity: HIGH,CRITICAL
+        exit-code: '1'
+
+    - name: Upload oe3 SARIF
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: trivy-oe3.sarif
+        category: oe3
+
+  license-check:
+    runs-on: ubuntu-latest
+    name: License Compliance
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        token: ${{ secrets.SUBMODULE_PAT || secrets.GITHUB_TOKEN }}
+
+    - name: Use Node.js 20
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Frontend — license check (fail on copyleft)
+      working-directory: ./orthanc-explorer-3-usable
+      run: |
+        npx license-checker --production --summary
+        npx license-checker --production --failOn "GPL;AGPL;LGPL;MPL;CDDL;EPL" || {
+          echo "::warning::Copyleft-Lizenzen gefunden — bitte pruefen"
+          exit 1
+        }
+
+    - name: Backend — python licenses (report only)
+      run: |
+        pip install -e ./mwl-broker pip-licenses >/dev/null
+        pip-licenses --with-system --format=markdown
+      # Report-only: psycopg ist LGPL — fuer internen Krankenhaus-Betrieb
+      # ok (keine Distribution). Bei Distribution: psycopg[binary] pruefen.
+
+  markdownlint:
+    runs-on: ubuntu-latest
+    name: Markdownlint (Doku-Qualitaet)
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js 20
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install markdownlint-cli2
+      run: npm install -D markdownlint-cli2
+
+    - name: Run Markdownlint (repo config .markdownlint-cli2.jsonc)
+      run: npx markdownlint-cli2
