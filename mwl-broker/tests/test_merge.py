@@ -42,5 +42,25 @@ def test_merge_first_source_wins():
     assert merged[1][0].AccessionNumber == "A2"
 
 
+def test_outgoing_identifier_retargets_charset():
+    """Per-source charset: outgoing query gets the source's charset while
+    the incoming identifier stays untouched (deepcopy)."""
+    from mwl_broker.upstream import outgoing_identifier
+
+    ident = Dataset()
+    ident.SpecificCharacterSet = "ISO_IR 100"
+    ident.PatientName = "Müller^Hans"
+    sps = Dataset()
+    sps.Modality = "CT"
+    ident.ScheduledProcedureStepSequence = [sps]
+
+    out = outgoing_identifier(ident, "ISO_IR 192")
+
+    assert out.SpecificCharacterSet == "ISO_IR 192"
+    assert ident.SpecificCharacterSet == "ISO_IR 100"
+    assert out.PatientName == "Müller^Hans"
+    assert out.ScheduledProcedureStepSequence[0].Modality == "CT"
+
+
 def test_merge_empty():
     assert merge_answers([]) == []

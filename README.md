@@ -67,8 +67,8 @@ python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 15 Tests (API + DIMSE e2e)
-cd orthanc-explorer-3-usable && npm run test      # 259 Tests
+cd mwl-broker && python -m pytest tests -q        # 30 Tests (API + DIMSE e2e + PHI/Security)
+cd orthanc-explorer-3-usable && npm run test      # 264 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -99,7 +99,7 @@ Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
 - [x] mwl-broker: MWL-Proxy-SCP, Store-Routing, Config-API, Metriken, Echo-Monitoring
 - [x] Dev-/Demo-Stack, .env-basierte Konfiguration, bootstrap.sh
 - [x] OE3: `broker.ts` API-Client + Broker-Dashboard
-- [x] Tests: 15 Backend (inkl. echter DIMSE-Integration), 10 Frontend neu
+- [x] Tests: 30 Backend (DIMSE-Integration, Allowlist, PHI-Hygiene), 15 Frontend neu
 - [x] Verifiziert auf Zielhost: C-FIND-Fan-out, Dedupe, Store-Routing, Echo
 - [x] Browser-E2E (Playwright, Desktop+Mobile): 8/8 grün, 0 Console-Errors
 - [ ] OE3: Editoren für Quellen/Ziele/Routing-Regeln

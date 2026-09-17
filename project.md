@@ -153,8 +153,8 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 15 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 259 Tests, 0 Errors |
+| `pytest` | 30 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 264 Tests, 0 Errors |
 | Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 8/8 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
@@ -169,12 +169,12 @@ pro Viewport unter `e2e/stack/screenshots/`).
 
 `test-stack.sh` + `.env.test`: isolierte Stack-Kopie (Projekt `mwl-test`,
 Ports `19xxx`/`14xxx`, eigene Volumes). Ablauf: `up -d --build` → Health-Wait
-→ C-FIND-Smoke → Playwright (8 Tests) → `down -v`. Läuft parallel zum
+→ C-FIND-Smoke → C-FIND-Smoke → C-STORE-Routing-Check (Regel→Peer, Default→Orthanc) → Playwright (8 Tests) → `down -v`. Läuft parallel zum
 regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
 
 `ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
 Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
-backend pytest (15) → frontend tsc → lint → vitest (259) → docker-e2e
+backend pytest (30) → frontend tsc → lint → vitest (264) → docker-e2e
 (8 Browser-Tests + DIMSE-Smoke). Verifiziert: alle Stages grün.
 `--quick` überspringt die Docker-Stage.
 

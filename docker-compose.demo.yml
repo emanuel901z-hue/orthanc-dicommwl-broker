@@ -15,7 +15,8 @@ services:
         [{"kind":"source","name":"ris-a","aet":"RIS_A","host":"mock-ris-a","port":11114,"calling_aet":"MWLBROKER","charset":"ISO_IR 100","priority":10},
          {"kind":"source","name":"ris-b","aet":"RIS_B","host":"mock-ris-b","port":11115,"calling_aet":"MWLBROKER","charset":"ISO_IR 100","priority":20},
          {"kind":"target","name":"orthanc","aet":"ORTHANC","host":"orthanc","port":4242,"is_default":true},
-         {"kind":"target","name":"pacs-peer","aet":"PEER","host":"dicom-peer","port":4242,"is_default":false}]
+         {"kind":"target","name":"pacs-peer","aet":"PEER","host":"dicom-peer","port":4242,"is_default":false},
+         {"kind":"rule","source":"ris-a","target":"pacs-peer","priority":10}]
 
   mock-ris-a:
     build: ./mwl-broker

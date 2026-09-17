@@ -220,3 +220,122 @@ def test_store_unrouted_strict(broker):
 
 def test_echo_endpoint_helper(mwl_scp):
     c_echo("RIS_A", "127.0.0.1", mwl_scp, "MWLBROKER", timeout_s=5)
+
+
+# ── Calling-AET allowlist, failure paths, fallbacks, PHI hygiene ───────
+
+
+@pytest.fixture()
+def restricted_broker():
+    """Broker that only accepts calling AET 'CT_01'."""
+    scp = BrokerSCP(Settings(dicom_port=0, allowed_calling_aets="CT_01"))
+    scp.start()
+    yield _port(scp.server)
+    scp.shutdown()
+
+
+@pytest.fixture()
+def lenient_broker():
+    """Broker with strict_store_status=False (store failures → success)."""
+    scp = BrokerSCP(Settings(dicom_port=0, strict_store_status=False))
+    scp.start()
+    yield _port(scp.server)
+    scp.shutdown()
+
+
+def _cfind_final_status(broker_port, query: Dataset) -> int | None:
+    """Like _cfind but returns the last non-pending DIMSE status."""
+    ae = AE(ae_title="TESTSCU")
+    ae.add_requested_context(ModalityWorklistInformationFind)
+    assoc = ae.associate("127.0.0.1", broker_port, ae_title="MWLBROKER")
+    assert assoc.is_established
+    last = None
+    try:
+        for status, _ds in assoc.send_c_find(query, ModalityWorklistInformationFind):
+            if status is not None:
+                last = status.Status
+    finally:
+        assoc.release()
+    return last
+
+
+def test_cfind_rejected_for_disallowed_calling_aet(restricted_broker, mwl_scp):
+    _seed_source(mwl_scp)
+    assert _cfind_final_status(restricted_broker, _wildcard_query()) == 0xA700
+    with session_factory()() as s:
+        assert s.scalars(select(QueryLog)).all() == []  # rejected before fan-out
+
+
+def test_cstore_rejected_for_disallowed_calling_aet(restricted_broker):
+    ds = _ct_dataset("ACC-X", generate_uid())
+    assert _cstore(restricted_broker, ds) == 0xA700
+    with session_factory()() as s:
+        assert s.scalars(select(StoreLog)).all() == []
+
+
+def test_store_unrouted_lenient_returns_success(lenient_broker):
+    ds = _ct_dataset("UNKNOWN-ACC", generate_uid())
+    assert _cstore(lenient_broker, ds) == 0x0000
+    with session_factory()() as s:
+        assert s.scalars(select(StoreLog)).one().status == "unrouted"
+
+
+def test_store_forward_failure_marks_failed(broker):
+    _seed_target(1, name="dead-pacs", is_default=True)  # port 1 — refused
+    ds = _ct_dataset("ACC-X", generate_uid())
+    assert _cstore(broker, ds) == 0xA700  # strict default
+    with session_factory()() as s:
+        row = s.scalars(select(StoreLog)).one()
+        assert row.status == "failed"
+        assert row.error
+
+
+def test_cfind_disabled_source_skipped(broker, mwl_scp):
+    _seed_source(mwl_scp)
+    dead_id = _seed_source(1, name="dead-ris", aet="DEAD")
+    with session_factory()() as s:
+        s.get(MwlSource, dead_id).enabled = False
+        s.commit()
+    answers = _cfind(broker, _wildcard_query())
+    assert len(answers) == 2
+    with session_factory()() as s:
+        log_row = s.scalars(select(QueryLog)).one()
+        assert log_row.status == "success"  # disabled source never queried
+        assert "dead-ris" not in log_row.per_source
+
+
+def test_store_routes_via_study_uid_fallback(broker, mwl_scp, store_scp):
+    """Empty AccessionNumber → seen_items matched via StudyInstanceUID."""
+    received, store_port = store_scp
+    source_id = _seed_source(mwl_scp)
+    target_id = _seed_target(store_port)
+    with session_factory()() as s:
+        s.add(RoutingRule(source_id=source_id, target_id=target_id))
+        s.commit()
+    _cfind(broker, _wildcard_query())
+    uid = VARIANTS["a"][0].StudyInstanceUID
+    ds = _ct_dataset("", uid)  # accession intentionally empty
+    assert _cstore(broker, ds) == 0x0000
+    assert len(received) == 1
+
+
+def test_query_log_never_stores_patient_name(broker, mwl_scp):
+    """PHI hygiene: PatientName in the query must not land in query_keys."""
+    _seed_source(mwl_scp)
+    q = _wildcard_query()
+    q.PatientName = "Müller^Hans"
+    _cfind(broker, q)
+    with session_factory()() as s:
+        row = s.scalars(select(QueryLog)).one()
+        assert "PatientName" not in row.query_keys
+        assert "Müller" not in str(row.query_keys)
+
+
+def test_cfind_increments_metrics(broker):
+    from prometheus_client import REGISTRY
+
+    labels = {"result": "success"}
+    before = REGISTRY.get_sample_value("mwl_cfind_requests_total", labels) or 0
+    _cfind(broker, _wildcard_query())
+    after = REGISTRY.get_sample_value("mwl_cfind_requests_total", labels)
+    assert after == before + 1

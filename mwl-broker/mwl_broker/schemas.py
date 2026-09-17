@@ -84,6 +84,7 @@ class EchoResult(BaseModel):
     rtt_ms: int | None = None
     last_check: datetime | None = None
     error: str | None = None
+    error: str | None = None
 
 
 class StatusOut(BaseModel):

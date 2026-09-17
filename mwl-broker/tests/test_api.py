@@ -83,3 +83,61 @@ def test_healthz(client):
 def test_logs_empty(client):
     assert client.get("/api/v1/logs/queries").json() == []
     assert client.get("/api/v1/logs/stores").json() == []
+
+
+def test_target_crud(client):
+    r = client.post("/api/v1/targets", json=TARGET)
+    assert r.status_code == 201
+    row = r.json()
+    assert row["is_default"] is True
+
+    r = client.put(f"/api/v1/targets/{row['id']}", json={**TARGET, "enabled": False})
+    assert r.json()["enabled"] is False
+
+    r = client.delete(f"/api/v1/targets/{row['id']}")
+    assert r.status_code == 204
+    assert client.get("/api/v1/targets").json() == []
+
+
+def test_source_validation_rejects_bad_payload(client):
+    r = client.post("/api/v1/sources", json={"name": "x"})  # aet/host/port missing
+    assert r.status_code == 422
+
+
+def test_echo_unknown_source_404(client):
+    assert client.post("/api/v1/sources/999/echo").status_code == 404
+
+
+def test_echo_unreachable_source_returns_error(client):
+    """Echo against a dead endpoint returns ok=False + error detail."""
+    src = client.post(
+        "/api/v1/sources",
+        json={**SOURCE, "port": 1, "timeout_s": 1},
+    ).json()
+    r = client.post(f"/api/v1/sources/{src['id']}/echo")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert body["error"]
+
+
+def test_seed_config_supports_rules(client):
+    """BROKER_SEED_CONFIG_JSON may include {"kind":"rule",...} items that
+    resolve source/target by name."""
+    from mwl_broker.db import seed_from_json
+
+    seed_from_json([
+        {**SOURCE, "kind": "source"},
+        {**TARGET, "kind": "target"},
+        {"kind": "rule", "source": "ris-a", "target": "pacs-kh", "priority": 5},
+    ])
+    rules = client.get("/api/v1/rules").json()
+    assert len(rules) == 1
+    assert rules[0]["priority"] == 5
+
+
+def test_seed_rule_skips_unknown_names(client):
+    from mwl_broker.db import seed_from_json
+
+    seed_from_json([{"kind": "rule", "source": "nope", "target": "nope"}])
+    assert client.get("/api/v1/rules").json() == []

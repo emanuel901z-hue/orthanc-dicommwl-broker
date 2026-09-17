@@ -59,6 +59,19 @@ done
 echo "── DICOM smoke: C-FIND through broker ──"
 python3 mwl-broker/scripts/cfind_smoke.py "$BROKER_DICOM_HOST" "$BROKER_DICOM_PORT" MWLBROKER
 
+echo "── DICOM smoke: C-STORE routing ──"
+# ACC-A-001 belongs to a ris-a worklist item (just C-FIND'd → seen_items)
+# and the seeded rule ris-a → pacs-peer must route it to the peer.
+python3 mwl-broker/scripts/cstore_smoke.py "$BROKER_DICOM_HOST" "$BROKER_DICOM_PORT" MWLBROKER ACC-A-001 1.2.840.10008.5.1.4.1.1.2.1
+# Unknown accession → default target (orthanc).
+python3 mwl-broker/scripts/cstore_smoke.py "$BROKER_DICOM_HOST" "$BROKER_DICOM_PORT" MWLBROKER ACC-SMOKE-X 1.2.840.10008.5.1.4.1.1.2.2
+
+peer_count=$(curl -sf http://127.0.0.1:19043/instances | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
+orthanc_count=$(curl -sf http://127.0.0.1:19042/instances | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
+echo "   pacs-peer instances: $peer_count | orthanc instances: $orthanc_count"
+[ "$peer_count" -ge 1 ]   || { echo "FAIL: routed store did not reach pacs-peer" >&2; exit 1; }
+[ "$orthanc_count" -ge 1 ] || { echo "FAIL: unrouted store did not reach orthanc (default)" >&2; exit 1; }
+
 echo "── Playwright (desktop + mobile) ──"
 (cd orthanc-explorer-3-usable && OE3_BASE="$OE3_BASE" \
   npx playwright test --config=e2e/stack/playwright.stack.config.ts)
