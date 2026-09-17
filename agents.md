@@ -8,7 +8,10 @@
   `@/`-Alias, kein `console.log`, genau ein `<h1>` pro Page,
   `data-shortcut="search"` auf Suchfeldern).
 - `mwl-broker/` — Python-Service (FastAPI + pynetdicom + SQLAlchemy).
-- `deploy/` — Postgres-Init, zukünftig weitere Deployment-Artefakte.
+- `ohif-viewer/` + `extension-radiology-advanced/` — gehärteter OHIF-v3.12.5-Build
+  (Compose-Profil `viewer`); Regeln siehe unten.
+- `deploy/` — `orthanc/orthanc.json`, `oe3-stack.nginx.conf`, `oe3-config.js`
+  (OE3-Runtime-Config), `ohif-config.js` (OHIF-Runtime-Config), `postgres-init.sh`.
 - `docker-compose.yml` (Workspace-Root) — Gesamtstack. Die
   `docker-compose.dev.yml` im Frontend-Repo ist nur für reine Frontend-
   Entwicklung gedacht.
@@ -25,6 +28,12 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d
 
 # Broker-Tests (ohne Docker; DIMSE-Tests nutzen ephemere Ports + sqlite)
 cd mwl-broker && python -m pytest tests -q
+# …mit Coverage (aktuell 96 %)
+cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
+
+# Broker-API + Swagger/OpenAPI (laufender Stack)
+curl -s http://127.0.0.1:18081/openapi.json | python3 -m json.tool | head
+#   Swagger UI: http://127.0.0.1:18081/docs
 
 # Broker lokal (Postgres via Docker, sonst BROKER_DATABASE_URL setzen)
 cd mwl-broker && uvicorn mwl_broker.main:app --port 8081
@@ -35,6 +44,11 @@ npm install
 npm run dev                 # Vite-Proxy: /orthanc-proxy, /broker-api
 npm run test && npm run lint
 npx tsc --noEmit -p tsconfig.app.json
+npx vitest run --coverage    # Broker-UI-Coverage (aktuell 98,9 %)
+
+# Deep-UI-Audit gegen den laufenden Stack (DOM-Checks + CRUD vs. REST-API,
+# Desktop 1400x900 + Mobile 375x812, Screenshots in e2e/stack/shots/)
+node e2e/stack/verify-ui.cjs
 
 # Vollständige lokale Pipeline / Test-Stack / Fork-Push-Guard
 ./ci-local.sh               # pytest → tsc → lint → vitest → docker-e2e (--quick ohne Docker)
