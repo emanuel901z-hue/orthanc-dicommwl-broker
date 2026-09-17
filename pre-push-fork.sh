@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# pre-push-fork.sh — safety gate before pushing the OE3 fork to its PUBLIC remote.
+# pre-push-fork.sh — safety gate before pushing ANY of the two public repos.
+#
+#   ./pre-push-fork.sh                      # OE3 fork (default)
+#   ./pre-push-fork.sh --repo .             # broker workspace repo
+#   ./pre-push-fork.sh --repo . --dry-run   # audit only
 #
 # Audits exactly what THIS push would publish (commits + files vs origin/main):
 #   1. clean worktree, correct remote (never upstream rhavekost/orthanc-explorer-3)
-#   2. file blacklist: .env*, databases, keys, screenshots, test-results, …
+#   2. file blacklist: .env*, databases, keys, screenshots, test-results, histories, …
 #   3. secret-pattern scan over the outgoing diff
-#   4. optional quick checks (--tests: tsc + vitest)
+#   4. optional quick checks (--tests: tsc + vitest, fork only)
 # Then pushes only after explicit confirmation.
+#
+# Push order when both changed: fork FIRST (the workspace pins it as a
+# submodule — its commit must exist on the public remote before cloning works).
 #
 # Usage:
 #   ./pre-push-fork.sh                 # audit + confirm + push
@@ -17,26 +24,28 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-FORK_DIR="orthanc-explorer-3-usable"
+REPO_DIR="orthanc-explorer-3-usable"
 BASE_REF="${BASE_REF:-origin/main}"
 DRY_RUN=0; ASSUME_YES=0; RUN_TESTS=0; SKIP_SECRETS=0
 
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRY_RUN=1 ;;
-    --yes) ASSUME_YES=1 ;;
-    --tests) RUN_TESTS=1 ;;
-    --skip-secret-scan) SKIP_SECRETS=1 ;;
-    *) echo "unknown flag: $arg" >&2; exit 2 ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repo) REPO_DIR="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --yes) ASSUME_YES=1; shift ;;
+    --tests) RUN_TESTS=1; shift ;;
+    --skip-secret-scan) SKIP_SECRETS=1; shift ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
 done
 
 die() { echo ""; echo "ABORT: $*" >&2; exit 1; }
 
-cd "$FORK_DIR"
+[ -d "$REPO_DIR/.git" ] || die "$REPO_DIR is not a git repository."
+cd "$REPO_DIR"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 
-echo "── fork push audit ──"
+echo "── public push audit: $(basename "$(pwd)") ──"
 echo "   repo:   $(git remote get-url origin 2>/dev/null || echo '<no origin>')"
 echo "   branch: $BRANCH  (base: $BASE_REF)"
 
@@ -45,8 +54,16 @@ ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
 case "$ORIGIN_URL" in
   *rhavekost/orthanc-explorer-3*) die "origin points at UPSTREAM ($ORIGIN_URL) — refusing to push." ;;
   *emanuel901z-hue*) : ;;
-  "") die "no 'origin' remote configured." ;;
-  *) echo "   WARN: origin is not the known fork owner (emanuel901z-hue) — double-check it." ;;
+  "")
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "   WARN: no 'origin' remote yet — audit runs locally, push would need: git remote add origin <url>"
+      BASE_REF="$(git rev-parse --abbrev-ref HEAD)~10"  # audit the recent history as a stand-in
+      echo "   (dry-run without remote: auditing last 10 commits as base $BASE_REF)"
+    else
+      die "no 'origin' remote configured — add it first: git remote add origin <url>"
+    fi
+    ;;
+  *) echo "   WARN: origin is not the known owner (emanuel901z-hue) — double-check it." ;;
 esac
 
 # ── 2. clean worktree ───────────────────────────────────────────────────
@@ -68,7 +85,7 @@ echo "$FILES" | sed 's/^/   /'
 echo "   ($(git diff --shortstat "$BASE_REF...HEAD"))"
 
 # ── 4. file blacklist (outgoing diff only) ──────────────────────────────
-BLACKLIST='(^|/)\.env($|\.)|\.(db|sqlite|sqlite3)$|\.(pem|key|p12|pfx)$|(^|/)secrets?\.|(^|/)test-results/|(^|/)screenshots/|(^|/)report/|(^|/)node_modules/|(^|/)\.venv/|\.log$'
+BLACKLIST='(^|/)\.env($|\.)|\.(db|sqlite|sqlite3)$|\.(pem|key|p12|pfx)$|(^|/)secrets?\.|(^|/)test-results/|(^|/)screenshots/|(^|/)report/|(^|/)node_modules/|(^|/)\.venv/|(^|/)history_[0-9a-f]+\.md$|\.log$'
 HITS="$(echo "$FILES" | grep -E "$BLACKLIST" || true)"
 [ -z "$HITS" ] || die "blacklisted files in outgoing diff:
 $(echo "$HITS" | sed 's/^/   /')"
@@ -98,10 +115,15 @@ fi
 
 # ── 6. optional quick checks ────────────────────────────────────────────
 if [ "$RUN_TESTS" -eq 1 ]; then
-  echo ""
-  echo "── quick checks (tsc + vitest) ──"
-  npx tsc --noEmit -p tsconfig.app.json
-  npm run test
+  if [ -f package.json ]; then
+    echo ""
+    echo "── quick checks (tsc + vitest) ──"
+    npx tsc --noEmit -p tsconfig.app.json
+    npm run test
+  else
+    echo ""
+    echo "── --tests skipped (no package.json in this repo) ──"
+  fi
 fi
 
 # ── 7. push ─────────────────────────────────────────────────────────────
