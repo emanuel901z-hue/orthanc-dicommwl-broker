@@ -45,8 +45,10 @@ die() { echo ""; echo "ABORT: $*" >&2; exit 1; }
 cd "$REPO_DIR"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 
+redact() { sed -E 's#(https?://)[^@/]*@#\1***@#'; }
+
 echo "── public push audit: $(basename "$(pwd)") ──"
-echo "   repo:   $(git remote get-url origin 2>/dev/null || echo '<no origin>')"
+echo "   repo:   $(git remote get-url origin 2>/dev/null | redact || echo '<no origin>')"
 echo "   branch: $BRANCH  (base: $BASE_REF)"
 
 # ── 1. remote must be the fork, never upstream ──────────────────────────
