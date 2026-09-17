@@ -95,6 +95,7 @@ def create_app() -> FastAPI:
         summary="Prometheus metrics",
         description="Prometheus text exposition format (C-FIND/C-STORE counters, "
                     "echo gauges, durations).",
+        response_description="Metrics in Prometheus text exposition format.",
         response_class=Response,
     )
     def prometheus_metrics():
@@ -104,6 +105,7 @@ def create_app() -> FastAPI:
         "/healthz", tags=["monitoring"],
         summary="Liveness + DB check",
         description="Returns `ok` and whether the config/log database is reachable.",
+        response_description="`{ok, db}` — `db` is false when the database is unreachable.",
     )
     def healthz():
         return {"ok": True, "db": db.check_db()}

@@ -264,8 +264,8 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 60 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 302 Tests, 0 Errors |
+| `pytest` | 88 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 325 Tests, 0 Errors |
 | Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 22/22 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
@@ -285,12 +285,57 @@ regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
 
 `ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
 Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
-backend pytest (60) → frontend tsc → lint → vitest (302) → docker-e2e
+backend pytest (88) → frontend tsc → lint → vitest (325) → docker-e2e
 (22 Browser-Tests + DIMSE-Smokes). Verifiziert: alle Stages grün.
 `--quick` überspringt die Docker-Stage.
 
+#### Coverage-Audit (2026-09)
+
+Gemessen mit `pytest-cov` bzw. `vitest --coverage`:
+
+| Bereich | Statements | Anmerkung |
+|---|---|---|
+| Backend `mwl_broker/` | **96 %** | api 99 %, main 100 %, settings_service 100 %, models/schemas/metrics 100 %, echo 96 %, dimse 93 % |
+| Frontend Broker-UI | **98.9 %** | `api/broker.ts` 100 %, Hooks 98 %, Seiten 95-100 % |
+
+Ergänzte Tests für zuvor ungedeckte Pfade: Rules-Update/Delete, Target-Echo,
+Log-Filter + Pagination-Validierung, `/metrics`, Lifespan (Seed + SCP-Bind),
+Settings-Update/Reset + Validierungsrandfälle, `seen_items`-Retention-Purge,
+Echo-Loop (inkl. Purge-Trigger und DB-Fehlerresistenz), Mock-RIS-Query-Filter,
+Transform-Validierungsmeldungen, C-ECHO-Fehlerstatus.
+Restliche Lücken sind bewusst: `mock_ris.main()` (argparse/Server-Start des
+Demo-Tools, live im Stack verifiziert) und defensive `except`-Zweige der
+DB-Schreibpfade (Fault-Injection ohne Erkenntnisgewinn).
+
+#### OpenAPI/Swagger-Vollständigkeit
+
+Audit gegen `/openapi.json` (26 Operationen, 15 Schemas): jede Operation hat
+Summary + Tag + Response-Description (kein FastAPI-Default „Successful
+Response" mehr), **alle** Path- und Query-Parameter sind beschrieben,
+Request-Bodies dokumentiert, jedes Schema-Feld hat eine Beschreibung
+(ausgenommen die FastAPI-internen `HTTPValidationError`/`ValidationError`).
+`test_openapi_documents_all_endpoints` erzwingt diesen Vertrag.
+
+#### Browser-Verifikation (Deep-Audit)
+
+`e2e/stack/verify-ui.cjs` (Chromium headless, Desktop 1400×900 + Mobile
+375×812): 6 Broker-Seiten × (H1-Anzahl, Overflow, Alt-Texte) + echte
+CRUD-Flows (Quellen/Ziele/Regeln/Modify-Regeln/Settings) jeweils gegen die
+REST-API gegengeprüft, C-ECHO-Button, Query-Log, mobile Sidebar-Navigation —
+**56/56 Checks grün**, 0 unerwartete Console-/Netzwerk-Fehler.
+
 Gefundene und behobene Defekte:
 
+- **Mobile Broker-Tabellen abgeschnitten**: Bei 375 px wurden die Action-Buttons
+  rechts aus dem Card-Bereich geschoben (Store targets: „Actions" halb sichtbar).
+  Fix: die vier Konfig-Tabellen rendern unterhalb `md` jetzt als Cards
+  (`ConfigRowCard`, Fork-Konvention „Mobile Card Views"), Label/Wert gestapelt
+  damit DICOM-Endpunkte nicht mitten im Token umbrechen.
+- **`ConfigRowCard` rendete die Badges nicht** (destrukturiert, aber nicht
+  ausgegeben) → „default"/„disabled" fehlten auf Mobile. Von der e2e-Suite
+  gefunden.
+- **Modify-Regeln auf Mobile ohne Operations-Anzeige** → Operations jetzt als
+  Card-Feld. Ebenfalls von der e2e-Suite gefunden.
 - **`/oe3-me` 404 → App komplett blockiert.** Der AuthGate ruft `/oe3-me`
   immer ab; ohne Backend-Proxy antwortete Orthanc 404 → "Zugriff
   verweigert". Fix: explizites Config-Opt-out `authCheck: false`

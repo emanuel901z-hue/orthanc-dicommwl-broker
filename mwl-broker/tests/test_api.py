@@ -144,7 +144,213 @@ def test_seed_rule_skips_unknown_names(client):
     assert client.get("/api/v1/rules").json() == []
 
 
+def test_rule_crud(client):
+    src = client.post("/api/v1/sources", json=SOURCE).json()
+    tgt = client.post("/api/v1/targets", json=TARGET).json()
+
+    rule = client.post("/api/v1/rules", json={"source_id": src["id"], "target_id": tgt["id"]}).json()
+    assert rule["priority"] == 100 and rule["enabled"] is True
+
+    r = client.put(f"/api/v1/rules/{rule['id']}", json={
+        "source_id": src["id"], "target_id": tgt["id"], "priority": 5, "enabled": False,
+    })
+    assert r.status_code == 200
+    assert r.json()["priority"] == 5 and r.json()["enabled"] is False
+
+    assert client.put("/api/v1/rules/999", json={
+        "source_id": src["id"], "target_id": tgt["id"],
+    }).status_code == 404
+    assert client.delete(f"/api/v1/rules/{rule['id']}").status_code == 204
+    assert client.get("/api/v1/rules").json() == []
+    assert client.delete("/api/v1/rules/999").status_code == 404
+
+
+def test_source_and_target_404_on_update_delete(client):
+    assert client.put("/api/v1/sources/999", json=SOURCE).status_code == 404
+    assert client.delete("/api/v1/sources/999").status_code == 404
+    assert client.put("/api/v1/targets/999", json=TARGET).status_code == 404
+    assert client.delete("/api/v1/targets/999").status_code == 404
+
+
+def test_target_echo_endpoint(client):
+    tgt = client.post("/api/v1/targets", json={**TARGET, "port": 1}).json()
+    r = client.post(f"/api/v1/targets/{tgt['id']}/echo")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "target"
+    assert body["ok"] is False and body["error"]
+    assert client.post("/api/v1/targets/999/echo").status_code == 404
+
+
+def test_log_endpoint_filters_and_pagination(client):
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import QueryLog, StoreLog
+
+    with session_factory()() as s:
+        s.add(QueryLog(calling_aet="CT_01", answers=1, per_source={"ris-a": 1}, status="success"))
+        s.add(QueryLog(calling_aet="MR_01", answers=0, per_source={"ris-a": "error"}, status="failed"))
+        s.add(StoreLog(calling_aet="CT_01", sop_instance_uid="1.2.3", status="success"))
+        s.add(StoreLog(calling_aet="CT_01", sop_instance_uid="1.2.4", status="unrouted"))
+        s.commit()
+
+    assert len(client.get("/api/v1/logs/queries").json()) == 2
+    by_aet = client.get("/api/v1/logs/queries?calling_aet=CT_01").json()
+    assert [q["calling_aet"] for q in by_aet] == ["CT_01"]
+    failed = client.get("/api/v1/logs/queries?status=failed").json()
+    assert len(failed) == 1 and failed[0]["status"] == "failed"
+
+    unrouted = client.get("/api/v1/logs/stores?status=unrouted").json()
+    assert len(unrouted) == 1 and unrouted[0]["sop_instance_uid"] == "1.2.4"
+
+    assert len(client.get("/api/v1/logs/queries?limit=1").json()) == 1
+    assert len(client.get("/api/v1/logs/queries?offset=1").json()) == 1
+    # query params are validated (ge/le constraints are part of the contract)
+    assert client.get("/api/v1/logs/queries?limit=0").status_code == 422
+    assert client.get("/api/v1/logs/queries?limit=501").status_code == 422
+    assert client.get("/api/v1/logs/queries?offset=-1").status_code == 422
+
+
+def test_metrics_endpoint_exposes_prometheus(client):
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    assert "text/plain" in r.headers["content-type"]
+    for metric in ("mwl_cfind_requests_total", "mwl_cstore_total", "mwl_echo_up", "mwl_seen_items"):
+        assert metric in r.text
+
+
+def test_healthz_reports_db_state(client):
+    body = client.get("/healthz").json()
+    assert body["ok"] is True and body["db"] is True
+
+
+def test_check_db_returns_false_when_engine_fails(monkeypatch):
+    from mwl_broker import db
+
+    def boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(db, "get_engine", boom)
+    assert db.check_db() is False
+
+
+def test_column_migrations_are_idempotent():
+    from mwl_broker import db
+
+    engine = db.get_engine()
+    db._apply_column_migrations(engine)
+    db._apply_column_migrations(engine)  # already applied — must not raise
+
+
+def test_settings_second_override_updates_existing_row(client):
+    client.put("/api/v1/settings/echo_interval_s", json={"value": "20"})
+    r = client.put("/api/v1/settings/echo_interval_s", json={"value": "25"})
+    assert r.json()["value"] == "25"
+
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import BrokerSetting
+
+    with session_factory()() as s:
+        assert s.get(BrokerSetting, "echo_interval_s").value == "25"
+
+
+def test_settings_validation_edge_cases(client):
+    from mwl_broker import settings_service
+
+    assert settings_service.validate_value("nope", "x") == ["unknown setting 'nope'"]
+    assert settings_service.validate_value("strict_store_status", "maybe") == [
+        "expected a boolean (true/false)"
+    ]
+    assert settings_service.validate_value("echo_interval_s", "9999") == ["must be between 5 and 3600"]
+
+
+def test_settings_get_int_falls_back_on_corrupt_value(client):
+    from mwl_broker import settings_service
+
+    settings_service.set_value("echo_interval_s", "not-a-number")  # bypasses validation on purpose
+    assert settings_service.get_int("echo_interval_s") == int(
+        settings_service._env_default("echo_interval_s")
+    )
+
+
+def test_seed_updates_existing_rows(client):
+    from mwl_broker.db import seed_from_json
+
+    seed_from_json([{**SOURCE, "kind": "source"}, {**TARGET, "kind": "target"}])
+    seed_from_json([
+        {**SOURCE, "kind": "source", "port": 11199, "priority": 5},
+        {**TARGET, "kind": "target", "is_default": False},
+    ])
+    src = client.get("/api/v1/sources").json()[0]
+    tgt = client.get("/api/v1/targets").json()[0]
+    assert src["port"] == 11199 and src["priority"] == 5
+    assert tgt["is_default"] is False
+
+    seed_from_json([{"kind": "transform", "name": "t",
+                     "operations": [{"op": "remove", "tag": "PatientAddress"}]}])
+    seed_from_json([{"kind": "transform", "name": "t", "priority": 7,
+                     "operations": [{"op": "remove", "tag": "PatientID"}]}])
+    tr = client.get("/api/v1/transforms").json()[0]
+    assert tr["priority"] == 7 and tr["operations"][0]["tag"] == "PatientID"
+
+
+def test_seed_transform_with_unknown_source_name_is_skipped(client):
+    from mwl_broker.db import seed_from_json
+
+    seed_from_json([{"kind": "transform", "name": "x", "source": "does-not-exist",
+                     "operations": [{"op": "remove", "tag": "PatientAddress"}]}])
+    tr = client.get("/api/v1/transforms").json()[0]
+    assert tr["source_id"] is None
+
+
+def test_lifespan_seeds_and_starts_scp(monkeypatch):
+    """Startup path: seed from JSON + bind the DICOM SCP + echo thread."""
+    import json
+
+    from fastapi.testclient import TestClient
+
+    from mwl_broker import api as api_mod
+    from mwl_broker import main as main_mod
+    from mwl_broker.config import Settings
+
+    settings = Settings(
+        dicom_port=0,
+        start_dicom=True,
+        start_echo_loop=True,
+        echo_interval_s=1,
+        seed_config_json=json.dumps([
+            {"kind": "target", "name": "seed-target", "aet": "SEED",
+             "host": "127.0.0.1", "port": 1, "is_default": True},
+        ]),
+    )
+    monkeypatch.setattr(main_mod, "get_settings", lambda: settings)
+    try:
+        with TestClient(main_mod.create_app()) as c:
+            assert [t["name"] for t in c.get("/api/v1/targets").json()] == ["seed-target"]
+            assert c.get("/api/v1/status").json()["scp_listening"] is True
+    finally:
+        api_mod.bind_scp(None)  # keep other tests independent of the SCP global
+
+
+def test_lifespan_reports_seed_errors(monkeypatch):
+    """A broken seed JSON must not prevent startup."""
+    from fastapi.testclient import TestClient
+
+    from mwl_broker import api as api_mod
+    from mwl_broker import main as main_mod
+    from mwl_broker.config import Settings
+
+    settings = Settings(dicom_port=0, start_dicom=False, start_echo_loop=False,
+                        seed_config_json="{not json")
+    monkeypatch.setattr(main_mod, "get_settings", lambda: settings)
+    try:
+        with TestClient(main_mod.create_app()) as c:
+            assert c.get("/healthz").json()["ok"] is True
+    finally:
+        api_mod.bind_scp(None)
+
+
 TRANSFORM = {
+
     "name": "kh-modify",
     "enabled": True,
     "priority": 10,
@@ -294,12 +500,41 @@ def test_openapi_documents_all_endpoints(client):
 
     for path, ops in spec["paths"].items():
         for method, op in ops.items():
-            assert op.get("summary"), f"{method.upper()} {path} missing summary"
-            assert op.get("tags"), f"{method.upper()} {path} missing tag"
+            where = f"{method.upper()} {path}"
+            assert op.get("summary"), f"{where} missing summary"
+            assert op.get("tags"), f"{where} missing tag"
 
-    # Query parameters documented
-    params = spec["paths"]["/api/v1/logs/queries"]["get"]["parameters"]
-    assert params and all(p.get("description") for p in params)
+            # every 2xx response carries a real description, not FastAPI's default
+            for code, response in op["responses"].items():
+                if not code.startswith("2"):
+                    continue
+                description = response.get("description", "")
+                assert description and description != "Successful Response", (
+                    f"{where} {code} missing response description"
+                )
+
+            # path + query parameters are documented
+            for param in op.get("parameters", []):
+                assert param.get("description"), (
+                    f"{where}: parameter {param['name']} missing description"
+                )
+
+    # request bodies documented
+    for path, method in [
+        ("/api/v1/sources", "post"), ("/api/v1/sources/{row_id}", "put"),
+        ("/api/v1/targets", "post"), ("/api/v1/targets/{row_id}", "put"),
+        ("/api/v1/rules", "post"), ("/api/v1/rules/{rule_id}", "put"),
+        ("/api/v1/transforms", "post"), ("/api/v1/transforms/{rule_id}", "put"),
+        ("/api/v1/settings/{key}", "put"),
+    ]:
+        body = spec["paths"][path][method].get("requestBody")
+        assert body, f"{method.upper()} {path} has no requestBody"
+        # FastAPI puts Body(description=…) on the content schema, not on the
+        # requestBody object itself — accept either location.
+        schema = body["content"]["application/json"]["schema"]
+        assert body.get("description") or schema.get("description"), (
+            f"{method.upper()} {path} requestBody missing description"
+        )
 
     # Request/response schema fields documented — ALL properties of the
     # schemas integrators consume must carry a description.

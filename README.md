@@ -89,8 +89,8 @@ python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 60 Tests (API + DIMSE e2e + PHI/Security + Transforms/Settings)
-cd orthanc-explorer-3-usable && npm run test      # 302 Tests
+cd mwl-broker && python -m pytest tests -q        # 88 Tests (API + DIMSE e2e + Transforms/Settings)
+cd orthanc-explorer-3-usable && npm run test      # 325 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -101,6 +101,10 @@ npx playwright test --config=e2e/stack/playwright.stack.config.ts
 # Ephermerer Test-Stack (eigener Projektname "mwl-test", Ports 19xxx/14xxx,
 # läuft parallel zum regulären Stack; up → C-FIND-Smoke → Playwright → down -v):
 ./test-stack.sh          # alles; --keep lässt ihn laufen, --down räumt ab
+
+# Coverage (Broker-Code): backend 96 %, frontend Broker-UI 98.9 %
+cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
+cd orthanc-explorer-3-usable && npx vitest run --coverage
 
 # Lokale CI-Pipeline (alle Stages: backend pytest → tsc → lint → vitest →
 # docker-e2e auf dem Test-Stack; gleiche Images/Code-Basis wie Produktion):

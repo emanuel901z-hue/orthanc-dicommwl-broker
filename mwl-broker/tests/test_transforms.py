@@ -75,6 +75,20 @@ def test_validate_copy_requires_valid_source_keyword():
     assert errors and "unknown source keyword" in errors[0]
 
 
+def test_validate_rejects_non_object_operation():
+    errors = validate_operations(["set PatientID"])  # type: ignore[list-item]
+    assert errors and "must be an object" in errors[0]
+
+
+def test_validate_replace_requires_pattern_and_value():
+    assert validate_operations([{"op": "replace", "tag": "AccessionNumber", "value": "x"}]) == [
+        "operation 1: 'pattern' is required for op 'replace'"
+    ]
+    assert validate_operations([{"op": "replace", "tag": "AccessionNumber", "pattern": "^A"}]) == [
+        "operation 1: 'value' is required for op 'replace'"
+    ]
+
+
 def test_validate_rejects_empty_operations():
     assert validate_operations([]) == ["operations must be a non-empty list"]
 

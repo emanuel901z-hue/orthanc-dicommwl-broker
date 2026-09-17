@@ -3,7 +3,9 @@
 All endpoints are sync `def` — they run in the FastAPI threadpool, which
 keeps them consistent with the synchronous DIMSE handlers.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Annotated
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -74,7 +76,10 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str)
         response_description=f"The created {kind}.",
         responses={409: {"description": f"A {kind} with this name already exists."}},
     )
-    def _create(body: in_schema, s: Session = _db_dep):
+    def _create(
+        body: Annotated[in_schema, Body(description=f"{kind.capitalize()} definition.")],
+        s: Session = _db_dep,
+    ):
         if s.scalar(select(model).where(model.name == body.name)):
             raise HTTPException(409, f"{body.name} already exists")
         row = model(**body.model_dump())
@@ -89,7 +94,11 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str)
         response_description=f"The updated {kind}.",
         responses={404: {"description": f"No {kind} with this ID."}},
     )
-    def _update(row_id: int, body: in_schema, s: Session = _db_dep):
+    def _update(
+        row_id: Annotated[int, Path(description=f"ID of the {kind} to update.")],
+        body: Annotated[in_schema, Body(description=f"Complete {kind} definition (replace semantics).")],
+        s: Session = _db_dep,
+    ):
         row = s.get(model, row_id)
         if row is None:
             raise HTTPException(404, "not found")
@@ -102,9 +111,13 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str)
     @router.delete(
         path + "/{row_id}", status_code=204, name=f"delete_{path[1:]}",
         tags=[f"{path[1:]}"], summary=f"Delete a {kind}",
+        response_description=f"The {kind} was deleted.",
         responses={404: {"description": f"No {kind} with this ID."}},
     )
-    def _delete(row_id: int, s: Session = _db_dep):
+    def _delete(
+        row_id: Annotated[int, Path(description=f"ID of the {kind} to delete.")],
+        s: Session = _db_dep,
+    ):
         row = s.get(model, row_id)
         if row is None:
             raise HTTPException(404, "not found")
@@ -134,7 +147,10 @@ def list_rules(s: Session = _db_dep):
     response_description="The created rule.",
     responses={404: {"description": "Referenced source or target does not exist."}},
 )
-def create_rule(body: RuleIn, s: Session = _db_dep):
+def create_rule(
+    body: Annotated[RuleIn, Body(description="Routing rule definition.")],
+    s: Session = _db_dep,
+):
     for mid, label in ((body.source_id, "source"), (body.target_id, "target")):
         model = MwlSource if label == "source" else PacsTarget
         if s.get(model, mid) is None:
@@ -152,7 +168,11 @@ def create_rule(body: RuleIn, s: Session = _db_dep):
     response_description="The updated rule.",
     responses={404: {"description": "No rule with this ID."}},
 )
-def update_rule(rule_id: int, body: RuleIn, s: Session = _db_dep):
+def update_rule(
+    rule_id: Annotated[int, Path(description="ID of the rule to update.")],
+    body: Annotated[RuleIn, Body(description="Routing rule definition (replace semantics).")],
+    s: Session = _db_dep,
+):
     row = s.get(RoutingRule, rule_id)
     if row is None:
         raise HTTPException(404, "not found")
@@ -166,9 +186,13 @@ def update_rule(rule_id: int, body: RuleIn, s: Session = _db_dep):
 @router.delete(
     "/rules/{rule_id}", status_code=204, tags=["rules"],
     summary="Delete a routing rule",
+    response_description="The rule was deleted.",
     responses={404: {"description": "No rule with this ID."}},
 )
-def delete_rule(rule_id: int, s: Session = _db_dep):
+def delete_rule(
+    rule_id: Annotated[int, Path(description="ID of the rule to delete.")],
+    s: Session = _db_dep,
+):
     row = s.get(RoutingRule, rule_id)
     if row is None:
         raise HTTPException(404, "not found")
@@ -217,7 +241,10 @@ def list_transforms(s: Session = _db_dep):
         422: {"description": "Invalid DICOM keyword / operation (details in `detail`)."},
     },
 )
-def create_transform(body: TransformIn, s: Session = _db_dep):
+def create_transform(
+    body: Annotated[TransformIn, Body(description="Transform rule definition (operations are validated against the DICOM dictionary).")],
+    s: Session = _db_dep,
+):
     if s.scalar(select(TransformRule).where(TransformRule.name == body.name)):
         raise HTTPException(409, f"{body.name} already exists")
     _check_scope(s, body)
@@ -241,7 +268,11 @@ def create_transform(body: TransformIn, s: Session = _db_dep):
         422: {"description": "Invalid DICOM keyword / operation."},
     },
 )
-def update_transform(rule_id: int, body: TransformIn, s: Session = _db_dep):
+def update_transform(
+    rule_id: Annotated[int, Path(description="ID of the transform rule to update.")],
+    body: Annotated[TransformIn, Body(description="Transform rule definition (replace semantics).")],
+    s: Session = _db_dep,
+):
     row = s.get(TransformRule, rule_id)
     if row is None:
         raise HTTPException(404, "not found")
@@ -260,9 +291,13 @@ def update_transform(rule_id: int, body: TransformIn, s: Session = _db_dep):
 @router.delete(
     "/transforms/{rule_id}", status_code=204, tags=["transforms"],
     summary="Delete a transform rule",
+    response_description="The transform rule was deleted.",
     responses={404: {"description": "No rule with this ID."}},
 )
-def delete_transform(rule_id: int, s: Session = _db_dep):
+def delete_transform(
+    rule_id: Annotated[int, Path(description="ID of the transform rule to delete.")],
+    s: Session = _db_dep,
+):
     row = s.get(TransformRule, rule_id)
     if row is None:
         raise HTTPException(404, "not found")
@@ -295,7 +330,10 @@ def list_settings():
         422: {"description": "Invalid value for this setting type."},
     },
 )
-def update_setting(key: str, body: SettingUpdateIn):
+def update_setting(
+    key: Annotated[str, Path(description="Setting key (see GET /settings for the allowlist).")],
+    body: Annotated[SettingUpdateIn, Body(description="New value — validated against the setting type.")],
+):
     if key not in settings_service.KNOWN:
         raise HTTPException(404, f"unknown setting {key!r}")
     errors = settings_service.validate_value(key, body.value)
@@ -308,9 +346,12 @@ def update_setting(key: str, body: SettingUpdateIn):
 @router.delete(
     "/settings/{key}", status_code=204, tags=["settings"],
     summary="Reset a setting to the ENV default",
+    response_description="The override was removed; the ENV default applies again.",
     responses={404: {"description": "Unknown setting key."}},
 )
-def reset_setting(key: str):
+def reset_setting(
+    key: Annotated[str, Path(description="Setting key whose override should be removed.")],
+):
     if key not in settings_service.KNOWN:
         raise HTTPException(404, f"unknown setting {key!r}")
     settings_service.reset(key)
@@ -365,7 +406,10 @@ def store_logs(
     response_description="Echo result with RTT (or the error detail).",
     responses={404: {"description": "No source with this ID."}},
 )
-def echo_source(source_id: int, s: Session = _db_dep):
+def echo_source(
+    source_id: Annotated[int, Path(description="ID of the source to C-ECHO.")],
+    s: Session = _db_dep,
+):
     row = s.get(MwlSource, source_id)
     if row is None:
         raise HTTPException(404, "not found")
@@ -378,7 +422,10 @@ def echo_source(source_id: int, s: Session = _db_dep):
     response_description="Echo result with RTT (or the error detail).",
     responses={404: {"description": "No target with this ID."}},
 )
-def echo_target(target_id: int, s: Session = _db_dep):
+def echo_target(
+    target_id: Annotated[int, Path(description="ID of the target to C-ECHO.")],
+    s: Session = _db_dep,
+):
     row = s.get(PacsTarget, target_id)
     if row is None:
         raise HTTPException(404, "not found")
