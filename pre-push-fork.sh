@@ -74,17 +74,28 @@ esac
 # ── 3. outgoing commits ─────────────────────────────────────────────────
 [ "$DRY_RUN" -eq 1 ] || git fetch origin --quiet 2>/dev/null || echo "   WARN: git fetch failed (offline?) — using local $BASE_REF"
 
-COMMITS="$(git log --oneline "$BASE_REF..HEAD" || true)"
+if git rev-parse --verify -q "$BASE_REF" >/dev/null; then
+  COMMITS="$(git log --oneline "$BASE_REF..HEAD" || true)"
+  FILES="$(git diff --name-only "$BASE_REF...HEAD")"
+  STAT="$(git diff --shortstat "$BASE_REF...HEAD")"
+  DIFF_SOURCE="diff"
+else
+  echo ""
+  echo "   NOTE: $BASE_REF not found (first push to an empty remote?) —"
+  echo "         auditing ALL commits and ALL tracked files."
+  COMMITS="$(git log --oneline)"
+  FILES="$(git ls-files)"
+  STAT="$(git ls-files | wc -l) tracked files"
+  DIFF_SOURCE="files"
+fi
 [ -n "$COMMITS" ] || { echo "── nothing to push ($BRANCH == $BASE_REF) ──"; exit 0; }
-
-FILES="$(git diff --name-only "$BASE_REF...HEAD")"
 echo ""
 echo "── outgoing commits (would become public) ──"
 echo "$COMMITS" | sed 's/^/   /'
 echo ""
 echo "── outgoing files ──"
 echo "$FILES" | sed 's/^/   /'
-echo "   ($(git diff --shortstat "$BASE_REF...HEAD"))"
+echo "   ($STAT)"
 
 # ── 4. file blacklist (outgoing diff only) ──────────────────────────────
 BLACKLIST='(^|/)\.env($|\.)|\.(db|sqlite|sqlite3)$|\.(pem|key|p12|pfx)$|(^|/)secrets?\.|(^|/)test-results/|(^|/)screenshots/|(^|/)report/|(^|/)node_modules/|(^|/)\.venv/|(^|/)history_[0-9a-f]+\.md$|\.log$'
@@ -109,7 +120,12 @@ xox[baprs]-[A-Za-z0-9-]{10,}
 [Ss]ecret["'"'"' ]*[:=]["'"'"' ]*[A-Za-z0-9!@#$%^&*_+-]{6,}
 [Aa]pi[_-]?[Kk]ey["'"'"' ]*[:=]["'"'"' ]*[A-Za-z0-9!@#$%^&*_+-]{6,}
 PAT
-  SECRET_HITS="$(git diff "$BASE_REF...HEAD" | grep -inE -f "$PATTERNS" | grep -viE 'example|placeholder|changeme|super-secret-test-key' || true)"
+  if [ "$DIFF_SOURCE" = "diff" ]; then
+    SECRET_INPUT="$(git diff "$BASE_REF...HEAD")"
+  else
+    SECRET_INPUT="$(git grep -inE -f "$PATTERNS" -- . || true)"  # all tracked files
+  fi
+  SECRET_HITS="$(printf '%s\n' "$SECRET_INPUT" | grep -inE -f "$PATTERNS" | grep -viE 'example|placeholder|changeme|super-secret-test-key' || true)"
   [ -z "$SECRET_HITS" ] || die "possible secrets in outgoing diff:
 $(echo "$SECRET_HITS" | sed 's/^/   /')
 (if these are all false positives: --skip-secret-scan)"
