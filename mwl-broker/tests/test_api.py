@@ -162,14 +162,15 @@ def test_openapi_documents_all_endpoints(client):
     params = spec["paths"]["/api/v1/logs/queries"]["get"]["parameters"]
     assert params and all(p.get("description") for p in params)
 
-    # Request/response schema fields documented
-    for schema_name, field in [
-        ("SourceIn", "aet"), ("SourceIn", "charset"), ("TargetIn", "is_default"),
-        ("RuleIn", "source_id"), ("QueryLogOut", "query_keys"),
-        ("StoreLogOut", "target_id"), ("EchoResult", "rtt_ms"),
-        ("StatusOut", "counts"),
+    # Request/response schema fields documented — ALL properties of the
+    # schemas integrators consume must carry a description.
+    for schema_name in [
+        "SourceIn", "SourceOut", "TargetIn", "TargetOut",
+        "RuleIn", "RuleOut", "QueryLogOut", "StoreLogOut",
+        "EchoResult", "StatusOut",
     ]:
         schema = spec["components"]["schemas"][schema_name]
-        assert schema["properties"][field].get("description"), (
-            f"{schema_name}.{field} missing description"
-        )
+        for field, prop in schema["properties"].items():
+            assert prop.get("description"), (
+                f"{schema_name}.{field} missing description"
+            )

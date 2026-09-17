@@ -52,8 +52,8 @@ class SourceIn(BaseModel):
 
 class SourceOut(SourceIn):
     model_config = ConfigDict(from_attributes=True)
-    id: int
-    created_at: datetime
+    id: int = Field(description="Row ID.")
+    created_at: datetime = Field(description="Creation timestamp (UTC).")
 
 
 class TargetIn(BaseModel):
@@ -92,8 +92,8 @@ class TargetIn(BaseModel):
 
 class TargetOut(TargetIn):
     model_config = ConfigDict(from_attributes=True)
-    id: int
-    created_at: datetime
+    id: int = Field(description="Row ID.")
+    created_at: datetime = Field(description="Creation timestamp (UTC).")
 
 
 class RuleIn(BaseModel):
@@ -111,14 +111,14 @@ class RuleIn(BaseModel):
 
 class RuleOut(RuleIn):
     model_config = ConfigDict(from_attributes=True)
-    id: int
+    id: int = Field(description="Row ID.")
 
 
 class QueryLogOut(BaseModel):
     """One incoming C-FIND request (audit log, PHI-free)."""
 
     model_config = ConfigDict(from_attributes=True)
-    id: int
+    id: int = Field(description="Row ID.")
     ts: datetime = Field(description="When the query was answered (UTC).")
     calling_aet: str = Field(description="AE title of the requesting modality.")
     query_keys: dict = Field(
@@ -138,7 +138,7 @@ class StoreLogOut(BaseModel):
     """One incoming C-STORE forward attempt."""
 
     model_config = ConfigDict(from_attributes=True)
-    id: int
+    id: int = Field(description="Row ID.")
     ts: datetime = Field(description="When the store was handled (UTC).")
     calling_aet: str = Field(description="AE title of the sending modality.")
     sop_instance_uid: str = Field(description="SOP Instance UID of the received instance.")
