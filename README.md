@@ -90,7 +90,7 @@ python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
 
 ```bash
 cd mwl-broker && python -m pytest tests -q        # 60 Tests (API + DIMSE e2e + PHI/Security + Transforms/Settings)
-cd orthanc-explorer-3-usable && npm run test      # 298 Tests
+cd orthanc-explorer-3-usable && npm run test      # 302 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):

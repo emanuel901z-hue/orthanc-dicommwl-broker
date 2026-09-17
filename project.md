@@ -265,7 +265,7 @@ orthanc-dicommwl-broker/
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
 | `pytest` | 60 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 298 Tests, 0 Errors |
+| `npm run test` / `tsc` / `lint` | 302 Tests, 0 Errors |
 | Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 22/22 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
@@ -285,7 +285,7 @@ regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
 
 `ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
 Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
-backend pytest (60) → frontend tsc → lint → vitest (298) → docker-e2e
+backend pytest (60) → frontend tsc → lint → vitest (302) → docker-e2e
 (22 Browser-Tests + DIMSE-Smokes). Verifiziert: alle Stages grün.
 `--quick` überspringt die Docker-Stage.
 
