@@ -61,6 +61,18 @@ Workspace-Interna (echte `.env`, Host-Ports, Krankenhaus-Topologie) gehören
 grundsätzlich in kein öffentliches Repo; `.env.example`/`.env.test` sind
 secret-freie Templates und per Allowlist erlaubt (bleiben secret-gescannt).
 
+**Credentials**: Tokens stehen **nie** in Remote-URLs oder committeten Dateien.
+Pro Repo ist ein repo-lokaler Credential-Helper gesetzt, der auf eine Datei
+außerhalb des Repos zeigt (mode 600):
+
+| Repo | Store-Datei | Config |
+|---|---|---|
+| Fork | `~/.config/git/credentials-oe3` | `git config --local credential.helper "store --file=…"` |
+| Broker | `~/.config/git/credentials-broker` | dito |
+
+Token rotieren = nur die Store-Datei neu schreiben:
+`printf 'https://<user>:<token>@github.com\n' > ~/.config/git/credentials-broker && chmod 600 …`
+
 ## Deployment-Konventionen
 
 - `.env` nie committen (steht in `.gitignore`); Änderungen an
