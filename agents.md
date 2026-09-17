@@ -42,12 +42,24 @@ npx tsc --noEmit -p tsconfig.app.json
 ./pre-push-fork.sh          # NUR so wird der OE3-Fork öffentlich gepusht (Audit + Secret-Scan)
 ```
 
-**Fork-Push-Regel**: Der public Fork (`orthanc-explorer-3-usable`) wird
-ausschließlich über `./pre-push-fork.sh` gepusht — das Script prüft
-Outgoing-Commits/-Dateien gegen eine Blacklist (.env, DBs, Keys, Screenshots,
-test-results), scannt den Diff auf Secret-Muster und verweigert Pushes an
-Upstream-Remotes. Workspace-Interna (Deployment, `.env`, Ports) gehören
-grundsätzlich nicht in den Fork.
+**Push-Regel (zwei öffentliche Repos)**: Beide werden ausschließlich über
+`./pre-push-fork.sh` gepusht — das Script prüft Outgoing-Commits/-Dateien
+gegen eine Blacklist (.env, DBs, Keys, Screenshots, test-results, History-
+Dateien), scannt den Diff auf Secret-Muster und verweigert Pushes an
+Upstream-Remotes.
+
+| Repo | Inhalt | Push |
+|---|---|---|
+| `orthanc-explorer-3-usable` | OE3-Fork: nur der UI-Slice | `./pre-push-fork.sh` |
+| `orthanc-dicommwl-broker` | Broker-Service + Deployment + Docs (OE3 als Submodule) | `./pre-push-fork.sh --repo .` |
+
+**Reihenfolge: erst Fork, dann Workspace.** Der Workspace pinnt den Fork als
+Submodule — dessen Commit muss vorher auf dem öffentlichen Remote existieren,
+sonst schlägt jeder Clone fehl.
+
+Workspace-Interna (echte `.env`, Host-Ports, Krankenhaus-Topologie) gehören
+grundsätzlich in kein öffentliches Repo; `.env.example`/`.env.test` sind
+secret-freie Templates und per Allowlist erlaubt (bleiben secret-gescannt).
 
 ## Deployment-Konventionen
 

@@ -140,7 +140,7 @@ if [ "$ASSUME_YES" -eq 0 ]; then
   [ "$answer" = "y" ] || [ "$answer" = "Y" ] || { echo "aborted."; exit 1; }
 fi
 
-git push origin "$BRANCH"
+git push -u origin "$BRANCH"
 
 REPO_PATH="$(echo "$ORIGIN_URL" | sed -E 's#(git@|https://)github.com[:/]##; s#\.git$##')"
 echo ""

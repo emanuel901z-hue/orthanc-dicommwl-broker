@@ -87,9 +87,10 @@ npx playwright test --config=e2e/stack/playwright.stack.config.ts
 # Optionaler pre-push-Hook (Quick-Stages lokal, da CI nur bei PRs läuft):
 git config core.hooksPath .githooks
 
-# Fork-Push-Guard: auditiert, was der OE3-Fork öffentlich machen würde
-# (Blacklist + Secret-Scan + Upstream-Schutz) — nur so wird der Fork gepusht:
-./pre-push-fork.sh --dry-run
+# Push-Guard für beide öffentlichen Repos (Blacklist + Secret-Scan +
+# Upstream-Schutz) — nur so wird gepusht, Reihenfolge: erst Fork, dann Workspace:
+./pre-push-fork.sh --dry-run            # OE3-Fork (orthanc-explorer-3-usable)
+./pre-push-fork.sh --repo . --dry-run   # Broker-Workspace (dieses Repo)
 ```
 
 GitHub-CI (`.github/workflows/ci.yml`) läuft als PR-Gate auf `main`/`develop`
