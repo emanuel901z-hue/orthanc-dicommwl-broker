@@ -853,6 +853,222 @@ def test_notify_settings_are_validated(client):
     assert rows["notify_min_interval_s"]["default"] == "300"
 
 
+def test_station_rule_crud_and_simulation(client):
+    src_row = client.post("/api/v1/sources", json=SOURCE).json()
+    other = client.post("/api/v1/sources", json={**SOURCE, "name": "ris-b"}).json()
+
+    created = client.post("/api/v1/station-rules", json={
+        "name": "ct-hides-ris-a", "station_aet": "CT_01", "mode": "deny",
+        "source_ids": [src_row["id"]], "source_priority": {str(other["id"]): 1},
+    })
+    assert created.status_code == 201
+    rule = created.json()
+    assert rule["mode"] == "deny" and rule["source_ids"] == [src_row["id"]]
+    assert rule["source_priority"] == {str(other["id"]): 1}
+
+    assert [r["name"] for r in client.get("/api/v1/station-rules").json()] == ["ct-hides-ris-a"]
+
+    updated = client.put(f"/api/v1/station-rules/{rule['id']}", json={
+        **{k: rule[k] for k in ("name", "station_aet", "source_ids", "source_priority")},
+        "mode": "allow", "priority": 5, "enabled": False,
+    }).json()
+    assert updated["mode"] == "allow" and updated["enabled"] is False
+
+    # the rule is disabled → no rule applies
+    body = client.post("/api/v1/simulate/station", json={"station_aet": "CT_01"}).json()
+    assert body["station_aet"] == "CT_01"
+    assert body["rule_id"] is None and "no station rule" in body["reason"]
+
+    client.put(f"/api/v1/station-rules/{rule['id']}", json={
+        **{k: rule[k] for k in ("name", "station_aet", "source_ids", "source_priority")},
+        "mode": "allow", "priority": 5, "enabled": True,
+    })
+    body = client.post("/api/v1/simulate/station", json={"station_aet": "CT_01"}).json()
+    assert body["rule_name"] == "ct-hides-ris-a" and body["mode"] == "allow"
+    by_name = {src_["name"]: src_ for src_ in body["sources"]}
+    # allow-list contains ris-a → only that source is visible
+    assert by_name["ris-a"]["visible"] is True
+    assert by_name["ris-b"]["visible"] is False
+    # ... but the priority override still reorders the fan-out
+    assert by_name["ris-b"]["effective_priority"] == 1
+
+    # validation
+    assert client.post("/api/v1/station-rules", json={
+        "name": "bad", "mode": "maybe",
+    }).status_code == 422
+    assert client.post("/api/v1/station-rules", json={
+        "name": "bad", "station_aet": "lower case!",
+    }).status_code == 422
+    assert client.post("/api/v1/station-rules", json={
+        "name": "ct-hides-ris-a",
+    }).status_code == 409
+
+    assert client.delete(f"/api/v1/station-rules/{rule['id']}").status_code == 204
+    assert client.get("/api/v1/station-rules").json() == []
+
+    actions = [row["action"] for row in client.get("/api/v1/audit/config").json()]
+    assert "create.station" in actions and "delete.station" in actions
+
+
+def test_atna_endpoints(client):
+    stats = client.get("/api/v1/atna/stats").json()
+    assert stats["enabled"] is False and stats["configured"] is False
+    assert stats["queue_size"] == 0 and stats["queue_max"] >= 100
+    assert stats["protocol"] == "tcp"
+
+    # the sample message documents the format for the receiving team
+    sample = client.get("/api/v1/atna/sample").json()["xml"]
+    assert sample.startswith('<?xml version="1.0"')
+    assert 'csd-code="110112"' in sample and "</AuditMessage>" in sample
+
+    # not configured → the test message reports it
+    assert client.post("/api/v1/atna/test").json() == {
+        "ok": False, "error": "audit repository not configured or disabled",
+    }
+
+    # configure a dead endpoint → delivery fails, reported back
+    client.put("/api/v1/settings/atna_enabled", json={"value": "true"})
+    client.put("/api/v1/settings/atna_syslog_host", json={"value": "127.0.0.1"})
+    client.put("/api/v1/settings/atna_syslog_port", json={"value": "1"})
+    from mwl_broker import atna
+
+    atna.reset_for_tests()
+    result = client.post("/api/v1/atna/test").json()
+    assert result["ok"] is False and result["error"]
+
+    actions = [row["action"] for row in client.get("/api/v1/audit/config").json()]
+    assert "test.atna" in actions
+
+
+def test_atna_settings_are_validated(client):
+    assert client.put("/api/v1/settings/atna_syslog_protocol",
+                      json={"value": "tls"}).status_code == 200
+    assert client.put("/api/v1/settings/atna_syslog_protocol",
+                      json={"value": "udp"}).status_code == 422
+    assert client.put("/api/v1/settings/atna_syslog_port",
+                      json={"value": "0"}).status_code == 422
+    assert client.put("/api/v1/settings/atna_queue_max",
+                      json={"value": "10"}).status_code == 422
+    assert client.put("/api/v1/settings/atna_tls_ca_file",
+                      json={"value": "relative.pem"}).status_code == 422
+    rows = {s["key"]: s for s in client.get("/api/v1/settings").json()}
+    assert rows["atna_syslog_protocol"]["kind"] == "enum:tcp,tls"
+    assert rows["atna_enabled"]["default"] == "False"
+
+
+LOCAL_ITEM = {
+    "accession": "EMERG-001", "sps_id": "1", "patient_id": "P9001",
+    "patient_name": "Notfall^Anna", "modality": "CT", "station_aet": "CT_01",
+    "procedure_description": "CT Schädel (Notfall)", "scheduled_date": "2026-09-17",
+    "scheduled_time": "12:00",
+}
+
+ORM = (
+    "MSH|^~\\&|RIS|HOSPITAL|MWLBROKER|RAD|20260917103000||ORM^O01|MSG0001|P|2.5\r"
+    "PID|1||P1001||Mueller^Hans||19800101|M\r"
+    "ORC|NW|PLACER1|FILLER1\r"
+    "OBR|1|PLACER1|ACC-HL7-1|CT^CT Thorax|R|20260917120000\r"
+    "ZDS|1.2.3.4|CT_01\r"
+)
+
+
+def test_local_item_crud(client):
+    created = client.post("/api/v1/local-items", json=LOCAL_ITEM)
+    assert created.status_code == 201
+    item = created.json()
+    assert item["accession"] == "EMERG-001" and item["origin"] == "manual"
+    assert item["valid_until"] is not None      # default validity applied
+    assert item["enabled"] is True
+
+    assert client.post("/api/v1/local-items", json=LOCAL_ITEM).status_code == 409
+    assert [row["accession"] for row in client.get("/api/v1/local-items").json()] == ["EMERG-001"]
+
+    updated = client.put(f"/api/v1/local-items/{item['id']}", json={
+        **LOCAL_ITEM, "procedure_description": "CT Schädel nativ", "enabled": False,
+    }).json()
+    assert updated["procedure_description"] == "CT Schädel nativ"
+    assert updated["enabled"] is False
+
+    assert client.delete(f"/api/v1/local-items/{item['id']}").status_code == 204
+    assert client.get("/api/v1/local-items").json() == []
+    assert client.delete(f"/api/v1/local-items/{item['id']}").status_code == 404
+
+    actions = [row["action"] for row in client.get("/api/v1/audit/config").json()]
+    assert "create.local_item" in actions and "delete.local_item" in actions
+    # the change log stays PHI-free
+    entries = client.get("/api/v1/audit/config?entity=local_item").json()
+    assert entries
+    # scheduling data is audited, patient identity is not (PHI boundary)
+    assert "patient_name" not in json.dumps(entries)
+    assert "Notfall^Anna" not in json.dumps(entries)
+    assert "P9001" not in json.dumps(entries)
+    created_entry = next(e for e in entries if e["action"] == "create.local_item")
+    assert created_entry["after_json"]["accession"] == "EMERG-001"
+    # a delete has no "after" state
+    deleted_entry = next(e for e in entries if e["action"] == "delete.local_item")
+    assert deleted_entry["after_json"] is None
+
+
+def test_local_item_validation(client):
+    assert client.post("/api/v1/local-items", json={**LOCAL_ITEM, "accession": ""}).status_code == 422
+    assert client.post("/api/v1/local-items", json={**LOCAL_ITEM, "accession": "X" * 80}).status_code == 422
+
+
+def test_hl7_orm_dry_run_and_apply(client):
+    # dry run: parse and report, write nothing
+    plan = client.post("/api/v1/hl7/orm?dry_run=true", content=ORM,
+                       headers={"Content-Type": "text/plain"}).json()
+    assert plan["dry_run"] is True
+    assert plan["accession"] == "ACC-HL7-1" and plan["order_control"] == "NW"
+    assert plan["parsed"]["patient_id"] == "P1001"
+    assert plan["parsed"]["station_aet"] == "CT_01"
+    assert plan["warnings"] == []
+    assert client.get("/api/v1/local-items").json() == []
+
+    # apply
+    applied = client.post("/api/v1/hl7/orm?dry_run=false", content=ORM,
+                          headers={"Content-Type": "text/plain"}).json()
+    assert applied["dry_run"] is False and applied["action"] == "created"
+    assert applied["item"]["accession"] == "ACC-HL7-1"
+    assert applied["item"]["origin"] == "hl7"
+
+    # a cancel removes it again
+    cancel = client.post("/api/v1/hl7/orm?dry_run=false",
+                         content=ORM.replace("ORC|NW|", "ORC|CA|"),
+                         headers={"Content-Type": "text/plain"}).json()
+    assert cancel["action"] == "cancelled"
+    assert client.get("/api/v1/local-items").json() == []
+
+    # the message log documents both
+    messages = client.get("/api/v1/hl7/messages").json()
+    assert [m["action"] for m in messages] == ["cancelled", "created"]
+    assert all(m["transport"] == "http" for m in messages)
+
+
+def test_hl7_orm_rejects_unusable_messages(client):
+    # no accession → 422 with the parser warnings
+    r = client.post("/api/v1/hl7/orm", content="MSH|^~\\&|RIS||MWLBROKER||2026||ORM^O01|C1|P|2.5",
+                    headers={"Content-Type": "text/plain"})
+    assert r.status_code == 422
+
+    client.put("/api/v1/settings/hl7_enabled", json={"value": "false"})
+    assert client.post("/api/v1/hl7/orm", content=ORM,
+                       headers={"Content-Type": "text/plain"}).status_code == 422
+    client.put("/api/v1/settings/hl7_enabled", json={"value": "true"})
+
+
+def test_hl7_and_local_settings_are_validated(client):
+    assert client.put("/api/v1/settings/local_default_validity_days",
+                      json={"value": "30"}).status_code == 200
+    assert client.put("/api/v1/settings/local_priority",
+                      json={"value": "5"}).status_code == 200
+    assert client.put("/api/v1/settings/hl7_mllp_port",
+                      json={"value": "0"}).status_code == 422
+    rows = {s["key"]: s for s in client.get("/api/v1/settings").json()}
+    assert rows["hl7_mllp_enabled"]["default"] == "False"
+    assert rows["local_priority"]["default"] == "-1"
+
+
 def test_openapi_documents_all_endpoints(client):
     """Every path operation carries a summary/tag, query params and schema
     fields carry descriptions — keeps Swagger UI usable for integrators."""
@@ -863,7 +1079,7 @@ def test_openapi_documents_all_endpoints(client):
     tag_names = {t["name"] for t in spec["tags"]}
     assert {"sources", "targets", "rules", "transforms", "settings",
             "logs", "monitoring", "audit", "config", "simulation", "cache",
-            "spool"} <= tag_names
+            "spool", "atna", "local"} <= tag_names
 
     for path, ops in spec["paths"].items():
         for method, op in ops.items():
@@ -919,6 +1135,10 @@ def test_openapi_documents_all_endpoints(client):
         "CacheSourceOut", "CacheItemOut",
         "SpoolStatsOut", "SpoolItemOut", "SpoolRetryOut",
         "NotifyEventOut", "NotifyTestOut",
+        "AtnaStatsOut", "AtnaTestOut", "AtnaSampleOut",
+        "LocalItemIn", "LocalItemOut", "Hl7MessageOut", "Hl7ParseOut",
+        "StationRuleIn", "StationRuleOut", "StationSimulateIn",
+        "StationPreviewOut", "StationPreviewSourceOut",
     ]:
         schema = spec["components"]["schemas"][schema_name]
         for field, prop in schema["properties"].items():

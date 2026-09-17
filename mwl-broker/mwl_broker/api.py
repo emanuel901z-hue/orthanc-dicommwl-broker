@@ -20,6 +20,13 @@ from .models import (
     StoreLog,
 )
 from .schemas import (
+    AtnaSampleOut,
+    AtnaStatsOut,
+    AtnaTestOut,
+    Hl7MessageOut,
+    Hl7ParseOut,
+    LocalItemIn,
+    LocalItemOut,
     AuditEntryOut,
     BreakerStateOut,
     CacheItemOut,
@@ -33,6 +40,10 @@ from .schemas import (
     SpoolItemOut,
     SpoolRetryOut,
     SpoolStatsOut,
+    StationPreviewOut,
+    StationSimulateIn,
+    StationRuleIn,
+    StationRuleOut,
     SimulateRouteIn,
     SimulateRouteOut,
     SimulateTransformIn,
@@ -53,8 +64,11 @@ from .schemas import (
     TransformIn,
     TransformOut,
 )
-from . import audit, breaker, cache, config_io, health_checks, notify, settings_service, simulate, spool, transforms
-from .models import BrokerSetting, ConfigAudit, SeenItem, SourceBreaker, TransformRule
+from . import (atna, audit, breaker, cache, config_io, health_checks, hl7,
+               local_worklist, metrics, notify, settings_service, simulate, spool,
+               station_rules, transforms)
+from .models import (BrokerSetting, ConfigAudit, Hl7Message, LocalWorklistItem,
+                     SeenItem, SourceBreaker, StationRule, TransformRule)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -205,6 +219,7 @@ _crud(router, "/sources", MwlSource, SourceIn, SourceOut, "source",
       before_delete=_drop_source_dependencies)
 _crud(router, "/targets", PacsTarget, TargetIn, TargetOut, "target",
       before_delete=_drop_target_dependencies)
+_crud(router, "/station-rules", StationRule, StationRuleIn, StationRuleOut, "station")
 
 
 # ── Routing rules ──────────────────────────────────────────────────────
@@ -471,6 +486,225 @@ def reset_setting(
     audit.record(s, _actor(request), "reset.setting", "setting", None, before,
                  None, _correlation(request))
     s.commit()
+
+
+# ── Local worklist items + HL7 ORD interface ───────────────────────────
+
+
+def _local_snapshot(row: LocalWorklistItem) -> dict:
+    return {
+        "id": row.id, "accession": row.accession, "sps_id": row.sps_id,
+        "patient_id": row.patient_id, "patient_name": row.patient_name,
+        "birth_date": row.birth_date, "sex": row.sex, "modality": row.modality,
+        "station_aet": row.station_aet,
+        "procedure_description": row.procedure_description,
+        "scheduled_date": row.scheduled_date, "scheduled_time": row.scheduled_time,
+        "study_uid": row.study_uid, "sps_status": row.sps_status,
+        "valid_until": row.valid_until, "enabled": row.enabled, "origin": row.origin,
+        "created_at": row.created_at, "updated_at": row.updated_at,
+    }
+
+
+@router.get(
+    "/local-items", response_model=list[LocalItemOut], tags=["local"],
+    summary="Local worklist items",
+    description="Items the broker adds to every C-FIND answer (emergencies, "
+                "unscheduled exams). They are attributed to the pseudo source "
+                "`local` and win the dedupe against the RIS.",
+    response_description="Local items, newest first.",
+)
+def list_local_items(s: Session = _db_dep):
+    rows = s.scalars(
+        select(LocalWorklistItem).order_by(LocalWorklistItem.id.desc())
+    ).all()
+    return [_local_snapshot(row) for row in rows]
+
+
+@router.post(
+    "/local-items", response_model=LocalItemOut, status_code=201, tags=["local"],
+    summary="Create a local worklist item",
+    description="Adds an entry that is merged into every matching C-FIND. The "
+                "default validity comes from `local_default_validity_days`.",
+    response_description="The created item.",
+    responses={409: {"description": "An item with this accession and SPS ID exists."}},
+)
+def create_local_item(
+    request: Request,
+    body: Annotated[LocalItemIn, Body(description="The worklist item to create.")],
+    s: Session = _db_dep,
+):
+    existing = s.scalars(
+        select(LocalWorklistItem).where(
+            LocalWorklistItem.accession == body.accession,
+            LocalWorklistItem.sps_id == body.sps_id,
+        )
+    ).first()
+    if existing is not None:
+        raise HTTPException(409, f"{body.accession}/{body.sps_id} already exists")
+    values = body.model_dump()
+    if values.get("valid_until") is None:
+        values["valid_until"] = local_worklist.expiry_for()
+    row = LocalWorklistItem(**values, origin="manual")
+    s.add(row)
+    s.flush()
+    audit.record(s, _actor(request), "create.local_item", "local_item", row.id, None,
+                 audit.snapshot("local_item", row), _correlation(request))
+    s.commit()
+    s.refresh(row)
+    local_worklist.publish_metrics()
+    return _local_snapshot(row)
+
+
+@router.put(
+    "/local-items/{item_id}", response_model=LocalItemOut, tags=["local"],
+    summary="Update a local worklist item",
+    response_description="The updated item.",
+    responses={404: {"description": "No local item with this ID."}},
+)
+def update_local_item(
+    request: Request,
+    item_id: Annotated[int, Path(description="ID of the local item to update.")],
+    body: Annotated[LocalItemIn, Body(description="Complete item definition (replace semantics).")],
+    s: Session = _db_dep,
+):
+    row = s.get(LocalWorklistItem, item_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    before = audit.snapshot("local_item", row)
+    for key, value in body.model_dump().items():
+        setattr(row, key, value)
+    s.flush()
+    audit.record(s, _actor(request), "update.local_item", "local_item", row.id, before,
+                 audit.snapshot("local_item", row), _correlation(request))
+    s.commit()
+    s.refresh(row)
+    return _local_snapshot(row)
+
+
+@router.delete(
+    "/local-items/{item_id}", tags=["local"], status_code=204,
+    summary="Delete a local worklist item",
+    description="The item disappears from the next worklist query.",
+    response_description="The item was deleted.",
+    responses={404: {"description": "No local item with this ID."}},
+)
+def delete_local_item(
+    request: Request,
+    item_id: Annotated[int, Path(description="ID of the local item to delete.")],
+    s: Session = _db_dep,
+):
+    row = s.get(LocalWorklistItem, item_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    before = audit.snapshot("local_item", row)
+    s.delete(row)
+    audit.record(s, _actor(request), "delete.local_item", "local_item", item_id, before,
+                 None, _correlation(request))
+    s.commit()
+    local_worklist.publish_metrics()
+
+
+@router.get(
+    "/hl7/messages", response_model=list[Hl7MessageOut], tags=["local"],
+    summary="Inbound HL7 messages",
+    description="Troubleshooting log of the ORM messages the broker received "
+                "(both transports), with the resulting action.",
+    response_description="Recent HL7 messages, newest first.",
+)
+def list_hl7_messages(
+    s: Session = _db_dep,
+    limit: int = Query(default=50, ge=1, le=500, description="Maximum number of messages."),
+):
+    return s.scalars(
+        select(Hl7Message).order_by(Hl7Message.ts.desc(), Hl7Message.id.desc()).limit(limit)
+    ).all()
+
+
+@router.post(
+    "/hl7/orm", response_model=Hl7ParseOut, tags=["local"],
+    summary="Apply an HL7 ORM order",
+    description="Parses an ORM^O01 message and creates, updates or cancels a "
+                "local worklist item. With `dry_run=true` the response only shows "
+                "what the parser understood and what would happen — the check "
+                "before wiring up a RIS interface.",
+    response_description="The parsed fields, the planned/applied action and any warnings.",
+    responses={
+        422: {"description": "The message could not be parsed or carries no accession number."},
+    },
+)
+def apply_hl7_orm(
+    request: Request,
+    body: Annotated[str, Body(media_type="text/plain",
+                              description="The raw HL7 v2 message (ORM^O01).")],
+    dry_run: bool = Query(default=True, description="Only parse and report; write nothing."),
+    s: Session = _db_dep,
+):
+    if not settings_service.get_bool("hl7_enabled"):
+        raise HTTPException(422, ["HL7 intake is disabled (setting hl7_enabled)"])
+    parsed = hl7.parse(body)
+    if not parsed["accession"]:
+        raise HTTPException(422, parsed["warnings"] or ["no accession number"])
+    if dry_run:
+        action = "cancelled" if hl7.is_cancel(parsed) else "created-or-updated"
+        return {"dry_run": True, "action": action, "item": None,
+                **{k: parsed[k] for k in ("message_type", "control_id", "order_control", "accession")},
+                "parsed": parsed, "warnings": parsed["warnings"]}
+
+    result = local_worklist.upsert_from_hl7(
+        parsed, transport="http",
+        default_station_aet=settings_service.get_str("hl7_default_station_aet"),
+        default_modality=settings_service.get_str("hl7_default_modality"),
+    )
+    row = s.get(LocalWorklistItem, result["item_id"]) if result["item_id"] else None
+    audit.record(s, _actor(request), f"hl7.{result['action']}", "local_item",
+                 result["item_id"], None, audit.snapshot("local_item", row),
+                 _correlation(request))
+    s.commit()
+    metrics.HL7_MESSAGES.labels(transport="http", result=result["action"]).inc()
+    return {"dry_run": False, "action": result["action"],
+            "item": _local_snapshot(row) if row is not None else None,
+            **{k: parsed[k] for k in ("message_type", "control_id", "order_control", "accession")},
+            "parsed": parsed, "warnings": parsed["warnings"] + ([result["error"]] if result.get("error") else [])}
+
+
+# ── ATNA audit trail ───────────────────────────────────────────────────
+
+
+@router.get(
+    "/atna/stats", response_model=AtnaStatsOut, tags=["atna"],
+    summary="ATNA audit trail state",
+    description="Whether the broker sends IHE ATNA audit messages, where they go "
+                "and how full the delivery buffer is.",
+    response_description="Audit configuration and buffer state.",
+)
+def atna_stats(s: Session = _db_dep):
+    return atna.stats()
+
+
+@router.post(
+    "/atna/test", response_model=AtnaTestOut, tags=["atna"],
+    summary="Send a test audit message",
+    description="Delivers one audit message to the configured repository and "
+                "reports whether it was accepted — the check after setting it up.",
+    response_description="Delivery result of the test message.",
+)
+def atna_test(request: Request, s: Session = _db_dep):
+    result = atna.send_test()
+    audit.record(s, _actor(request), "test.atna", "setting", None,
+                 None, {"ok": result["ok"]}, _correlation(request))
+    s.commit()
+    return result
+
+
+@router.get(
+    "/atna/sample", response_model=AtnaSampleOut, tags=["atna"],
+    summary="Example audit message",
+    description="A complete PS3.15 audit message as the broker produces it — for "
+                "the team that operates the Audit Record Repository.",
+    response_description="The XML of a sample Query audit message.",
+)
+def atna_sample(s: Session = _db_dep):
+    return {"xml": atna.sample_message()}
 
 
 # ── Alerting ───────────────────────────────────────────────────────────
@@ -789,6 +1023,32 @@ def rollback_configuration(
 )
 def simulate_routing(body: SimulateRouteIn, s: Session = _db_dep):
     return simulate.simulate_route(s, body.accession, body.study_uid)
+
+
+@router.post(
+    "/simulate/station", response_model=StationPreviewOut, tags=["simulation"],
+    summary="Simulate the per-station rules",
+    description="Shows which sources a station would see and in which order they "
+                "win the dedupe. Uses the same rule matching as the live C-FIND "
+                "path; nothing is queried.",
+    response_description="Sources with visibility and effective priority plus the matching rule.",
+)
+def simulate_station(
+    body: StationSimulateIn,
+    s: Session = _db_dep,
+):
+    sources = s.scalars(
+        select(MwlSource).where(MwlSource.enabled.is_(True)).order_by(MwlSource.priority, MwlSource.id)
+    ).all()
+    from .upstream import SourceCfg
+
+    cfgs = [
+        SourceCfg(id=r.id, name=r.name, aet=r.aet, host=r.host, port=r.port,
+                  calling_aet=r.calling_aet, charset=r.charset, timeout_s=r.timeout_s,
+                  priority=r.priority)
+        for r in sources
+    ]
+    return station_rules.preview(body.station_aet, cfgs)
 
 
 @router.post(

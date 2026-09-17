@@ -344,6 +344,155 @@ class SettingUpdateIn(BaseModel):
     )
 
 
+class LocalItemIn(BaseModel):
+    """A locally maintained worklist item (emergency / unscheduled exam)."""
+
+    accession: str = Field(min_length=1, max_length=64, description="Accession number.",
+                           examples=["EMERG-001"])
+    sps_id: str = Field(default="1", max_length=64,
+                        description="Scheduled Procedure Step ID (unique per accession).")
+    patient_id: str = Field(default="", max_length=64, description="Patient ID (0010,0020).")
+    patient_name: str = Field(default="", max_length=128,
+                              description="Patient name in DICOM form: 'Last^First'.")
+    birth_date: str = Field(default="", max_length=16, description="Birth date (YYYY-MM-DD).")
+    sex: str = Field(default="", max_length=4, description="Sex (M/F/O).")
+    modality: str = Field(default="", max_length=16, description="Modality, e.g. CT.")
+    station_aet: str = Field(default="", max_length=16,
+                             description="Scheduled station AE title (empty = any station).")
+    procedure_description: str = Field(default="", max_length=128,
+                                       description="What has to be done (shown to the operator).")
+    scheduled_date: str = Field(default="", max_length=16, description="Scheduled date (YYYY-MM-DD).")
+    scheduled_time: str = Field(default="", max_length=16, description="Scheduled time (HH:MM).")
+    study_uid: str = Field(default="", max_length=128, description="Study Instance UID, if known.")
+    sps_status: str = Field(default="SCHEDULED", max_length=16,
+                            description="SPS status (0040,0020) sent to the modality.")
+    valid_until: datetime | None = Field(
+        default=None, description="Expiry — after this the item is purged (null = never).",
+    )
+    enabled: bool = Field(default=True, description="Disabled items are not returned.")
+
+
+class LocalItemOut(LocalItemIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: int = Field(description="Row ID.")
+    origin: str = Field(description="manual | hl7 — how the item was created.")
+    created_at: datetime = Field(description="Creation timestamp (UTC).")
+    updated_at: datetime = Field(description="Last modification (UTC).")
+
+
+class Hl7MessageOut(BaseModel):
+    """One inbound HL7 message (troubleshooting log)."""
+
+    id: int = Field(description="Row ID.")
+    ts: datetime = Field(description="When it arrived (UTC).")
+    transport: str = Field(description="http | mllp.")
+    message_type: str = Field(description="MSH-9, e.g. ORM^O01.")
+    control_id: str = Field(description="MSH-10.")
+    order_control: str = Field(description="ORC-1, e.g. NW / CA.")
+    accession: str = Field(description="Accession number found in the message.")
+    action: str = Field(description="created | updated | cancelled | rejected | error.")
+    error: str = Field(default="", description="Reason when the message was not applied.")
+
+
+class Hl7ParseOut(BaseModel):
+    """Result of an ORM message (dry-run shows what would happen)."""
+
+    dry_run: bool = Field(description="True when nothing was written.")
+    message_type: str = Field(description="MSH-9.")
+    control_id: str = Field(description="MSH-10 (used for the ACK).")
+    order_control: str = Field(description="ORC-1 — NW creates, CA cancels.")
+    accession: str = Field(description="Accession number parsed from the message.")
+    action: str = Field(description="planned/applied action, e.g. created | cancelled.")
+    item: LocalItemOut | None = Field(default=None, description="The affected local item.")
+    parsed: dict = Field(description="All fields the parser mapped.")
+    warnings: list[str] = Field(description="What could not be mapped (the UI shows it).")
+
+
+class AtnaStatsOut(BaseModel):
+    """State of the ATNA audit trail."""
+
+    enabled: bool = Field(description="Whether auditing is switched on.")
+    configured: bool = Field(description="True when enabled *and* a repository host is set.")
+    host: str = Field(description="Audit repository host.")
+    port: int = Field(description="Audit repository port.")
+    protocol: str = Field(description="tcp | tls.")
+    queue_size: int = Field(description="Buffered messages waiting for delivery.")
+    queue_max: int = Field(description="Buffer limit before the oldest are dropped.")
+    worker_running: bool = Field(description="Whether the drain worker is alive.")
+
+
+class AtnaTestOut(BaseModel):
+    """Result of a test audit message."""
+
+    ok: bool = Field(description="True when the repository accepted the message.")
+    error: str = Field(default="", description="Delivery error, if any.")
+
+
+class AtnaSampleOut(BaseModel):
+    """An example audit message — for the receiving team."""
+
+    xml: str = Field(description="A complete PS3.15 audit message (Query event).")
+
+
+class StationRuleIn(BaseModel):
+    """Per-station worklist rule (filter + priority override)."""
+
+    name: str = Field(min_length=1, max_length=64, description="Unique rule name.")
+    station_aet: str = Field(
+        default="*", max_length=16, pattern=r"^(\*|[A-Za-z0-9_-]{1,16})$",
+        description="ScheduledStationAETitle this rule applies to ('*' = fallback).",
+        examples=["CT_01"],
+    )
+    mode: Literal["allow", "deny"] = Field(
+        default="deny", description="deny: hide the listed sources; allow: show only them.",
+    )
+    source_ids: list[int] = Field(
+        default_factory=list, description="Source IDs the rule applies to.",
+    )
+    source_priority: dict = Field(
+        default_factory=dict,
+        description="Priority override for this station: {source_id: priority}.",
+    )
+    priority: int = Field(default=100, description="Rule order — lower wins.")
+    enabled: bool = Field(default=True, description="Disabled rules are ignored.")
+
+
+class StationRuleOut(StationRuleIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: int = Field(description="Row ID.")
+    created_at: datetime = Field(description="Creation timestamp (UTC).")
+
+
+class StationSimulateIn(BaseModel):
+    """A station to check against the per-station rules."""
+
+    station_aet: str = Field(
+        default="", max_length=16,
+        description="ScheduledStationAETitle of the console (empty = no station filter).",
+        examples=["CT_01"],
+    )
+
+
+class StationPreviewSourceOut(BaseModel):
+    """One source as the station would see it."""
+
+    id: int = Field(description="Source row ID.")
+    name: str = Field(description="Source name.")
+    visible: bool = Field(description="Whether this source's answers reach the station.")
+    effective_priority: int = Field(description="Priority used for the merge (override applied).")
+
+
+class StationPreviewOut(BaseModel):
+    """What a station would see — a dry-run of the station rules."""
+
+    station_aet: str = Field(description="Station that was checked.")
+    rule_id: int | None = Field(default=None, description="Matching rule (null = none).")
+    rule_name: str | None = Field(default=None, description="Name of that rule.")
+    mode: str | None = Field(default=None, description="allow | deny.")
+    sources: list[StationPreviewSourceOut] = Field(description="Sources with visibility and order.")
+    reason: str = Field(description="Human-readable explanation.")
+
+
 class NotifyEventOut(BaseModel):
     """One alerting event the broker can send."""
 

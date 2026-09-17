@@ -14,6 +14,8 @@ from sqlalchemy import select
 from .config import get_settings
 from .models import (
     BrokerSetting,
+    LocalWorklistItem,
+    StationRule,
     ConfigAudit,
     MwlSource,
     PacsTarget,
@@ -57,12 +59,42 @@ def _transform(row: TransformRule) -> dict:
     }
 
 
+def _local_item(row) -> dict:
+    """Scheduling data only — deliberately without the patient identifiers.
+
+    The change log (and the configuration export built from it) must stay
+    PHI-free; the local worklist table itself is the place where the patient
+    data lives. A rollback therefore restores the schedule, not the identity —
+    the diff shows that, and the operator can complete the entry.
+    """
+    return {
+        "accession": row.accession, "sps_id": row.sps_id,
+        "modality": row.modality, "station_aet": row.station_aet,
+        "procedure_description": row.procedure_description,
+        "scheduled_date": row.scheduled_date, "scheduled_time": row.scheduled_time,
+        "study_uid": row.study_uid, "sps_status": row.sps_status,
+        "valid_until": row.valid_until.isoformat() if row.valid_until else None,
+        "enabled": row.enabled, "origin": row.origin,
+    }
+
+
+def _station(row) -> dict:
+    return {
+        "name": row.name, "station_aet": row.station_aet, "mode": row.mode,
+        "source_ids": list(row.source_ids or []),
+        "source_priority": dict(row.source_priority or {}),
+        "priority": row.priority, "enabled": row.enabled,
+    }
+
+
 def _setting(row: BrokerSetting) -> dict:
     return {"key": row.key, "value": row.value}
 
 
 SERIALIZERS = {
     "source": (MwlSource, _source),
+    "local_item": (LocalWorklistItem, _local_item),
+    "station": (StationRule, _station),
     "target": (PacsTarget, _target),
     "rule": (RoutingRule, _rule),
     "transform": (TransformRule, _transform),

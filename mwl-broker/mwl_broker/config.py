@@ -35,6 +35,26 @@ class Settings(BaseSettings):
     cache_hide_completed: bool = True   # never resurrect COMPLETED/DISCONTINUED steps
     cache_max_items: int = 5000         # safety cap per source snapshot
 
+    # Locally maintained worklist items (emergencies, unscheduled exams)
+    local_priority: int = -1            # merge priority: before every upstream source
+    local_default_validity_days: int = 7   # 0 = items never expire
+
+    # HL7 ORM interface
+    hl7_enabled: bool = True            # accept POST /hl7/orm
+    hl7_mllp_enabled: bool = False      # extra MLLP listener for the RIS
+    hl7_mllp_bind: str = "0.0.0.0"
+    hl7_mllp_port: int = 2575
+    hl7_default_station_aet: str = ""   # fallback when the ORM carries none
+    hl7_default_modality: str = ""
+
+    # IHE ATNA audit trail (own Audit Record Repository)
+    atna_enabled: bool = False          # explicit opt-in: audit leaves the broker
+    atna_syslog_host: str = ""
+    atna_syslog_port: int = 6514
+    atna_syslog_protocol: str = "tcp"   # tcp | tls
+    atna_tls_ca_file: str = ""          # optional CA bundle for TLS
+    atna_queue_max: int = 10000         # bounded buffer against a dead ARR
+
     # Alerting (webhook)
     notify_webhook_url: str = ""        # empty = alerting disabled
     notify_events: str = ""             # comma-separated event codes (see GET /notify/events)
@@ -59,6 +79,7 @@ class Settings(BaseSettings):
     start_dicom: bool = True
     start_echo_loop: bool = True
     start_spool: bool = True
+    start_atna: bool = True
 
     # Optional bootstrap: JSON list of sources/targets to upsert on startup
     seed_config_json: str = ""

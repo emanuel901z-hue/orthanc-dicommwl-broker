@@ -26,6 +26,8 @@ class SourceCfg:
     calling_aet: str
     charset: str
     timeout_s: int
+    # merge order across sources (lower wins); station rules may override it
+    priority: int = 100
 
 
 def dedupe_key(ds: Dataset) -> tuple[str, str, str]:

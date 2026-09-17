@@ -96,6 +96,11 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
 - `GET /spool`, `GET /spool/stats`, `POST /spool/{id}/retry`, `POST /spool/retry-all`,
   `DELETE /spool/{id}?reason=` — C-STORE-Spool (Store and Forward)
 - `GET /notify/events`, `POST /notify/test` — Alerting (Webhook)
+- `GET/POST /local-items`, `PUT/DELETE /local-items/{id}` — lokale Worklist-Items
+- `POST /hl7/orm?dry_run=`, `GET /hl7/messages` — HL7-ORM-Schnittstelle (MLLP-Listener optional)
+- `GET/POST /station-rules`, `PUT/DELETE /station-rules/{id}` — Per-Station-Regeln
+- `POST /simulate/station` — Vorschau: welche Quellen sieht eine Konsole?
+- `GET /atna/stats`, `POST /atna/test`, `GET /atna/sample` — ATNA-Audit-Trail
 - `GET /logs/queries`, `GET /logs/stores` (paged, Filter: aet, source, status, since)
 - `GET /status` — SCP-Listener, Echo-Matrix (Quellen+Ziele inkl. `breaker_state`), Zähler
 - `GET /healthz`, `GET /metrics` (Prometheus)
@@ -187,6 +192,37 @@ Produktionsfehler (kein Default-Ziel, Regeln auf deaktivierten Knoten, tote
 Quellen, offene Breaker, leere AET-Allowlist, AET-Kollision mit dem Broker
 selbst) und liefert Findings mit stabilem `code` — die UI übersetzt sie und
 verlinkt direkt ins betroffene Formular.
+
+### Lokale Worklist-Items und HL7-ORM
+
+Notfälle und ungeplante Untersuchungen führt der Broker selbst
+(`local_worklist_item`): sie werden mit der **höchsten Priorität** in jede
+passende C-FIND-Antwort gemischt (Matching auf Patient/Zugang/Modalität/Station/
+Datum) und laufen unter der Pseudo-Quelle `local`, die nie abgefragt wird, aber
+in Routing-Regeln nutzbar ist.
+
+HL7-ORM-Aufträge kommen über `POST /hl7/orm` (mit Trockenlauf) oder den
+**MLLP-Listener** (`hl7_mllp_enabled`); derselbe Parser und Upsert-Pfad für
+beide. `NW` legt an, `XO`/`SC` ändert, `CA`/`OC` storniert; unmappbare Felder
+erscheinen als Warnung statt als halber Eintrag. Der Audit-Snapshot lokaler
+Einträge enthält bewusst **keine Patientendaten** (sonst läge PHI im
+Konfigurations-Export).
+
+### Per-Station-Filter und -Priorität
+
+`station_rule` verbirgt Quellen vor einer Konsole (`deny`) oder zeigt nur
+bestimmte (`allow`) und kann die Merge-Reihenfolge für diese Station umdrehen
+(`source_priority`). Gefiltert wird **nach dem Merge** — die Deduplizierung
+bleibt für jede Station identisch. `POST /simulate/station` zeigt vorab, was eine
+Konsole sieht.
+
+### ATNA-Audit-Trail (IHE, Syslog/TLS)
+
+`atna.py` erzeugt PS3.15-Audit-Nachrichten (`Query`, `Import`, `Export`,
+`Security Alert`) als RFC-5424-Syslog über TCP oder TLS an die eigene
+Audit-Record-Repository. Eine begrenzte Queue mit Worker-Thread sorgt dafür, dass
+ein nicht erreichbares ARR den DICOM-Verkehr nie blockiert (verworfene Nachrichten
+werden gezählt). Bewusst **opt-in** (`atna_enabled`).
 
 ### Alerting (Webhook)
 
@@ -361,9 +397,9 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 260 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 404 Tests, 0 Errors |
-| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 40/40 grün, 0 Console-/Page-/Netzwerk-Fehler |
+| `pytest` | 339 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 428 Tests, 0 Errors |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 44/44 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
 
@@ -382,8 +418,8 @@ regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
 
 `ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
 Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
-backend pytest (260) → frontend tsc → lint → vitest (404) → docker-e2e
-(40 Browser-Tests + DIMSE-Smokes + Breaker-/Cache-/Spool-/Webhook-Szenario). Verifiziert: alle Stages grün.
+backend pytest (339) → frontend tsc → lint → vitest (428) → docker-e2e
+(44 Browser-Tests + DIMSE-Smokes + Breaker-/Cache-/Spool-/Webhook-/HL7-/ATNA-Szenario). Verifiziert: alle Stages grün.
 `--quick` überspringt die Docker-Stage.
 
 #### Coverage-Audit (2026-09)
@@ -392,7 +428,7 @@ Gemessen mit `pytest-cov` bzw. `vitest --coverage`:
 
 | Bereich | Statements | Anmerkung |
 |---|---|---|
-| Backend `mwl_broker/` | **97 %** | notify 100 %, spool 93 %, cache 99 %, api 97 %, main 100 %, settings_service/schemas/models/metrics 100 %, routing 100 %, breaker 99 %, audit 97 %, config_io 96 %, health_checks 98 %, echo 96 %, dimse 93 % |
+| Backend `mwl_broker/` | **96 %** | station_rules 100 %, atna 97 %, local_worklist 97 %, hl7 96 %, notify 100 %, cache 99 %, api 97 %, main 100 %, settings_service/schemas/models/metrics 100 %, routing 100 %, breaker 99 %, audit 97 %, config_io 96 %, health_checks 98 %, echo 96 %, dimse 93 % |
 | Frontend Broker-UI | **97.9 %** | `api/broker.ts` 100 %, Diff-Helfer/Panels 100 %, Seiten 95-100 % |
 
 Ergänzte Tests für zuvor ungedeckte Pfade: Rules-Update/Delete, Target-Echo,
@@ -462,6 +498,7 @@ Gefundene und behobene Defekte:
 | 10 | Sprint 3 der Roadmap: Worklist-Cache mit Stale-Fallback | ✅ |
 | 11 | Sprint 4 der Roadmap: C-STORE-Spool + Alembic-Migrationspfad | ✅ |
 | 12 | Sprint 5 der Roadmap: Alerting/Webhooks | ✅ |
+| 13 | Sprint 6 der Roadmap: lokale Worklist + HL7-ORM, Stationsregeln, ATNA | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert

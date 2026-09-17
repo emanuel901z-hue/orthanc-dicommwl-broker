@@ -34,6 +34,62 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "Interval of the C-ECHO monitoring loop in seconds.",
     ),
+    "local_priority": (
+        "int",
+        "Merge priority of local worklist items (lower wins; default before every source).",
+    ),
+    "local_default_validity_days": (
+        "int",
+        "Default validity of a manually created local item in days (0 = unlimited).",
+    ),
+    "hl7_enabled": (
+        "bool",
+        "Accept HL7 ORM orders over the REST endpoint.",
+    ),
+    "hl7_mllp_enabled": (
+        "bool",
+        "Listen for HL7 ORM messages on the MLLP port as well.",
+    ),
+    "hl7_mllp_bind": (
+        "str",
+        "Interface the MLLP listener binds to.",
+    ),
+    "hl7_mllp_port": (
+        "int",
+        "MLLP port the RIS sends ORM messages to.",
+    ),
+    "hl7_default_station_aet": (
+        "str",
+        "Scheduled station used when an ORM message carries no station AE title.",
+    ),
+    "hl7_default_modality": (
+        "str",
+        "Modality used when an ORM message carries none.",
+    ),
+    "atna_enabled": (
+        "bool",
+        "Send IHE ATNA audit messages to an Audit Record Repository.",
+    ),
+    "atna_syslog_host": (
+        "str",
+        "Host of the audit repository (syslog/TLS receiver).",
+    ),
+    "atna_syslog_port": (
+        "int",
+        "Port of the audit repository (6514 = syslog over TLS, 514 = plain).",
+    ),
+    "atna_syslog_protocol": (
+        "enum:tcp,tls",
+        "Transport to the audit repository.",
+    ),
+    "atna_tls_ca_file": (
+        "path",
+        "Optional CA bundle used to verify the audit repository (TLS only).",
+    ),
+    "atna_queue_max": (
+        "int",
+        "Maximum buffered audit messages before the oldest are dropped.",
+    ),
     "notify_webhook_url": (
         "url",
         "Webhook that receives broker alerts (Slack/Teams-compatible JSON, empty = off).",
@@ -111,6 +167,11 @@ KNOWN: dict[str, tuple[str, str]] = {
 _INT_RANGES = {
     "seen_item_ttl_days": (1, 3650),
     "echo_interval_s": (5, 3600),
+    "local_priority": (-1000, 1000),
+    "local_default_validity_days": (0, 3650),
+    "hl7_mllp_port": (1, 65535),
+    "atna_syslog_port": (1, 65535),
+    "atna_queue_max": (100, 1000000),
     "notify_min_interval_s": (0, 86400),
     "spool_max_items": (1, 1000000),
     "spool_max_bytes": (1048576, 1099511627776),
@@ -173,6 +234,10 @@ def validate_value(key: str, raw: str) -> list[str]:
         lo, hi = _INT_RANGES.get(key, (0, 10**9))
         if not lo <= n <= hi:
             return [f"must be between {lo} and {hi}"]
+    elif kind.startswith("enum:"):
+        choices = [c.strip() for c in kind.split(":", 1)[1].split(",") if c.strip()]
+        if raw not in choices:
+            return [f"must be one of: {', '.join(choices)}"]
     elif kind == "url":
         return _validate_url(raw)
     elif kind == "events":

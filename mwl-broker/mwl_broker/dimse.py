@@ -13,7 +13,7 @@ from pynetdicom.presentation import build_context
 from pynetdicom.sop_class import ModalityWorklistInformationFind, Verification
 from sqlalchemy import select
 
-from . import breaker, cache, cstore, metrics, routing, settings_service, spool, transforms
+from . import atna, breaker, cache, cstore, local_worklist, metrics, routing, settings_service, spool, station_rules, transforms
 from .config import Settings
 from .db import session_factory
 from .models import QueryLog, RoutingRule, SeenItem, StoreLog, MwlSource, PacsTarget
@@ -101,6 +101,7 @@ class BrokerSCP:
             SourceCfg(
                 id=r.id, name=r.name, aet=r.aet, host=r.host, port=r.port,
                 calling_aet=r.calling_aet, charset=r.charset, timeout_s=r.timeout_s,
+                priority=r.priority,
             )
             for r in rows
         ]
@@ -122,6 +123,9 @@ class BrokerSCP:
 
         if not self._calling_allowed(calling):
             log.warning("C-FIND rejected: calling AET %r not allowed", calling)
+            atna.audit(atna.EVENT_SECURITY, outcome="8", broker_aet=self.settings.broker_aet,
+                       source_aet=calling, query="C-FIND rejected (calling AET not allowed)",
+                       event_type=("ITI-19", "Node Authentication"))
             yield S_OUT_OF_RESOURCES, None
             return
 
@@ -129,6 +133,12 @@ class BrokerSCP:
         per_source: dict[str, int | str] = {}
         collected: list[tuple[SourceCfg, list[Dataset]]] = []
         served_stale: list[str] = []
+
+        # Per-station rules: the console's priority override decides who wins the
+        # dedupe, and its visibility filter is applied after the merge.
+        station = station_rules.query_station(identifier)
+        rule = station_rules.matching_rule(station)
+        sources = station_rules.order_sources(sources, rule)
 
         # Circuit breaker: skip sources that are known to be down instead of
         # paying their timeout on every single query.
@@ -173,10 +183,23 @@ class BrokerSCP:
                         else:
                             per_source[src.name] = "error"
 
+        # Local items (emergencies) participate with the highest priority — the
+        # pseudo source is not part of the fan-out, so it sorts first.
+        local = local_worklist.answers_for(identifier)
+        if local is not None:
+            collected.append(local)
+            per_source[local[0].name] = len(local[1])
+            metrics.UPSTREAM_ANSWERS.labels(source=local[0].name).inc(len(local[1]))
+
         # restore priority order for deterministic merge
         order = {src.id: i for i, src in enumerate(sources)}
-        collected.sort(key=lambda t: order[t[0].id])
+        collected.sort(key=lambda t: order.get(t[0].id, local_worklist.local_priority()))
         merged = merge_answers(collected)
+
+        merged, hidden = station_rules.filter_merged(merged, rule)
+        if hidden:
+            log.info("C-FIND for station %s: %d answer(s) hidden by rule '%s'",
+                     station or "(any)", hidden, rule["name"])
 
         self._record_seen_items(merged)
 
@@ -195,9 +218,37 @@ class BrokerSCP:
         self._write_query_log(calling, identifier, len(merged), per_source, duration_ms,
                               status, served_stale)
 
+        self._audit_query(calling, identifier, merged)
+
         for ds, _src in merged:
             yield S_PENDING, ds
         yield S_SUCCESS, None
+
+    def _audit_query(self, calling: str, identifier: Dataset,
+                     merged: list[tuple[Dataset, SourceCfg]]) -> None:
+        """One ATNA Query message per C-FIND, including the patients disclosed."""
+        summary = self._query_summary(identifier)
+        flat: dict[str, str] = {}
+        for key, value in summary.items():
+            if isinstance(value, dict):
+                flat.update({k: str(v) for k, v in value.items()})
+            else:
+                flat[key] = str(value)
+        keys = " ".join(f"{k}={v}" for k, v in flat.items())
+        patients = [str(ds.get("PatientID", "") or "") for ds, _src in merged]
+        patients = [pid for pid in dict.fromkeys(patients) if pid][:50]
+        atna.audit(
+            atna.EVENT_QUERY, broker_aet=self.settings.broker_aet,
+            source_aet=calling, query=keys[:400],
+            event_type=("ITI-20", "Modality Worklist Query"),
+        )
+        for patient_id in patients:
+            atna.audit(
+                atna.EVENT_QUERY, broker_aet=self.settings.broker_aet,
+                source_aet=calling, patient_id=patient_id,
+                query=f"worklist disclosure {keys[:120]}",
+                event_type=("ITI-20", "Modality Worklist Query"),
+            )
 
     def _record_seen_items(self, merged: list[tuple[Dataset, SourceCfg]]) -> None:
         if not merged:
@@ -246,6 +297,9 @@ class BrokerSCP:
         calling = event.assoc.requestor.ae_title
         if not self._calling_allowed(calling):
             log.warning("C-STORE rejected: calling AET %r not allowed", calling)
+            atna.audit(atna.EVENT_SECURITY, outcome="8", broker_aet=self.settings.broker_aet,
+                       source_aet=calling, query="C-STORE rejected (calling AET not allowed)",
+                       event_type=("ITI-19", "Node Authentication"))
             return S_OUT_OF_RESOURCES
 
         try:
@@ -258,6 +312,7 @@ class BrokerSCP:
         accession = str(getattr(ds, "AccessionNumber", "") or "")
         study_uid = str(getattr(ds, "StudyInstanceUID", "") or "")
         sop_uid = str(getattr(ds, "SOPInstanceUID", "") or "")
+        patient_id = str(getattr(ds, "PatientID", "") or "")
 
         strict = settings_service.get_bool("strict_store_status")
         source_id, target = self._resolve_target(accession, study_uid)
@@ -268,6 +323,16 @@ class BrokerSCP:
             return S_OUT_OF_RESOURCES if strict else S_SUCCESS
 
         applied = self._apply_transforms(ds, source_id, target.id)
+
+        # ATNA: the instance arrived (Import) and is forwarded (Export)
+        atna.audit(atna.EVENT_IMPORT, broker_aet=self.settings.broker_aet,
+                   source_aet=calling, destination_aet=target.aet,
+                   patient_id=patient_id, study_uid=study_uid, accession=accession,
+                   event_type=("ITI-41", "DICOM Instance Received"))
+        atna.audit(atna.EVENT_EXPORT, broker_aet=self.settings.broker_aet,
+                   source_aet=self.settings.broker_aet, destination_aet=target.aet,
+                   patient_id=patient_id, study_uid=study_uid, accession=accession,
+                   event_type=("ITI-41", "DICOM Instance Forwarded"))
 
         # The instance is already spooled or was delivered before: a repeated
         # C-STORE (the modality never saw a confirmation) must not store it twice.

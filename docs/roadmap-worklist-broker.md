@@ -40,10 +40,10 @@ auditierbar.
 | **P1** | Simulation (Dry-Run) für Routing/Transform | Regeln gefahrlos prüfen, bevor sie greifen | klein | **✅ Sprint 2** |
 | **P1** | Konsistenz-Checks / Health-Panel | Fehlkonfigurationen früh und sichtbar | klein | **✅ Sprint 1** |
 | **P1** | Alerting/Webhooks + Readiness-Endpoint | Betrieb erfährt Störungen, bevor Anwender anrufen | klein | **✅ Sprint 5** |
-| **P2** | Lokale Worklist-Items / HL7-ORM-Adapter | Notfälle und ungeplante Untersuchungen | hoch | offen |
-| **P2** | Per-Station-Filter und -Priorität | jede Konsole sieht nur ihre Arbeitsliste | mittel | offen |
+| **P2** | Lokale Worklist-Items / HL7-ORM-Adapter | Notfälle und ungeplante Untersuchungen | hoch | **✅ Sprint 6** |
+| **P2** | Per-Station-Filter und -Priorität | jede Konsole sieht nur ihre Arbeitsliste | mittel | **✅ Sprint 6** |
 | **P2** | DICOM-TLS (mTLS) + Zertifikatsverwaltung | Segmentierung/Netzwerkanforderungen | mittel | offen |
-| **P2** | ATNA-Audit-Export (syslog/TLS) | IHE-Compliance, zentrale Auditablage | mittel | offen |
+| **P2** | ATNA-Audit-Export (syslog/TLS) | IHE-Compliance, zentrale Auditablage | mittel | **✅ Sprint 6** |
 
 ---
 
@@ -413,33 +413,89 @@ Ereignisse ankommen.
 
 ### P2-1 Lokale Worklist-Items / HL7-ORM-Adapter
 
-**Wert.** Notfälle und ungeplante Untersuchungen existieren in keinem RIS.
-Der Broker kann lokale Items (manuell oder per HL7 ORM/ADT) in den Fan-out
-mischen und mit Priorität versehen.
+**Wert in der Produktion.** Notfälle und ungeplante Untersuchungen existieren in
+keinem RIS. Der Broker führt sie selbst und mischt sie in jede passende
+C-FIND-Antwort — mit der **höchsten Priorität**, damit der Notfall gegen das RIS
+gewinnt. Provenienz ist die Pseudo-Quelle `local`: sie wird nie abgefragt
+(bleibt deaktiviert), ist aber in Routing-Regeln nutzbar — genau das schickt
+Notfallbilder in ein anderes PACS.
 
-**Backend.** Tabelle `local_worklist_item` (Accession, PatientID/Name,
-Modality, Station, SPS-Zeit, Gültigkeit); Aufnahme in `merge_answers` mit
-konfigurierbarer Priorität (`local_priority`); REST-CRUD plus
-`POST /api/v1/hl7/orm` (MLLP-Listener optional, eigenes Deployment-Thema).
-**Frontend.** Seite `/broker/worklist` mit Anlegen/Bearbeiten (Formular mit
-DICOM-Keyword-Validierung), Gültigkeitsdauer, Kennzeichnung „lokal" im
-Query-Log.
-**Tests.** pytest (Merge-Reihenfolge, Ablauf/Gültigkeit, ORM-Parsing),
-DIMSE-Integration (lokales Item erscheint in der C-FIND-Antwort), UI-Tests.
+**Backend.**
+
+- Tabelle `local_worklist_item` (Zugang + Schritt-ID als Schlüssel, Patient,
+  Modalität, Station, Termin, Gültigkeit, Herkunft `manual|hl7`) + `hl7_message`
+  als Schnittstellen-Protokoll.
+- `local_worklist.py`: DICOM-View (`to_dataset`), **Matching auf die
+  Abfrageschlüssel** (Patient, Zugang, Modalität, Station, Datum — eine
+  CT-Konsole sieht keine MR-Einträge), Merge als erste Quelle, Purge abgelaufener
+  Einträge, `upsert_from_hl7`.
+- `hl7.py`: ORM^O01-Parser. Die Feldzuordnung steht an einer Stelle und ist
+  dokumentiert (inkl. der MSH-Besonderheit, dass MSH-1 das Trennzeichen selbst
+  ist); unmappbare Felder landen in `warnings`, statt halbe Einträge zu erzeugen.
+  Storni (`CA`/`OC`) löschen den Eintrag, Änderungen (`XO`/`SC`) aktualisieren,
+  leere Felder überschreiben nie vorhandene Werte.
+- `mllp.py`: **MLLP-Listener** (eigener Port, `0x0B … 0x1C 0x0D`-Framing) mit
+  ACK/NAK — viele RIS sprechen nur MLLP. Er nutzt denselben Parser und
+  Upsert-Pfad wie der REST-Weg.
+- API: CRUD `/local-items`, `POST /hl7/orm?dry_run=` (Trockenlauf zeigt das
+  Parse-Ergebnis und was passieren würde), `GET /hl7/messages`.
+- Settings: `local_priority`, `local_default_validity_days`, `hl7_enabled`,
+  `hl7_mllp_enabled|bind|port`, `hl7_default_station_aet|modality`.
+- Metriken: `mwl_local_worklist_items`, `mwl_hl7_messages_total{transport,result}`.
+- **PHI-Grenze:** Der Audit-/Export-Snapshot eines lokalen Eintrags enthält nur
+  Termindaten, **keine Patientendaten** — sonst läge PHI im Änderungsprotokoll
+  und damit im Konfigurations-Export. Ein Rollback stellt den Termin wieder her,
+  nicht die Identität (der Diff zeigt das).
+
+**Frontend (OE3).** Seite `/broker/worklist`: Tabelle (Mobile als Cards) mit
+CRUD, Gültigkeit, Herkunft; daneben das **HL7-Panel** — Nachricht einfügen,
+„Prüfen (Trockenlauf)" zeigt das Parse-Ergebnis samt Warnungen, „Anwenden"
+schreibt, plus die letzten empfangenen Nachrichten.
+
+**Tests & Verifikation.** Parser (Felder, Komponenten, Z-Segmente, Datums-/Zeit-
+Formate, Storni, Müll-Eingaben, ACK), DICOM-View, Matching inkl. Wildcards,
+Ablauf/Deaktivierung, Pseudo-Quelle erst bei Bedarf, HL7-Upsert (created/
+updated/cancelled/cancel-unknown, kein Blanking, getrennte SPS-IDs), Purge,
+Integration (lokaler Eintrag in der C-FIND-Antwort, Query-Filter, Dedupe-Vorrang,
+Stationsregel verbirgt ihn), **MLLP end-to-end über einen echten Socket**, API, UI.
+Im Test-Stack: Notfall anlegen → erscheint in der C-FIND-Antwort, HL7
+Trockenlauf + Anwenden, MLLP-Listener.
 
 ### P2-2 Per-Station-Filter und -Priorität
 
-**Wert.** Eine Konsole soll nur ihre Arbeitsliste sehen; Prioritäten je
-Station verhindern, dass eine Notfallquelle von einer langsamen Routinequelle
-verdrängt wird.
+**Wert in der Produktion.** Jede Konsole soll ihre Arbeitsliste sehen. Eine
+Station-Regel verbirgt Quellen vor einer Konsole (`deny`) oder zeigt nur
+bestimmte (`allow`) und kann die **Merge-Reihenfolge** für diese Konsole
+umdrehen — damit gewinnt z. B. das Notfall-RIS am CT, das Routine-RIS am
+Röntgen.
 
-**Backend.** Filterregeln je Station (`ScheduledStationAETitle` → Quellen
-erlauben/verbieten), Prioritäts-Override je Station; Filterung erfolgt **nach**
-dem Merge, damit Dedupe unverändert bleibt.
-**Frontend.** Regel-Editor mit Station-Auswahl (Mehrfach), Vorschau der
-Wirkung über P1-2.
-**Tests.** pytest (Filtermatrix), Integration (C-FIND mit Station-AET),
-Playwright.
+**Backend.**
+
+- Tabelle `station_rule`: `station_aet` (`*` = Rückfall), `mode`
+  (`allow|deny`), `source_ids`, `source_priority` (`{source_id: priority}`),
+  `priority`, `enabled`.
+- `station_rules.py`: Matching (exakte Station vor Rückfall, erste aktive Regel
+  nach `priority`), Sichtbarkeit, Umsortierung der Fan-out-Quellen und
+  **Filterung nach dem Merge** — die Deduplizierung darf nicht von der Station
+  abhängen (gleicher Zugang ⇒ ein Eintrag, egal wer fragt).
+- `query_station()` liest den `ScheduledStationAETitle` aus der SPS-Sequenz
+  (mit Rückfall auf die oberste Ebene). Ohne Station greift keine Regel.
+- API: CRUD `/station-rules`, `POST /simulate/station` (Vorschau: welche Quellen
+  sichtbar, welche effektive Priorität, welche Regel — dieselbe Logik wie im
+  Echtpfad).
+- Validierung: `mode` als Enum, `station_aet` gegen das AE-Titel-Muster
+  (Tippfehler würden sonst still nie greifen).
+
+**Frontend (OE3).** Seite `/broker/stations`: Regel-CRUD mit Quellen-Auswahl als
+Checkboxen, Modus-Umschalter und **Vorschau-Panel** („Welche Quellen sieht diese
+Konsole?") — per Knopf oder direkt aus der Regelzeile.
+
+**Tests & Verifikation.** Matching (exakt/Rückfall/deaktiviert/Reihenfolge),
+Sichtbarkeit (deny/allow/leere allow-Liste), Prioritäts-Override,
+Merge-Filterung, Vorschau; Integration: C-FIND mit Stations-AET liefert
+gefilterte Antworten, andere Stationen bleiben unberührt, Prioritäts-Override
+dreht die Dedupe **inklusive der `seen_items`-Provenienz**; API inkl. Validierung
+und Audit; UI (Desktop + Mobile); Test-Stack: Regel anlegen und Vorschau prüfen.
 
 ### P2-3 DICOM-TLS (mTLS) und Zertifikatsverwaltung
 
@@ -459,16 +515,46 @@ Dateirechte restriktiv, kein Export über die API.
 
 ### P2-4 ATNA-Audit-Export (IHE, syslog/TLS)
 
-**Wert.** Zentrale Auditablage im KIS/SIEM, IHE-Konformität.
+**Wert in der Produktion.** IHE verlangt eine zentrale, manipulationssichere
+Nachvollziehbarkeit: wer hat wann welche Patientendaten abgefragt oder
+weitergeleitet. Der Broker erzeugt die Nachrichten, die Gegenstelle
+(Audit Record Repository) betreibt das Haus selbst — hier zunächst als eigene
+Instanz.
 
-**Backend.** Audit-Records (Query/Store/Config) als IHE-ATNA-XML an einen
-konfigurierten Audit Record Repository per syslog über TLS senden; Setting
-`atna_syslog_url`, `atna_enabled`; Puffer bei Nichterreichbarkeit.
-**Frontend.** Settings-Karte mit Status des letzten Versands.
-**Tests.** pytest mit Mock-Syslog-Server, Formatvalidierung gegen das
-ATNA-Schema.
+**Backend.**
 
----
+- `atna.py`: **DICOM PS3.15 / RFC 3881 Audit Messages** als XML, verpackt in
+  einen **RFC 5424 Syslog-Frame** (mit der von DICOM geforderten UTF-8-BOM),
+  Transport **TCP oder TLS** (optional mit CA-Bundle zur Verifikation).
+- Ereignisse: `Query` (110112, ein C-FIND mit den offengelegten Patienten),
+  `Import` (110104) und `Export` (110106) je C-STORE, `Security Alert` (110113)
+  bei abgewiesener Assoziation (mit `EventOutcomeIndicator=8`).
+- **Zustellung blockiert nie den DICOM-Pfad**: eine begrenzte Queue
+  (`atna_queue_max`) mit Worker-Thread; ist sie voll, werden Nachrichten
+  verworfen und gezählt (`mwl_atna_dropped_total`). Ein kurzer Config-Cache (2 s)
+  hält die „ist Audit aktiv?"-Prüfung von der Datenbank weg.
+- **Bewusst opt-in**: `atna_enabled` ist per Default aus — Audit-Daten verlassen
+  den Broker erst, wenn das eingeschaltet wird.
+- API: `GET /atna/stats`, `POST /atna/test` (synchron, meldet das Ergebnis),
+  `GET /atna/sample` (Beispielnachricht — das Erste, was das ARR-Team braucht).
+- Metriken: `mwl_atna_sent_total{event}`, `mwl_atna_failed_total`,
+  `mwl_atna_dropped_total`, `mwl_atna_queue_size`.
+- **PHI:** Eine Audit-Nachricht enthält die Patienten-ID (das ist ihr Zweck) —
+  sie geht an die Gegenstelle des Hauses, **nicht** in die Broker-Logs.
+
+**Frontend (OE3).** ATNA-Karte auf der Settings-Seite: Zustand (aus/konfiguriert,
+Pufferstand), Ein/Aus, Host/Port/Transport/CA, **Testversand mit Ergebnis** und
+die **Beispielnachricht** als XML zum Anzeigen.
+
+**Tests & Verifikation.** Aufbau der Nachricht (Event-Codes, Rollen, Patient/
+Study/Zugang/Query-Objekte, XML-Escaping), Syslog-Frame (PRI, RFC-5424-Kopf,
+BOM), **Zustellung an einen echten TCP-Empfänger**, TLS-Zweig mit CA-Verifikation
+(monkeypatch), bounded Queue inkl. Drop-Metrik, Fehlerpfade, Testversand,
+`stats`; Integration: C-FIND erzeugt Query-Audits (inkl. je Patient), C-STORE
+erzeugt Import+Export, abgewiesene AET erzeugt ein Security-Event, ohne
+Konfiguration passiert nichts; API + Validierung; UI. Im Test-Stack läuft ein
+**echter Syslog-Empfänger auf dem Host**: Testnachricht **und** die während der
+Szenarien anfallenden Audit-Nachrichten (Query-Events) kommen an.
 
 ## Querschnittsthemen
 
@@ -730,6 +816,44 @@ Paket nur manuell installiert).
 | Playwright | 40 Tests (Desktop + Mobile), inkl. Testversand aus der UI |
 | test-stack.sh | Echter Webhook-Empfänger auf dem Host: Testnachricht **und** echte Ereignisse (`breaker_open`, `config_error`, `spool_dead_letter`) kommen an |
 | verify-ui.cjs | 80 Checks (Desktop 1400×900 + Mobile 375×812) |
+
+### Sprint 6 — P2: lokale Worklist/HL7, Stationsregeln, ATNA (umgesetzt)
+
+**Umgesetzt.** Die drei fachlich priorisierten P2-Themen (P2-1, P2-2, P2-4) —
+jeweils Backend, API, DAU-sichere OE3-Oberfläche, Tests und Verifikation:
+
+- **P2-1** `local_worklist_item` + `hl7_message` + `hl7.py` + `mllp.py`:
+  Notfall-Einträge mit höchster Merge-Priorität, Matching auf die
+  Abfrageschlüssel, Pseudo-Quelle `local` (routingfähig), HL7-ORM-Parser mit
+  Trockenlauf und MLLP-Listener, Seite `/broker/worklist` mit HL7-Panel.
+- **P2-2** `station_rule` + `station_rules.py`: Sichtbarkeitsfilter und
+  Prioritäts-Override je Konsole, Filterung nach dem Merge, Vorschau-Endpunkt,
+  Seite `/broker/stations`.
+- **P2-4** `atna.py`: PS3.15-Audit-Nachrichten als RFC-5424-Syslog über TCP/TLS,
+  bounded Queue, Testversand, Beispielnachricht, ATNA-Karte auf der
+  Settings-Seite. Bewusst opt-in.
+
+**Beim Umsetzen gefunden und behoben.**
+
+| Fund | Fix |
+|---|---|
+| HL7-Feldindizes waren durchweg um eins verschoben (MSH-1 *ist* das Trennzeichen, alle anderen Segmente sind 1-basiert) | Parser auf **HL7-Feldnummern** umgestellt (`_field(seg, 9, msh=True)`), Testnachrichten korrigiert |
+| Uhrzeit aus einem kombinierten `YYYYMMDDHHMM`-Feld wurde als `20:26` gelesen | `_format_time` unterscheidet jetzt Zeit-only (HHMM) und vollen Stempel |
+| Die Pseudo-Quelle `local` wurde bei **jedem Start** angelegt und tauchte in einer frischen Installation als Quelle auf | entsteht erst mit dem ersten lokalen Eintrag (`answers_for` bricht ohne Einträge vorher ab) |
+| Der Audit-Snapshot lokaler Einträge enthielt den **Patientennamen** — damit PHI im Änderungsprotokoll und im Konfigurations-Export | Snapshot auf Termindaten reduziert, dokumentiert; ein Rollback stellt den Termin, nicht die Identität wieder her |
+| `audit.snapshot()` warf bei `None` (Storno ohne Zeile) | akzeptiert `None` (Dokumentation war schon so) |
+| HL7-Nachrichten wurden nur im MLLP-Pfad protokolliert | Logging ins gemeinsame `upsert_from_hl7` gezogen |
+| Test-Stack behielt seine Volumes → Restdaten machten die Assertions vom Vorlauf abhängig | `down -v` vor dem Start; die neuen Abschnitte sind zusätzlich idempotent |
+
+**Tests & Verifikation.**
+
+| Ebene | Umfang |
+|---|---|
+| pytest | 339 Tests, 96 % Coverage (+36: Parser, lokale Items, MLLP über echten Socket, Stationsregeln, ATNA) |
+| vitest | 428 Tests, 98 % Broker-UI-Coverage (+24: Worklist-/Stationsseite, ATNA-Karte, Client) |
+| Playwright | 44 Tests (Desktop + Mobile), inkl. Notfall in der Liste, HL7-Trockenlauf, Stationsvorschau, ATNA-Beispielnachricht + Testversand |
+| test-stack.sh | Notfall erscheint in der C-FIND-Antwort, HL7 Trockenlauf/Anwenden, Stationsvorschau, **echter Syslog-Empfänger** mit Audit-Nachrichten (42, Query-Events enthalten) |
+| verify-ui.cjs | 100 Checks (Desktop 1400×900 + Mobile 375×812) |
 
 ## Offene Entscheidungen (an den Betreiber)
 

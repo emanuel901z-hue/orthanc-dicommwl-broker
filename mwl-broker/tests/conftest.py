@@ -6,6 +6,7 @@ os.environ["BROKER_DATABASE_URL"] = "sqlite:///./test_mwl.db"
 os.environ["BROKER_START_DICOM"] = "false"
 os.environ["BROKER_START_ECHO_LOOP"] = "false"
 os.environ["BROKER_START_SPOOL"] = "false"   # the worker is driven explicitly in tests
+os.environ["BROKER_START_ATNA"] = "false"    # the ATNA drain worker is driven explicitly
 # a writable spool directory (the production default lives under /var/lib)
 SPOOL_DIR = Path(__file__).resolve().parent.parent / ".pytest-spool"
 os.environ["BROKER_SPOOL_DIR"] = str(SPOOL_DIR)
@@ -16,13 +17,15 @@ import pytest  # noqa: E402
 @pytest.fixture(autouse=True)
 def fresh_echo_state():
     """Echo status and alert de-bounce live in module globals — reset per test."""
-    from mwl_broker import echo, notify
+    from mwl_broker import atna, echo, notify
 
     echo.reset_for_tests()
     notify.reset_for_tests()
+    atna.reset_for_tests()
     yield
     echo.reset_for_tests()
     notify.reset_for_tests()
+    atna.reset_for_tests()
 
 
 @pytest.fixture(autouse=True)

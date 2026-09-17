@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from . import metrics, notify
+from . import local_worklist, metrics, notify
 from .db import session_factory
 from .models import MwlSource, PacsTarget
 from .upstream import c_echo
@@ -111,6 +111,7 @@ def echo_loop(interval_s: int, stop: threading.Event) -> None:
             if ticks % 60 == 0:
                 settings_service.purge_seen_items()
                 cache.purge()
+                local_worklist.purge_expired()
         except Exception:
             pass  # DB not ready yet — next tick retries
         try:

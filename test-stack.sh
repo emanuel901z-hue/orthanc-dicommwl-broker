@@ -44,6 +44,10 @@ cleanup() {
 trap cleanup EXIT
 
 echo "── building + starting test stack ──"
+# start from a clean database: the scenarios below (local items, station rules,
+# spool entries) are not idempotent by nature, and a leftover volume would make
+# the assertions depend on the previous run
+$COMPOSE down -v --remove-orphans > /dev/null 2>&1 || true
 $COMPOSE up -d --build
 
 echo "── waiting for broker health ──"
@@ -105,6 +109,61 @@ case "$test_result" in
   *) echo "FAIL: the webhook did not accept the test message" >&2; exit 1 ;;
 esac
 [ -s "$WEBHOOK_LOG" ] || { echo "FAIL: the webhook receiver got nothing" >&2; exit 1; }
+
+echo "── ATNA: audit trail to an own repository ──"
+# A plain-TCP syslog receiver on the host stands in for the hospital's ARR.
+ATNA_LOG=$(mktemp)
+ATNA_PORT=19998
+python3 - "$ATNA_LOG" "$ATNA_PORT" <<'PY' &
+import socket, sys, threading
+
+log_path, port = sys.argv[1], int(sys.argv[2])
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("0.0.0.0", port))
+server.listen(8)
+
+def handle(conn):
+    with conn:
+        conn.settimeout(2)
+        data = b""
+        try:
+            while True:
+                chunk = conn.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+        except socket.timeout:
+            pass
+    if data:
+        with open(log_path, "ab") as handle_file:
+            handle_file.write(data + b"\n")
+
+while True:
+    conn, _ = server.accept()
+    threading.Thread(target=handle, args=(conn,), daemon=True).start()
+PY
+ATNA_PID=$!
+trap 'kill $WEBHOOK_PID $ATNA_PID 2>/dev/null; rm -f "$WEBHOOK_LOG" "$ATNA_LOG"' EXIT
+sleep 1
+
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/atna_syslog_host" \
+  -H 'Content-Type: application/json' -d '{"value":"host.docker.internal"}' > /dev/null
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/atna_syslog_port" \
+  -H 'Content-Type: application/json' -d "{\"value\":\"$ATNA_PORT\"}" > /dev/null
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/atna_syslog_protocol" \
+  -H 'Content-Type: application/json' -d '{"value":"tcp"}' > /dev/null
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/atna_enabled" \
+  -H 'Content-Type: application/json' -d '{"value":"true"}' > /dev/null
+
+atna_test=$(curl -sf -X POST "$BROKER_API_URL/api/v1/atna/test")
+echo "   test audit message: $atna_test"
+case "$atna_test" in
+  *'"ok":true'*) ;;
+  *) echo "FAIL: the audit repository did not accept the test message" >&2; exit 1 ;;
+esac
+atna_sample=$(curl -sf "$BROKER_API_URL/api/v1/atna/sample" | python3 -c "import json,sys; print(json.load(sys.stdin)['xml'][:40])")
+echo "   sample message: $atna_sample"
 
 echo "── DICOM smoke: C-FIND through broker ──"
 python3 mwl-broker/scripts/cfind_smoke.py "$BROKER_DICOM_HOST" "$BROKER_DICOM_PORT" MWLBROKER
@@ -250,6 +309,51 @@ set_target_port 4242
 echo "   dead letters for the UI test: $dead"
 [ "$dead" -ge 1 ] || { echo "FAIL: no dead letter was produced" >&2; exit 1; }
 
+echo "── Local worklist items + HL7 ORM ──"
+# A locally scheduled emergency must appear in the worklist the modality gets.
+curl -s -X POST "$BROKER_API_URL/api/v1/local-items" -H 'Content-Type: application/json' -d '{
+  "accession":"EMERG-E2E","sps_id":"1","patient_id":"P7777","patient_name":"Notfall^Erika",
+  "modality":"CT","station_aet":"CT_01","procedure_description":"CT Schaedel (Notfall)",
+  "scheduled_date":"2026-09-17"}' > /dev/null
+local_count=$(curl -sf "$BROKER_API_URL/api/v1/local-items" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
+echo "   local items: $local_count"
+[ "$local_count" -ge 1 ] || { echo "FAIL: the local item was not created" >&2; exit 1; }
+
+python3 mwl-broker/scripts/cfind_smoke.py "$BROKER_DICOM_HOST" "$BROKER_DICOM_PORT" MWLBROKER > /tmp/cfind-local.txt 2>&1 || true
+grep -q "EMERG-E2E" /tmp/cfind-local.txt || { echo "FAIL: the local item is missing from the C-FIND answers" >&2; exit 1; }
+echo "   C-FIND answers: $(grep -c 'acc=' /tmp/cfind-local.txt) (incl. the local emergency)"
+
+# The HL7 interface: dry-run, then apply.
+ORM='MSH|^~\&|RIS|HOSPITAL|MWLBROKER|RAD|20260917103000||ORM^O01|E2E1|P|2.5
+PID|1||P8888||Weber^Karl||19700101|M
+ORC|NW|P1|F1
+OBR|1|P1|ACC-HL7-E2E|DX^Thorax p.a.|R|20260918101500
+ZDS|1.2.3.4.5|XR_01'
+orm_dry=$(curl -sf -X POST "$BROKER_API_URL/api/v1/hl7/orm?dry_run=true" \
+  -H 'Content-Type: text/plain' --data-binary "$ORM" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['accession'], d['order_control'], d['action'])")
+echo "   HL7 dry-run: $orm_dry"
+orm_apply=$(curl -sf -X POST "$BROKER_API_URL/api/v1/hl7/orm?dry_run=false" \
+  -H 'Content-Type: text/plain' --data-binary "$ORM" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['accession'], d['action'])")
+echo "   HL7 apply: $orm_apply"
+case "$orm_apply" in
+  *created*|*updated*) ;;
+  *) echo "FAIL: the HL7 order was not applied" >&2; exit 1 ;;
+esac
+
+echo "── Station rules ──"
+rule_id=$(curl -s -X POST "$BROKER_API_URL/api/v1/station-rules" -H 'Content-Type: application/json' -d '{
+  "name":"e2e-ct-hides-ris-b","station_aet":"CT_01","mode":"deny","source_ids":[]}' \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id', 'existing'))")
+station_preview=$(curl -sf -X POST "$BROKER_API_URL/api/v1/simulate/station" \
+  -H 'Content-Type: application/json' -d '{"station_aet":"CT_01"}' \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['rule_name'], len(d['sources']))")
+echo "   station preview: $station_preview"
+case "$station_preview" in
+  e2e-ct-hides-ris-b*) ;;
+  *) echo "FAIL: the station rule was not matched" >&2; exit 1 ;;
+esac
+echo "   (rule $rule_id stays for the UI test)"
+
 echo "── Alerting: an event reached the webhook ──"
 events=""
 for _ in $(seq 1 20); do
@@ -273,7 +377,17 @@ case "$events" in
   *spool_dead_letter*|*target_down*|*source_down*) ;;
   *) echo "FAIL: no real broker event was delivered" >&2; exit 1 ;;
 esac
-# the receiver stays up: the Playwright suite sends a test message from the UI
+# the receivers stay up: the Playwright suite sends test messages from the UI
+
+echo "── ATNA: a real audit message was delivered ──"
+sleep 3
+if grep -aq 'csd-code="110112"' "$ATNA_LOG" 2>/dev/null; then
+  echo "   audit messages received: $(grep -ac 'AuditMessage' "$ATNA_LOG") (Query events included)"
+else
+  echo "   audit messages received: $(grep -ac 'AuditMessage' "$ATNA_LOG" || echo 0)"
+  echo "FAIL: no Query audit message reached the repository" >&2
+  exit 1
+fi
 
 echo "── Playwright (desktop + mobile) ──"
 (cd orthanc-explorer-3-usable && OE3_BASE="$OE3_BASE" \

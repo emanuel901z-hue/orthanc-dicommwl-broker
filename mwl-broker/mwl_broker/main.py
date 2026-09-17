@@ -15,6 +15,8 @@ from . import api, db
 from .schemas import ReadyOut
 from .config import get_settings
 from .dimse import BrokerSCP
+from . import atna
+from . import mllp
 from .echo import echo_loop
 from .spool import worker as spool_worker
 
@@ -36,6 +38,7 @@ async def lifespan(app: FastAPI):
     stop = threading.Event()
     echo_thread = None
     spool_thread = None
+    mllp_thread = None
     if settings.start_dicom:
         scp = BrokerSCP(settings)
         scp.start()
@@ -45,6 +48,11 @@ async def lifespan(app: FastAPI):
             target=echo_loop, args=(settings.echo_interval_s, stop), daemon=True
         )
         echo_thread.start()
+    if settings.start_atna:
+        atna.start()
+    if settings.hl7_mllp_enabled:
+        mllp_thread = threading.Thread(target=mllp.serve, args=(stop,), daemon=True)
+        mllp_thread.start()
     if settings.start_spool:
         # store and forward: retries instances that could not be delivered
         spool_thread = threading.Thread(target=spool_worker, args=(stop,), daemon=True)
@@ -53,10 +61,13 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         stop.set()
+        atna.stop()
         if echo_thread is not None:
             echo_thread.join(timeout=2)
         if spool_thread is not None:
             spool_thread.join(timeout=2)
+        if mllp_thread is not None:
+            mllp_thread.join(timeout=2)
         if scp is not None:
             scp.shutdown()
 
@@ -86,6 +97,8 @@ def create_app() -> FastAPI:
             {"name": "rules", "description": "Routing rules: worklist source → store target."},
             {"name": "transforms", "description": "DICOM attribute modifications applied before forwarding (tag set/remove/prefix/suffix/replace/copy)."},
             {"name": "settings", "description": "Runtime settings — UI override over the deployment ENV default."},
+            {"name": "local", "description": "Local worklist items (emergencies) and the HL7 ORM interface."},
+            {"name": "atna", "description": "IHE ATNA audit trail: PS3.15 audit messages over syslog/TLS."},
             {"name": "spool", "description": "C-STORE spool: store-and-forward queue with retries and dead letters."},
             {"name": "cache", "description": "Worklist cache: snapshots that bridge an unreachable RIS, with a bounded stale window."},
             {"name": "audit", "description": "Configuration change log (before/after snapshots)."},

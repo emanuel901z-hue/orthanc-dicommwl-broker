@@ -31,6 +31,22 @@ cd mwl-broker && python -m pytest tests -q
 # …mit Coverage (aktuell 96 %)
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 
+# Lokale Worklist + HL7 (laufender Stack)
+curl -s http://127.0.0.1:18081/api/v1/local-items | python3 -m json.tool
+curl -s -X POST http://127.0.0.1:18081/api/v1/hl7/orm?dry_run=true \
+  -H 'Content-Type: text/plain' --data-binary @/tmp/orm.hl7 | python3 -m json.tool
+curl -s http://127.0.0.1:18081/api/v1/hl7/messages?limit=10 | python3 -m json.tool
+
+# Stationsregeln + Vorschau
+curl -s http://127.0.0.1:18081/api/v1/station-rules | python3 -m json.tool
+curl -s -X POST http://127.0.0.1:18081/api/v1/simulate/station \
+  -H 'Content-Type: application/json' -d '{"station_aet":"CT_01"}' | python3 -m json.tool
+
+# ATNA-Audit-Trail
+curl -s http://127.0.0.1:18081/api/v1/atna/stats | python3 -m json.tool
+curl -s http://127.0.0.1:18081/api/v1/atna/sample | python3 -c "import json,sys; print(json.load(sys.stdin)['xml'])"
+curl -X POST http://127.0.0.1:18081/api/v1/atna/test
+
 # Alerting (laufender Stack)
 curl -s http://127.0.0.1:18081/api/v1/notify/events | python3 -m json.tool
 curl -X POST http://127.0.0.1:18081/api/v1/notify/test
@@ -182,6 +198,14 @@ Token rotieren = nur die Store-Datei neu schreiben:
   nicht (`create_all` ändert vorhandene Tabellen nie) und die API antwortet mit
   500. Revisionen nach der Baseline müssen **defensiv** sein (Existenzprüfung),
   weil eine frische DB das Schema schon hat. `tests/test_db.py` erzwingt das.
+- **HL7-Feldindizes sind HL7-Feldnummern.** MSH ist die Ausnahme: MSH-1 *ist*
+  das Trennzeichen, deshalb `_field(seg, n, msh=True)` (Index n−1). Alle anderen
+  Segmente sind 1-basiert.
+- **Lokale Einträge nie mit Patientendaten ins Änderungsprotokoll.** Der
+  Audit-Snapshot enthält nur Termindaten; sonst landet PHI im
+  Konfigurations-Export. Die Tabelle selbst ist der PHI-Speicher.
+- **Audit-/Alerting-Zustellung blockiert nie den DICOM-Pfad** (Queue bzw.
+  Hintergrund-Thread); ATNA ist opt-in, Fehler werden nur gezählt.
 - **Alerting darf nie blockieren.** Versand läuft auf einem Hintergrund-Thread,
   Fehler werden nur geloggt/gezählt. Gemeldet wird der Übergang, nicht jeder
   Check (sonst Nachrichtenflut); die Webhook-URL nie vollständig loggen.

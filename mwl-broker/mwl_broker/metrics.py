@@ -19,6 +19,14 @@ ECHO_UP = Gauge(
     "mwl_echo_up", "Last C-ECHO result (1=ok, 0=fail)", ["kind", "name"]
 )
 SEEN_ITEMS = Gauge("mwl_seen_items", "Rows in seen_items table")
+LOCAL_ITEMS = Gauge("mwl_local_worklist_items", "Active local worklist items")
+HL7_MESSAGES = Counter(
+    "mwl_hl7_messages_total", "Inbound HL7 messages", ["transport", "result"]
+)
+ATNA_SENT = Counter("mwl_atna_sent_total", "ATNA audit messages delivered", ["event"])
+ATNA_FAILED = Counter("mwl_atna_failed_total", "ATNA audit messages that failed", ["event"])
+ATNA_DROPPED = Counter("mwl_atna_dropped_total", "ATNA audit messages dropped (queue full)")
+ATNA_QUEUE = Gauge("mwl_atna_queue_size", "Buffered ATNA audit messages")
 NOTIFY_SENT = Counter("mwl_notify_sent_total", "Alerts delivered to the webhook", ["event"])
 NOTIFY_FAILED = Counter(
     "mwl_notify_failed_total", "Alerts that could not be delivered", ["event"]

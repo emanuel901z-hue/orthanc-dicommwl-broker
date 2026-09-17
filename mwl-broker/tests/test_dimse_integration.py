@@ -487,6 +487,272 @@ def test_cfind_increments_metrics(broker):
     assert after == before + 1
 
 
+# ── Local worklist items ───────────────────────────────────────────────
+
+
+def _local_item(accession="EMERG-1", **kwargs) -> None:
+    from mwl_broker.models import LocalWorklistItem
+
+    values = {
+        "accession": accession, "sps_id": "1", "patient_id": "P9001",
+        "patient_name": "Notfall^Anna", "modality": "CT", "station_aet": "CT_01",
+        "procedure_description": "CT Schädel (Notfall)", "scheduled_date": "2026-09-17",
+        "origin": "manual", "enabled": True,
+    }
+    values.update(kwargs)
+    with session_factory()() as s:
+        s.add(LocalWorklistItem(**values))
+        s.commit()
+
+
+def test_cfind_includes_local_items(broker, mwl_scp):
+    _seed_source(mwl_scp)
+    _local_item()
+
+    answers = _cfind(broker, _wildcard_query())
+
+    assert len(answers) == 3                      # two from the RIS + the local one
+    local = [ds for ds in answers if str(ds.AccessionNumber) == "EMERG-1"]
+    assert len(local) == 1
+    assert str(local[0].PatientName) == "Notfall^Anna"
+    assert str(local[0].ScheduledProcedureStepSequence[0].Modality) == "CT"
+
+    # the query log shows the pseudo source
+    log_row = _last_query_log()
+    assert log_row.per_source.get("local") == 1
+
+
+def test_local_items_respect_the_query_filters(broker, mwl_scp):
+    _seed_source(mwl_scp)
+    _local_item("EMERG-CT", modality="CT")
+    _local_item("EMERG-MR", modality="MR", station_aet="MR_01")
+
+    mr_answers = _cfind(broker, _station_query("MR_01"))
+
+    accessions = {str(ds.AccessionNumber) for ds in mr_answers}
+    assert "EMERG-MR" in accessions
+    assert "EMERG-CT" not in accessions
+
+
+def test_local_item_wins_the_dedupe(broker, mwl_scp):
+    """The local entry replaces the RIS one for the same accession."""
+    _seed_source(mwl_scp)
+    accession = VARIANTS["a"][0].AccessionNumber
+    # the merge key is patient + accession + SPS ID, so the local entry has to
+    # carry the same identity to replace the RIS answer
+    _local_item(accession, patient_id=VARIANTS["a"][0].PatientID,
+                sps_id=f"SPS-{accession}", procedure_description="Notfall-Override")
+
+    answers = _cfind(broker, _wildcard_query())
+
+    matches = [ds for ds in answers if str(ds.AccessionNumber) == accession]
+    assert len(matches) == 1
+    assert str(matches[0].RequestedProcedureDescription) == "Notfall-Override"
+
+    # provenance follows the local pseudo source (which routing rules can use)
+    with session_factory()() as s:
+        row = s.scalars(
+            select(SeenItem).where(SeenItem.accession == accession)
+            .order_by(SeenItem.ts.desc())
+        ).first()
+        local_source = s.scalars(select(MwlSource).where(MwlSource.name == "local")).one()
+        assert row.source_id == local_source.id
+
+
+def test_station_rule_can_hide_local_items(broker, mwl_scp):
+    from mwl_broker.models import StationRule
+
+    from mwl_broker import local_worklist
+
+    _seed_source(mwl_scp)
+    _local_item()
+    local_worklist.local_source_id()      # the pseudo source appears with the first item
+    with session_factory()() as s:
+        local_source = s.scalars(select(MwlSource).where(MwlSource.name == "local")).one()
+        s.add(StationRule(name="hide-local", station_aet="CT_01", mode="deny",
+                          source_ids=[local_source.id]))
+        s.commit()
+
+    accessions = {str(ds.AccessionNumber) for ds in _cfind(broker, _station_query("CT_01"))}
+
+    assert "EMERG-1" not in accessions
+
+
+def test_mllp_listener_applies_an_order_and_answers():
+    """The MLLP listener accepts an ORM message and returns an ACK."""
+    import socket as socket_mod
+    import threading as threading_mod
+
+    from mwl_broker import mllp
+
+    settings_service.set_value("hl7_mllp_port", "0")   # bind an ephemeral port
+    probe = socket_mod.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    settings_service.set_value("hl7_mllp_bind", "127.0.0.1")
+    settings_service.set_value("hl7_mllp_port", str(port))
+
+    stop = threading_mod.Event()
+    thread = threading_mod.Thread(target=mllp.serve, args=(stop,), daemon=True)
+    thread.start()
+    try:
+        deadline = time.time() + 5
+        ack = ""
+        while time.time() < deadline:
+            try:
+                with socket_mod.create_connection(("127.0.0.1", port), timeout=1) as conn:
+                    message = (
+                        "MSH|^~\\&|RIS||MWLBROKER||20260917103000||ORM^O01|MLLP1|P|2.5\r"
+                        "PID|1||P5001||Test^Patient||19900101|F\r"
+                        "ORC|NW\r"
+                        "OBR|1||ACC-MLLP-1|CT^CT Notfall|R|20260917140000\r"
+                    )
+                    conn.sendall(b"\x0b" + message.encode() + b"\x1c\x0d")
+                    ack = conn.recv(4096).decode("utf-8", "replace")
+                break
+            except OSError:
+                time.sleep(0.1)
+    finally:
+        stop.set()
+        thread.join(timeout=2)
+
+    assert "MSA|AA|MLLP1" in ack
+    with session_factory()() as s:
+        from mwl_broker.models import Hl7Message, LocalWorklistItem
+
+        assert s.query(LocalWorklistItem).count() == 1
+        assert s.query(Hl7Message).one().transport == "mllp"
+
+
+# ── ATNA audit trail ───────────────────────────────────────────────────
+
+
+def test_cfind_writes_a_query_audit_message(broker, mwl_scp, monkeypatch):
+    from mwl_broker import atna
+
+    messages: list[str] = []
+    monkeypatch.setattr(atna, "send", lambda xml: messages.append(xml) or True)
+    _seed_source(mwl_scp)
+
+    _cfind(broker, _station_query("CT_01"))
+
+    assert messages, "no audit message was produced"
+    assert all('csd-code="110112"' in xml for xml in messages)   # Query
+    assert any("ScheduledStationAETitle=CT_01" in xml for xml in messages)
+    # every disclosed patient gets its own message (that is the audit trail)
+    assert any('ParticipantObjectID="P1001"' in xml for xml in messages)
+
+
+def test_cstore_writes_import_and_export_audits(broker, mwl_scp, store_scp, monkeypatch):
+    from mwl_broker import atna
+
+    messages: list[str] = []
+    monkeypatch.setattr(atna, "send", lambda xml: messages.append(xml) or True)
+    _seed_source(mwl_scp)
+    _cfind(broker, _wildcard_query())
+    _seed_target(store_scp[1], name="pacs", is_default=True)
+
+    ds = _ct_dataset(VARIANTS["a"][0].AccessionNumber, VARIANTS["a"][0].StudyInstanceUID)
+    assert _cstore(broker, ds) == 0x0000
+
+    codes = {xml.split('EventID csd-code="')[1][:6] for xml in messages}
+    assert {"110104", "110106"} <= codes          # Import + Export
+    assert any('ParticipantObjectID="ACC-A-001"' in xml for xml in messages)
+
+
+def test_rejected_calling_aet_writes_a_security_alert(restricted_broker, monkeypatch):
+    """A rejected association is a security event — it belongs in the audit trail."""
+    from mwl_broker import atna
+
+    messages: list[str] = []
+    monkeypatch.setattr(atna, "send", lambda xml: messages.append(xml) or True)
+
+    # the restricted broker does not allow the helper's AE title
+    assert _cfind_final_status(restricted_broker, _wildcard_query()) == 0xA700
+
+    assert len(messages) == 1
+    assert 'csd-code="110113"' in messages[0]     # Security Alert
+    assert 'EventOutcomeIndicator="8"' in messages[0]
+    assert 'UserID="TESTSCU"' in messages[0]
+
+
+def test_auditing_is_off_by_default(broker, mwl_scp):
+    """Without configuration nothing is queued (and nothing breaks)."""
+    from mwl_broker import atna
+
+    _seed_source(mwl_scp)
+
+    _cfind(broker, _wildcard_query())
+
+    assert atna.configured() is False
+    assert atna.stats()["queue_size"] == 0
+
+
+# ── Per-station rules ──────────────────────────────────────────────────
+
+
+def _station_query(station: str) -> Dataset:
+    q = _wildcard_query()
+    q.ScheduledProcedureStepSequence[0].ScheduledStationAETitle = station
+    return q
+
+
+def test_cfind_applies_the_station_filter(broker, mwl_scp):
+    """A station rule hides a source for that console only."""
+    from mwl_broker.models import StationRule
+
+    source_id = _seed_source(mwl_scp)
+    with session_factory()() as s:
+        s.add(StationRule(name="ct-hides-ris-a", station_aet="CT_01", mode="deny",
+                          source_ids=[source_id]))
+        s.commit()
+
+    # the mock items are scheduled for CT_01 → the rule hides the only source
+    assert _cfind(broker, _station_query("CT_01")) == []
+
+    # another station is unaffected
+    assert len(_cfind(broker, _station_query("MR_01"))) == 2
+    # and a query without a station matches no rule at all
+    assert len(_cfind(broker, _wildcard_query())) == 2
+
+
+def test_cfind_station_allow_list(broker, mwl_scp):
+    from mwl_broker.models import StationRule
+
+    source_id = _seed_source(mwl_scp)
+    with session_factory()() as s:
+        s.add(StationRule(name="mr-only", station_aet="MR_01", mode="allow",
+                          source_ids=[source_id + 99]))
+        s.commit()
+
+    # allow-list without this source → nothing is shown
+    assert _cfind(broker, _station_query("MR_01")) == []
+    assert len(_cfind(broker, _station_query("CT_01"))) == 2
+
+
+def test_cfind_station_priority_override_wins_the_dedupe(broker, mwl_scp):
+    """Two sources with the same items: the station decides who wins."""
+    from mwl_broker.models import StationRule
+
+    first = _seed_source(mwl_scp, name="ris-a", aet="RIS_A")
+    second = _seed_source(mwl_scp, name="ris-b", aet="RIS_B")
+    with session_factory()() as s:
+        s.get(MwlSource, second).priority = 1        # ris-b wins by default
+        s.commit()
+        s.add(StationRule(name="ct-prefers-a", station_aet="CT_01", mode="deny",
+                          source_ids=[], source_priority={str(first): 1}))
+        s.commit()
+
+    assert len(_cfind(broker, _wildcard_query())) == 2          # ris-b wins
+    assert len(_cfind(broker, _station_query("CT_01"))) == 2    # ris-a wins instead
+
+    # the provenance (seen_items) follows the override
+    with session_factory()() as s:
+        rows = s.query(SeenItem).order_by(SeenItem.id.desc()).limit(2).all()
+        assert {row.source_id for row in rows} == {first}
+
+
 # ── C-STORE spool (store and forward) ──────────────────────────────────
 
 
