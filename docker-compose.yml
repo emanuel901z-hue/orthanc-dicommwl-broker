@@ -91,6 +91,9 @@ services:
       # store and forward: undeliverable instances survive a PACS outage and a
       # container restart — keep this on real storage with enough headroom
       - mwl-spool:/var/lib/mwl-broker/spool
+    extra_hosts:
+      # lets the broker reach services on the host (e.g. a webhook receiver)
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

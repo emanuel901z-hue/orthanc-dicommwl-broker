@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from . import metrics
+from . import metrics, notify
 from .db import session_factory
 from .models import MwlSource, PacsTarget
 from .upstream import c_echo
@@ -19,6 +19,7 @@ ECHO_STATUS: dict[str, dict[int, dict]] = {"source": {}, "target": {}}
 
 def _record(kind: str, row_id: int, name: str, ok: bool, rtt_ms: int | None, error: str | None):
     with _lock:
+        previous = ECHO_STATUS[kind].get(row_id)
         ECHO_STATUS[kind][row_id] = {
             "kind": kind,
             "id": row_id,
@@ -29,6 +30,15 @@ def _record(kind: str, row_id: int, name: str, ok: bool, rtt_ms: int | None, err
             "error": error,
         }
     metrics.ECHO_UP.labels(kind=kind, name=name).set(1 if ok else 0)
+
+    # Alert on the transition only — a flapping node must not become a storm.
+    if previous is not None and previous.get("ok") != ok:
+        if ok:
+            notify.notify(f"{kind}_recovered", f"{kind} '{name}' answers again.",
+                          {"kind": kind, "name": name}, subject=name)
+        else:
+            notify.notify(f"{kind}_down", f"{kind} '{name}' stopped answering C-ECHO.",
+                          {"kind": kind, "name": name, "error": error}, subject=name)
 
 
 def echo_one(kind: str, row) -> dict:
@@ -55,6 +65,24 @@ def snapshot() -> dict[str, list[dict]]:
         return {kind: list(items.values()) for kind, items in ECHO_STATUS.items()}
 
 
+def _notify_config_errors() -> None:
+    """Alert about configuration findings (errors only, de-bounced per code)."""
+    from . import health_checks
+    from .config import get_settings
+
+    try:
+        with session_factory()() as s:
+            findings = health_checks.config_findings(s, get_settings())
+    except Exception:
+        return
+    for finding in findings:
+        if finding["severity"] != "error":
+            continue
+        notify.notify("config_error", f"Configuration check failed: {finding['message']}",
+                      {"code": finding["code"], **finding.get("details", {})},
+                      subject=finding["code"])
+
+
 def echo_loop(interval_s: int, stop: threading.Event) -> None:
     """Background loop: echo every enabled source/target.
 
@@ -78,6 +106,8 @@ def echo_loop(interval_s: int, stop: threading.Event) -> None:
             for source_cfg in cache.sources_due_for_refresh():
                 cache.refresh(source_cfg)
             ticks += 1
+            if ticks % 10 == 0:
+                _notify_config_errors()
             if ticks % 60 == 0:
                 settings_service.purge_seen_items()
                 cache.purge()

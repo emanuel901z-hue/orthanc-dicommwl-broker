@@ -39,7 +39,7 @@ auditierbar.
 | **P1** | Config-Audit + Export/Import/Rollback | Nachvollziehbarkeit, Staging→Prod, Notfall-Rollback | mittel | **✅ Sprint 2** |
 | **P1** | Simulation (Dry-Run) für Routing/Transform | Regeln gefahrlos prüfen, bevor sie greifen | klein | **✅ Sprint 2** |
 | **P1** | Konsistenz-Checks / Health-Panel | Fehlkonfigurationen früh und sichtbar | klein | **✅ Sprint 1** |
-| **P1** | Alerting/Webhooks + Readiness-Endpoint | Betrieb erfährt Störungen, bevor Anwender anrufen | klein | Readiness ✅ Sprint 1, Webhooks offen (Sprint 5) |
+| **P1** | Alerting/Webhooks + Readiness-Endpoint | Betrieb erfährt Störungen, bevor Anwender anrufen | klein | **✅ Sprint 5** |
 | **P2** | Lokale Worklist-Items / HL7-ORM-Adapter | Notfälle und ungeplante Untersuchungen | hoch | offen |
 | **P2** | Per-Station-Filter und -Priorität | jede Konsole sieht nur ihre Arbeitsliste | mittel | offen |
 | **P2** | DICOM-TLS (mTLS) + Zertifikatsverwaltung | Segmentierung/Netzwerkanforderungen | mittel | offen |
@@ -357,29 +357,55 @@ Fehlkonfigurationen.
 
 ### P1-4 Alerting/Webhooks + Readiness
 
-**Wert in der Produktion.** Der Betrieb soll es erfahren, bevor die
-Radiologie anruft.
+**Wert in der Produktion.** Der Betrieb soll es erfahren, bevor die Radiologie
+anruft: ein RIS, das nicht mehr antwortet, ein PACS-Ausfall, ein Dead Letter im
+Spool, ein Konfigurationsfehler.
 
 **Backend.**
 
-- Ereignisse: Quelle/Target down (aus dem Echo-Loop), Spool-Dead-Letter,
-  Backlog über Schwelle, Breaker offen, Konfigurationsfehler.
-- Settings: `notify_webhook_url`, `notify_events` (CSV),
-  `notify_min_interval_s` (Flankenschutz gegen Sturm).
-- `POST /api/v1/notify/test` für einen Testversand aus der UI.
-- Zustellung als JSON-POST (Slack/Teams-kompatibel dokumentiert), Fehler
-  werden geloggt, aber nie nach außen sichtbar.
+- `notify.py` mit einem **Ereigniskatalog** (9 Codes, per `GET /notify/events`
+  abrufbar): `source_down`, `source_recovered`, `target_down`,
+  `target_recovered`, `breaker_open`, `spool_dead_letter`, `spool_backlog`,
+  `spool_full`, `config_error` — jeweils mit Severity und Beschreibung.
+- **Zustellung ist fire-and-forget**: jeder Versand läuft auf einem kurzlebigen
+  Hintergrund-Thread. Ein langsamer oder kaputter Webhook darf niemals einen
+  C-FIND oder C-STORE verzögern; Fehler werden geloggt und gezählt, nie an den
+  Aufrufer gereicht.
+- **Dämpfung** je Ereignis+Objekt (`notify_min_interval_s`, Default 300 s):
+  eine flappende Quelle erzeugt keine Nachrichtenflut. Der erste Check einer
+  Quelle meldet nichts — gemeldet wird nur der **Übergang**.
+- Payload ist Slack/Teams-kompatibel: ein `text`-Feld plus strukturierte Felder
+  (`event`, `severity`, `message`, `details`, `broker`, `timestamp`).
+- **Die Webhook-URL wird nie vollständig geloggt** (sie trägt in der Regel ein
+  Secret-Token) — im Log steht nur `https://host/…`.
+- Emit-Punkte: Echo-Loop (Übergänge up/down je Quelle/Ziel), Breaker (Öffnen),
+  Spool (Dead Letter, Rückstand, voll), Echo-Loop alle 10 Ticks
+  (Konfigurationsfehler).
+- Settings: `notify_webhook_url` (leer = aus, muss http(s) sein),
+  `notify_events` (CSV, gegen den Katalog validiert), `notify_min_interval_s`.
+- API: `GET /notify/events`, `POST /notify/test` (auditiert) — der Testversand
+  meldet das Ergebnis der Zustellung zurück.
+- Metriken: `mwl_notify_sent_total{event}`, `mwl_notify_failed_total{event}`,
+  `mwl_notify_suppressed_total{event}`.
+- Readiness bleibt `GET /healthz/ready` (Sprint 1).
 
 **Frontend (OE3).**
 
-- Settings-Seite: Webhook-URL, Ereignisauswahl (Mehrfachauswahl),
-  Mindestabstand, „Testnachricht senden" mit Ergebnisanzeige.
+- Eigene **Alerting-Karte** auf der Settings-Seite (statt drei generischer
+  Felder): Webhook-URL mit Override/Reset, **Ereignisauswahl als Checkboxen**
+  (Code, Severity und Beschreibung kommen aus der API), Mindestabstand und
+  **„Testnachricht senden"** mit Ergebnisanzeige — die Prüfung, die der
+  Betreiber nach dem Einrichten braucht.
 
-**Tests & Verifikation.**
-
-- pytest: Ereignis→Versand, Rate-Limit, Fehlerpfad (Webhook 500 → geloggt,
-  Broker funktioniert weiter), Testendpunkt.
-- vitest/Playwright: Formular, Testbutton.
+**Tests & Verifikation.** Ereigniskatalog, Abo-Logik, Validierung (URL,
+unbekannte Codes), Zustellung gegen einen **echten lokalen HTTP-Empfänger**
+(Payload-Form, `text`, Details), Dämpfung (gleiches Objekt unterdrückt, anderes
+Objekt nicht, abschaltbar), unbekanntes Ereignis, Fehlerpfad (HTTP 500,
+unerreichbar) ohne Wirkung auf den Broker, Testversand (ok/Fehler/keine URL),
+URL-Redaction im Log, Übergangs-Alarme aus Echo/Breaker/Spool; API, UI.
+Im Test-Stack läuft ein echter Empfänger auf dem Host
+(`host.docker.internal`): der Smoke prüft den Testversand **und** dass echte
+Ereignisse ankommen.
 
 ---
 
@@ -491,7 +517,7 @@ ATNA-Schema.
 | 2 | Simulation (P1-2) + Config-Audit/Export/Rollback (P1-1) | keine | **✅ umgesetzt** |
 | 3 | Worklist-Cache (P0-1) | Löschkonzept/PHI-Entscheidung | **✅ umgesetzt** |
 | 4 | C-STORE-Spool (P0-2) | Alembic-Migration, Speicherkonzept | **✅ umgesetzt** |
-| 5 | Alerting (P1-4), dann P2 nach fachlicher Priorisierung | Betriebsentscheidung | offen |
+| 5 | Alerting (P1-4), dann P2 nach fachlicher Priorisierung | Betriebsentscheidung | **✅ umgesetzt** |
 
 Jede Phase endet mit: pytest + vitest + Playwright (Desktop/Mobile) +
 `verify-ui.cjs`, aktualisierter OpenAPI-Doku und aktualisiertem `project.md`.
@@ -678,6 +704,33 @@ Paket nur manuell installiert).
 | test-stack.sh | Szenario „Ziel down → gepuffert → Ziel up → zugestellt" plus Dead Letter für die UI |
 | verify-ui.cjs | 77 Checks (Desktop 1400×900 + Mobile 375×812) |
 
+### Sprint 5 — Alerting/Webhooks (umgesetzt)
+
+**Umgesetzt.**
+
+- `notify.py`: Ereigniskatalog (9 Codes) + `GET /notify/events`; Zustellung als
+  JSON-POST auf einem Hintergrund-Thread (DICOM-Pfad wird nie blockiert);
+  Dämpfung je Ereignis+Objekt; Slack/Teams-kompatibler Payload; URL-Redaction
+  im Log; `POST /notify/test` mit Ergebnis.
+- Emit-Punkte: Echo-Übergänge (Quelle/Ziel up/down), Breaker-Öffnen,
+  Spool-Dead-Letter/-Rückstand/-voll, Konfigurationsfehler aus dem Echo-Loop.
+- Settings `notify_webhook_url` / `notify_events` / `notify_min_interval_s`
+  (neue Validierungs-Kinds `url` und `events`), Metriken `mwl_notify_*`.
+- UI: Alerting-Karte auf der Settings-Seite mit Ereignis-Checkboxen und
+  Testversand (die drei Keys erscheinen nicht mehr in der generischen Liste).
+- Deployment: `host.docker.internal:host-gateway` für den Broker, damit ein
+  Webhook auf dem Host erreichbar ist.
+
+**Tests & Verifikation.**
+
+| Ebene | Umfang |
+|---|---|
+| pytest | 260 Tests, 97 % Coverage (notify.py 100 %; +20: Katalog, Abo, Dämpfung, Zustellung gegen echten Empfänger, Fehlerpfade, Redaction, Übergangs-Alarme) |
+| vitest | 404 Tests, 98 % Broker-UI-Coverage (+9: Alerting-Karte, Client) |
+| Playwright | 40 Tests (Desktop + Mobile), inkl. Testversand aus der UI |
+| test-stack.sh | Echter Webhook-Empfänger auf dem Host: Testnachricht **und** echte Ereignisse (`breaker_open`, `config_error`, `spool_dead_letter`) kommen an |
+| verify-ui.cjs | 80 Checks (Desktop 1400×900 + Mobile 375×812) |
+
 ## Offene Entscheidungen (an den Betreiber)
 
 1. **Cache und PHI — entschieden, aber bestätigen lassen:** Der Cache speichert
@@ -694,6 +747,9 @@ Paket nur manuell installiert).
    Fehlermelden an die Modalität).
 3. **Audit-Actor:** kommt der Benutzerkontext aus einem vorgelagerten Proxy
    (Header) oder bleibt das Audit rein technisch?
-4. **Alerting-Ziel:** Webhook (Teams/Slack) oder E-Mail/Syslog?
+4. **Alerting-Ziel — entschieden:** Webhook (Slack/Teams-kompatibles JSON). Die
+   Ereignisauswahl liegt in der UI, der Testversand zeigt sofort, ob der
+   Endpunkt annimmt. Wer E-Mail/Syslog braucht, kann einen kleinen
+   Konverter-Dienst davorhängen — der Broker bleibt bei einem JSON-POST.
 5. **TLS:** welche Strecken sind zu verschlüsseln (Modalität→Broker,
    Broker→PACS, beides)?

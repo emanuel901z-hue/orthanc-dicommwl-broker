@@ -95,6 +95,7 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
 - `GET /cache/stats`, `GET /cache/items`, `DELETE /cache[/sources/{id}]` — Worklist-Cache
 - `GET /spool`, `GET /spool/stats`, `POST /spool/{id}/retry`, `POST /spool/retry-all`,
   `DELETE /spool/{id}?reason=` — C-STORE-Spool (Store and Forward)
+- `GET /notify/events`, `POST /notify/test` — Alerting (Webhook)
 - `GET /logs/queries`, `GET /logs/stores` (paged, Filter: aet, source, status, since)
 - `GET /status` — SCP-Listener, Echo-Matrix (Quellen+Ziele inkl. `breaker_state`), Zähler
 - `GET /healthz`, `GET /metrics` (Prometheus)
@@ -186,6 +187,19 @@ Produktionsfehler (kein Default-Ziel, Regeln auf deaktivierten Knoten, tote
 Quellen, offene Breaker, leere AET-Allowlist, AET-Kollision mit dem Broker
 selbst) und liefert Findings mit stabilem `code` — die UI übersetzt sie und
 verlinkt direkt ins betroffene Formular.
+
+### Alerting (Webhook)
+
+`notify.py` schickt Broker-Ereignisse als JSON-POST an einen Webhook
+(Slack/Teams-kompatibel: `text` plus strukturierte Felder). Neun Ereignisse sind
+im Katalog (`GET /notify/events`): Quelle/Ziel up/down, Breaker offen,
+Spool-Dead-Letter/-Rückstand/-voll, Konfigurationsfehler.
+
+Die Zustellung läuft **immer** auf einem Hintergrund-Thread — ein langsamer oder
+toter Webhook darf nie einen C-FIND/C-STORE verzögern; Fehler werden geloggt und
+gezählt. Gemeldet wird nur der **Übergang** (nicht jeder Check), und gleiche
+Ereignisse für dasselbe Objekt werden `notify_min_interval_s` lang gedämpft.
+Die Webhook-URL wird nie vollständig geloggt (sie trägt ein Secret-Token).
 
 ### C-STORE-Spool (Store and Forward)
 
@@ -347,9 +361,9 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 240 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 395 Tests, 0 Errors |
-| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 38/38 grün, 0 Console-/Page-/Netzwerk-Fehler |
+| `pytest` | 260 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 404 Tests, 0 Errors |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 40/40 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
 
@@ -368,8 +382,8 @@ regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
 
 `ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
 Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
-backend pytest (240) → frontend tsc → lint → vitest (395) → docker-e2e
-(38 Browser-Tests + DIMSE-Smokes + Breaker-/Cache-/Spool-Szenario). Verifiziert: alle Stages grün.
+backend pytest (260) → frontend tsc → lint → vitest (404) → docker-e2e
+(40 Browser-Tests + DIMSE-Smokes + Breaker-/Cache-/Spool-/Webhook-Szenario). Verifiziert: alle Stages grün.
 `--quick` überspringt die Docker-Stage.
 
 #### Coverage-Audit (2026-09)
@@ -378,8 +392,8 @@ Gemessen mit `pytest-cov` bzw. `vitest --coverage`:
 
 | Bereich | Statements | Anmerkung |
 |---|---|---|
-| Backend `mwl_broker/` | **97 %** | spool 93 %, cache 99 %, api 97 %, main 100 %, settings_service/schemas/models/metrics 100 %, routing 100 %, breaker 99 %, audit 97 %, config_io 96 %, health_checks 98 %, echo 96 %, dimse 93 % |
-| Frontend Broker-UI | **97.8 %** | `api/broker.ts` 100 %, Diff-Helfer/Panels 100 %, Seiten 95-100 % |
+| Backend `mwl_broker/` | **97 %** | notify 100 %, spool 93 %, cache 99 %, api 97 %, main 100 %, settings_service/schemas/models/metrics 100 %, routing 100 %, breaker 99 %, audit 97 %, config_io 96 %, health_checks 98 %, echo 96 %, dimse 93 % |
+| Frontend Broker-UI | **97.9 %** | `api/broker.ts` 100 %, Diff-Helfer/Panels 100 %, Seiten 95-100 % |
 
 Ergänzte Tests für zuvor ungedeckte Pfade: Rules-Update/Delete, Target-Echo,
 Log-Filter + Pagination-Validierung, `/metrics`, Lifespan (Seed + SCP-Bind),
@@ -447,6 +461,7 @@ Gefundene und behobene Defekte:
 | 9 | Sprint 2 der Roadmap: Simulation + Config-Audit/Export/Rollback | ✅ |
 | 10 | Sprint 3 der Roadmap: Worklist-Cache mit Stale-Fallback | ✅ |
 | 11 | Sprint 4 der Roadmap: C-STORE-Spool + Alembic-Migrationspfad | ✅ |
+| 12 | Sprint 5 der Roadmap: Alerting/Webhooks | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert

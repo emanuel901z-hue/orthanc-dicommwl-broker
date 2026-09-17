@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from . import metrics, settings_service
+from . import metrics, notify, settings_service
 from .db import session_factory
 from .models import MwlSource, SourceBreaker
 
@@ -110,6 +110,12 @@ def record_failure(source_id: int, error: str = "") -> None:
             "breaker open (source %s, %d consecutive failures, %ds cooldown)",
             source_id, failures, open_seconds,
         )
+        name = _source_name(source_id)
+        notify.notify("breaker_open",
+                      f"Source '{name}' is skipped after {failures} consecutive failures.",
+                      {"source": name, "failures": failures, "cooldown_s": open_seconds,
+                       "error": (error or "")[:200]},
+                      subject=name)
     _publish(source_id, _source_name(source_id), state)
 
 

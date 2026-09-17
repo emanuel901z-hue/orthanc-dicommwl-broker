@@ -19,6 +19,13 @@ ECHO_UP = Gauge(
     "mwl_echo_up", "Last C-ECHO result (1=ok, 0=fail)", ["kind", "name"]
 )
 SEEN_ITEMS = Gauge("mwl_seen_items", "Rows in seen_items table")
+NOTIFY_SENT = Counter("mwl_notify_sent_total", "Alerts delivered to the webhook", ["event"])
+NOTIFY_FAILED = Counter(
+    "mwl_notify_failed_total", "Alerts that could not be delivered", ["event"]
+)
+NOTIFY_SUPPRESSED = Counter(
+    "mwl_notify_suppressed_total", "Alerts suppressed by the de-bounce", ["event"]
+)
 SPOOL_ITEMS = Gauge(
     "mwl_spool_items", "Spooled C-STORE instances by status", ["status"]
 )

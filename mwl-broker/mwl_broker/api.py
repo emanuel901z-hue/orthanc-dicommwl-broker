@@ -28,6 +28,8 @@ from .schemas import (
     ConfigImportIn,
     ImportPlanOut,
     RollbackOut,
+    NotifyEventOut,
+    NotifyTestOut,
     SpoolItemOut,
     SpoolRetryOut,
     SpoolStatsOut,
@@ -51,7 +53,7 @@ from .schemas import (
     TransformIn,
     TransformOut,
 )
-from . import audit, breaker, cache, config_io, health_checks, settings_service, simulate, spool, transforms
+from . import audit, breaker, cache, config_io, health_checks, notify, settings_service, simulate, spool, transforms
 from .models import BrokerSetting, ConfigAudit, SeenItem, SourceBreaker, TransformRule
 
 router = APIRouter(prefix="/api/v1")
@@ -469,6 +471,35 @@ def reset_setting(
     audit.record(s, _actor(request), "reset.setting", "setting", None, before,
                  None, _correlation(request))
     s.commit()
+
+
+# ── Alerting ───────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/notify/events", response_model=list[NotifyEventOut], tags=["monitoring"],
+    summary="Alerting events",
+    description="The events the broker can push to a webhook. Subscribe to them "
+                "with the `notify_events` setting (comma-separated codes).",
+    response_description="Known event codes with severity and description.",
+)
+def notify_events(s: Session = _db_dep):
+    return notify.events()
+
+
+@router.post(
+    "/notify/test", response_model=NotifyTestOut, tags=["monitoring"],
+    summary="Send a test alert",
+    description="Delivers a test message to the configured webhook and reports "
+                "whether it was accepted — the operator's check after setting it up.",
+    response_description="Delivery result of the test message.",
+)
+def notify_test(request: Request, s: Session = _db_dep):
+    result = notify.send_test()
+    audit.record(s, _actor(request), "test.notify", "setting", None,
+                 None, {"ok": result["ok"]}, _correlation(request))
+    s.commit()
+    return result
 
 
 # ── C-STORE spool ──────────────────────────────────────────────────────

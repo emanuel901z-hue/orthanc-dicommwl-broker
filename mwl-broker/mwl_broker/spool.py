@@ -34,7 +34,7 @@ from pydicom.filereader import dcmread
 from pydicom.filewriter import dcmwrite
 from sqlalchemy import delete, func, select
 
-from . import cstore, metrics, settings_service
+from . import cstore, metrics, notify, settings_service
 from .db import session_factory
 from .models import StoreSpool
 
@@ -221,6 +221,11 @@ def enqueue(ds: Dataset, source_id: int | None, target_id: int | None,
                 "spool is full (%d items / %d bytes) — refusing instance %s",
                 cap["items"], cap["bytes"], sop_uid,
             )
+            notify.notify("spool_full",
+                          "The C-STORE spool is full — new instances are refused.",
+                          {"items": cap["items"], "max_items": cap["max_items"],
+                           "bytes": cap["bytes"], "max_bytes": cap["max_bytes"]},
+                          subject="spool")
             return "full"
 
         try:
@@ -311,6 +316,11 @@ def forward(item_id: int) -> str:
             s.commit()
             metrics.SPOOL_DEAD.labels(target=row.target_name or "none").inc()
             log.error("spool: %s → dead letter (target gone)", row.sop_instance_uid)
+            notify.notify("spool_dead_letter",
+                          f"Spooled instance for '{row.target_name}' gave up: target gone.",
+                          {"sop_instance_uid": row.sop_instance_uid, "target": row.target_name,
+                           "reason": "target is missing or disabled"},
+                          subject=row.target_name or "none")
             return STATUS_DEAD
         try:
             ds = _read_payload(row.payload_path)
@@ -320,6 +330,11 @@ def forward(item_id: int) -> str:
             s.commit()
             metrics.SPOOL_DEAD.labels(target=target.name).inc()
             log.error("spool: %s → dead letter (%s)", row.sop_instance_uid, exc)
+            notify.notify("spool_dead_letter",
+                          f"Spooled instance for '{target.name}' gave up: {exc}",
+                          {"sop_instance_uid": row.sop_instance_uid, "target": target.name,
+                           "reason": str(exc)[:200]},
+                          subject=target.name)
             return STATUS_DEAD
 
         try:
@@ -332,6 +347,13 @@ def forward(item_id: int) -> str:
                 metrics.SPOOL_DEAD.labels(target=target.name).inc()
                 log.error("spool: %s gave up after %d attempts — %s",
                           row.sop_instance_uid, row.attempts, exc)
+                notify.notify("spool_dead_letter",
+                              f"Spooled instance for '{target.name}' gave up after "
+                              f"{row.attempts} attempts: {exc}",
+                              {"sop_instance_uid": row.sop_instance_uid,
+                               "target": target.name, "attempts": row.attempts,
+                               "reason": str(exc)[:200]},
+                              subject=target.name)
             else:
                 row.status = STATUS_FAILED
                 row.next_attempt_at = _backoff(row.attempts)
@@ -381,6 +403,7 @@ def worker(stop: threading.Event, interval_s: int | None = None) -> None:
     while not stop.is_set():
         try:
             run_once()
+            _notify_backlog()
             ticks += 1
             if ticks % 60 == 0:
                 purge()
@@ -391,6 +414,19 @@ def worker(stop: threading.Event, interval_s: int | None = None) -> None:
         except Exception:
             wait_s = 10
         stop.wait(wait_s)
+
+
+def _notify_backlog(threshold_s: int = 900) -> None:
+    """Alert when instances wait too long (de-bounced by notify)."""
+    data = stats()
+    if not data["open"] or (data["oldest_age_s"] or 0) < threshold_s:
+        return
+    notify.notify("spool_backlog",
+                  f"{data['open']} instance(s) are waiting in the spool "
+                  f"(oldest {int((data['oldest_age_s'] or 0) / 60)} min).",
+                  {"open": data["open"],
+                   "oldest_minutes": int((data["oldest_age_s"] or 0) / 60)},
+                  subject="spool")
 
 
 def retry(item_id: int) -> bool:

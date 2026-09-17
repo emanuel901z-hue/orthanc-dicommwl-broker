@@ -820,6 +820,39 @@ def test_spool_settings_are_validated(client):
     assert rows["spool_enabled"]["default"] == "True"
 
 
+def test_notify_endpoints(client):
+    events = client.get("/api/v1/notify/events").json()
+    codes = {event["code"] for event in events}
+    assert "source_down" in codes and "spool_dead_letter" in codes
+    assert all(event["severity"] and event["description"] for event in events)
+
+    # no webhook configured → the test message reports it
+    assert client.post("/api/v1/notify/test").json() == {
+        "ok": False, "error": "no webhook URL configured",
+    }
+
+    client.put("/api/v1/settings/notify_webhook_url", json={"value": "http://127.0.0.1:1/hook"})
+    result = client.post("/api/v1/notify/test").json()
+    assert result["ok"] is False and result["error"]
+
+    actions = [row["action"] for row in client.get("/api/v1/audit/config").json()]
+    assert "test.notify" in actions
+
+
+def test_notify_settings_are_validated(client):
+    assert client.put("/api/v1/settings/notify_webhook_url",
+                      json={"value": "https://hooks.example/x"}).status_code == 200
+    assert client.put("/api/v1/settings/notify_webhook_url",
+                      json={"value": "not-a-url"}).status_code == 422
+    assert client.put("/api/v1/settings/notify_events",
+                      json={"value": "source_down,target_down"}).status_code == 200
+    assert client.put("/api/v1/settings/notify_events",
+                      json={"value": "source_down,bogus"}).status_code == 422
+    rows = {s["key"]: s for s in client.get("/api/v1/settings").json()}
+    assert rows["notify_webhook_url"]["kind"] == "url"
+    assert rows["notify_min_interval_s"]["default"] == "300"
+
+
 def test_openapi_documents_all_endpoints(client):
     """Every path operation carries a summary/tag, query params and schema
     fields carry descriptions — keeps Swagger UI usable for integrators."""
@@ -885,6 +918,7 @@ def test_openapi_documents_all_endpoints(client):
         "RuleByNameIn", "TransformImportIn",
         "CacheSourceOut", "CacheItemOut",
         "SpoolStatsOut", "SpoolItemOut", "SpoolRetryOut",
+        "NotifyEventOut", "NotifyTestOut",
     ]:
         schema = spec["components"]["schemas"][schema_name]
         for field, prop in schema["properties"].items():

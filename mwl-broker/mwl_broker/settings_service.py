@@ -34,6 +34,18 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "Interval of the C-ECHO monitoring loop in seconds.",
     ),
+    "notify_webhook_url": (
+        "url",
+        "Webhook that receives broker alerts (Slack/Teams-compatible JSON, empty = off).",
+    ),
+    "notify_events": (
+        "events",
+        "Comma-separated event codes to send (see GET /notify/events).",
+    ),
+    "notify_min_interval_s": (
+        "int",
+        "Minimum distance between two messages for the same event and object.",
+    ),
     "spool_enabled": (
         "bool",
         "Spool C-STORE instances that cannot be forwarded and retry them later.",
@@ -99,6 +111,7 @@ KNOWN: dict[str, tuple[str, str]] = {
 _INT_RANGES = {
     "seen_item_ttl_days": (1, 3650),
     "echo_interval_s": (5, 3600),
+    "notify_min_interval_s": (0, 86400),
     "spool_max_items": (1, 1000000),
     "spool_max_bytes": (1048576, 1099511627776),
     "spool_max_attempts": (1, 1000),
@@ -112,6 +125,26 @@ _INT_RANGES = {
 }
 _AET_RE = re.compile(r"^[A-Z0-9_-]{1,16}$")
 _BOOL_TRUE = {"true", "1", "yes", "on"}
+
+
+def _validate_url(value: str) -> list[str]:
+    """A webhook URL must be http(s) — anything else is a configuration error."""
+    if not value:
+        return []  # empty = alerting disabled
+    if not value.startswith(("http://", "https://")):
+        return ["must start with http:// or https://"]
+    return []
+
+
+def _validate_events(value: str) -> list[str]:
+    """Only known event codes may be subscribed."""
+    from .notify import EVENTS
+
+    codes = [part.strip() for part in (value or "").split(",") if part.strip()]
+    unknown = [code for code in codes if code not in EVENTS]
+    if unknown:
+        return [f"unknown event(s): {', '.join(unknown)}"]
+    return []
 
 
 def _validate_path(value: str) -> list[str]:
@@ -140,6 +173,10 @@ def validate_value(key: str, raw: str) -> list[str]:
         lo, hi = _INT_RANGES.get(key, (0, 10**9))
         if not lo <= n <= hi:
             return [f"must be between {lo} and {hi}"]
+    elif kind == "url":
+        return _validate_url(raw)
+    elif kind == "events":
+        return _validate_events(raw)
     elif kind == "path":
         return _validate_path(raw)
     elif kind == "aets":

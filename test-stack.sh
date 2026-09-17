@@ -61,6 +61,51 @@ for i in $(seq 1 30); do
   curl -sf "$OE3_BASE/oe3/" -o /dev/null && break || sleep 2
 done
 
+echo "── Alerting: webhook delivery ──"
+# A tiny receiver on the host — the broker reaches it via host.docker.internal.
+WEBHOOK_LOG=$(mktemp)
+WEBHOOK_PORT=19999
+python3 - "$WEBHOOK_LOG" "$WEBHOOK_PORT" <<'PY' &
+import json, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+log_path, port = sys.argv[1], int(sys.argv[2])
+
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        with open(log_path, "a") as handle:
+            handle.write(body.decode("utf-8", "replace") + "\n")
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *args):
+        pass
+
+HTTPServer(("0.0.0.0", port), Handler).serve_forever()
+PY
+WEBHOOK_PID=$!
+trap 'kill $WEBHOOK_PID 2>/dev/null; rm -f "$WEBHOOK_LOG"' EXIT
+sleep 1
+
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/notify_webhook_url" \
+  -H 'Content-Type: application/json' \
+  -d "{\"value\":\"http://host.docker.internal:$WEBHOOK_PORT/hook\"}" > /dev/null
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/notify_events" \
+  -H 'Content-Type: application/json' \
+  -d '{"value":"source_down,target_down,spool_dead_letter,breaker_open,spool_full,config_error"}' > /dev/null
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/notify_min_interval_s" \
+  -H 'Content-Type: application/json' -d '{"value":"0"}' > /dev/null
+
+test_result=$(curl -sf -X POST "$BROKER_API_URL/api/v1/notify/test")
+echo "   test message: $test_result"
+case "$test_result" in
+  *'"ok":true'*) ;;
+  *) echo "FAIL: the webhook did not accept the test message" >&2; exit 1 ;;
+esac
+[ -s "$WEBHOOK_LOG" ] || { echo "FAIL: the webhook receiver got nothing" >&2; exit 1; }
+
 echo "── DICOM smoke: C-FIND through broker ──"
 python3 mwl-broker/scripts/cfind_smoke.py "$BROKER_DICOM_HOST" "$BROKER_DICOM_PORT" MWLBROKER
 
@@ -204,6 +249,31 @@ done
 set_target_port 4242
 echo "   dead letters for the UI test: $dead"
 [ "$dead" -ge 1 ] || { echo "FAIL: no dead letter was produced" >&2; exit 1; }
+
+echo "── Alerting: an event reached the webhook ──"
+events=""
+for _ in $(seq 1 20); do
+  sleep 2
+  events=$(python3 - "$WEBHOOK_LOG" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1]) as handle:
+        codes = {json.loads(line).get("event") for line in handle if line.strip()}
+except FileNotFoundError:
+    codes = set()
+print(",".join(sorted(c for c in codes if c)))
+PY
+)
+  case "$events" in
+    *spool_dead_letter*|*target_down*|*source_down*) break ;;
+  esac
+done
+echo "   events received: $events"
+case "$events" in
+  *spool_dead_letter*|*target_down*|*source_down*) ;;
+  *) echo "FAIL: no real broker event was delivered" >&2; exit 1 ;;
+esac
+# the receiver stays up: the Playwright suite sends a test message from the UI
 
 echo "── Playwright (desktop + mobile) ──"
 (cd orthanc-explorer-3-usable && OE3_BASE="$OE3_BASE" \

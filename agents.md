@@ -31,6 +31,15 @@ cd mwl-broker && python -m pytest tests -q
 # …mit Coverage (aktuell 96 %)
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 
+# Alerting (laufender Stack)
+curl -s http://127.0.0.1:18081/api/v1/notify/events | python3 -m json.tool
+curl -X POST http://127.0.0.1:18081/api/v1/notify/test
+# Webhook konfigurieren (URL + Ereignisse):
+curl -X PUT http://127.0.0.1:18081/api/v1/settings/notify_webhook_url \
+  -H 'Content-Type: application/json' -d '{"value":"https://hooks.example/x"}'
+curl -X PUT http://127.0.0.1:18081/api/v1/settings/notify_events \
+  -H 'Content-Type: application/json' -d '{"value":"source_down,spool_dead_letter"}'
+
 # C-STORE-Spool (laufender Stack)
 curl -s http://127.0.0.1:18081/api/v1/spool/stats | python3 -m json.tool
 curl -s 'http://127.0.0.1:18081/api/v1/spool?status=dead' | python3 -m json.tool
@@ -173,6 +182,9 @@ Token rotieren = nur die Store-Datei neu schreiben:
   nicht (`create_all` ändert vorhandene Tabellen nie) und die API antwortet mit
   500. Revisionen nach der Baseline müssen **defensiv** sein (Existenzprüfung),
   weil eine frische DB das Schema schon hat. `tests/test_db.py` erzwingt das.
+- **Alerting darf nie blockieren.** Versand läuft auf einem Hintergrund-Thread,
+  Fehler werden nur geloggt/gezählt. Gemeldet wird der Übergang, nicht jeder
+  Check (sonst Nachrichtenflut); die Webhook-URL nie vollständig loggen.
 - **Spool-Semantik**: Payload auf Platte (atomar geschrieben), DB nur Metadaten;
   Datei nach Zustellung löschen, Zeile als Duplikatsschutz behalten. Bei vollem
   Budget **abweisen**, nie still verwerfen. `spool.is_duplicate` im Live-Pfad

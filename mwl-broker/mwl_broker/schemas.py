@@ -344,6 +344,21 @@ class SettingUpdateIn(BaseModel):
     )
 
 
+class NotifyEventOut(BaseModel):
+    """One alerting event the broker can send."""
+
+    code: str = Field(description="Event code used in `notify_events`.", examples=["source_down"])
+    severity: str = Field(description="error | warning | info.")
+    description: str = Field(description="What the event means (English, for the UI).")
+
+
+class NotifyTestOut(BaseModel):
+    """Result of a test alert."""
+
+    ok: bool = Field(description="True when the webhook accepted the message.")
+    error: str = Field(default="", description="Delivery error, if any.")
+
+
 class SpoolStatsOut(BaseModel):
     """Backlog overview of the C-STORE spool (store and forward)."""
 

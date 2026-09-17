@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     cache_hide_completed: bool = True   # never resurrect COMPLETED/DISCONTINUED steps
     cache_max_items: int = 5000         # safety cap per source snapshot
 
+    # Alerting (webhook)
+    notify_webhook_url: str = ""        # empty = alerting disabled
+    notify_events: str = ""             # comma-separated event codes (see GET /notify/events)
+    notify_min_interval_s: int = 300    # de-bounce per event+subject
+
     # C-STORE spool (store and forward) — never lose an image
     spool_enabled: bool = True
     accept_when_queued: bool = True     # ack the modality once the instance is safely spooled
