@@ -293,8 +293,30 @@ def test_store_unrouted_lenient_returns_success(lenient_broker):
         assert s.scalars(select(StoreLog)).one().status == "unrouted"
 
 
-def test_store_forward_failure_marks_failed(broker):
+def test_store_forward_failure_is_spooled_and_accepted(broker):
+    """Store and forward: the instance is queued and the modality is told OK."""
+    from mwl_broker import spool
+
     _seed_target(1, name="dead-pacs", is_default=True)  # port 1 — refused
+    ds = _ct_dataset("ACC-X", generate_uid())
+
+    # the spool accepts it (default: accept_when_queued) → success, not 0xA700
+    assert _cstore(broker, ds) == 0x0000
+
+    with session_factory()() as s:
+        row = s.scalars(select(StoreLog)).one()
+        assert row.status == "queued"
+        assert row.error
+    queued = spool.items(status="queued")
+    assert len(queued) == 1
+    assert queued[0]["sop_instance_uid"] == str(ds.SOPInstanceUID)
+    assert queued[0]["target_name"] == "dead-pacs"
+
+
+def test_store_forward_failure_without_spool_marks_failed(broker):
+    """With the spool disabled the previous policy applies (strict → failure)."""
+    settings_service.set_value("spool_enabled", "false")
+    _seed_target(1, name="dead-pacs", is_default=True)
     ds = _ct_dataset("ACC-X", generate_uid())
     assert _cstore(broker, ds) == 0xA700  # strict default
     with session_factory()() as s:
@@ -463,6 +485,86 @@ def test_cfind_increments_metrics(broker):
     _cfind(broker, _wildcard_query())
     after = REGISTRY.get_sample_value("mwl_cfind_requests_total", labels)
     assert after == before + 1
+
+
+# ── C-STORE spool (store and forward) ──────────────────────────────────
+
+
+def test_spooled_instance_is_delivered_once_the_target_recovers(broker, mwl_scp, store_scp):
+    """The full store-and-forward round trip: down → queued → up → delivered."""
+    from mwl_broker import spool
+
+    received, store_port = store_scp
+    _seed_source(mwl_scp)
+    _cfind(broker, _wildcard_query())                      # worklist provenance
+    target_id = _seed_target(1, name="dead-pacs", is_default=True)  # unreachable
+
+    ds = _ct_dataset("ACC-A-001", generate_uid())
+    assert _cstore(broker, ds) == 0x0000, "the modality is told success (queued)"
+
+    queued = spool.items(status="queued")
+    assert len(queued) == 1
+    assert queued[0]["target_name"] == "dead-pacs"
+    with session_factory()() as s:
+        assert s.scalars(select(StoreLog)).one().status == "queued"
+
+    # the target comes back (same name/AET, now reachable)
+    with session_factory()() as s:
+        s.get(PacsTarget, target_id).port = store_port
+        s.commit()
+
+    result = spool.run_once()
+
+    assert result["sent"] == 1
+    assert spool.stats()["open"] == 0
+    assert spool.stats()["sent"] == 1
+    # and the instance really arrived
+    assert len(received) == 1
+    assert str(received[0].SOPInstanceUID) == str(ds.SOPInstanceUID)
+
+
+def test_spooled_instance_is_not_sent_twice(broker, mwl_scp, store_scp):
+    """A duplicate C-STORE must not produce a second delivery."""
+    from mwl_broker import spool
+
+    received, store_port = store_scp
+    target_id = _seed_target(1, name="dead-pacs", is_default=True)
+    ds = _ct_dataset("ACC-A-001", generate_uid())
+    assert _cstore(broker, ds) == 0x0000
+
+    with session_factory()() as s:
+        s.get(PacsTarget, target_id).port = store_port
+        s.commit()
+    spool.run_once()
+    assert len(received) == 1
+
+    # the modality repeats the store (it never got a "stored" confirmation from
+    # the PACS) — the broker answers from the duplicate guard
+    assert _cstore(broker, ds) == 0x0000
+    assert len(spool.items(status="queued")) == 0
+    assert len(received) == 1
+
+
+def test_spool_disabled_keeps_the_strict_failure(broker, mwl_scp):
+    from mwl_broker import spool
+
+    settings_service.set_value("spool_enabled", "false")
+    _seed_target(1, name="dead-pacs", is_default=True)
+
+    assert _cstore(broker, _ct_dataset("ACC-A-001", generate_uid())) == 0xA700
+    assert spool.items() == []
+
+
+def test_accept_when_queued_can_be_turned_off(broker, mwl_scp):
+    """With accept_when_queued=false the modality is told that it did not arrive."""
+    from mwl_broker import spool
+
+    settings_service.set_value("accept_when_queued", "false")
+    _seed_target(1, name="dead-pacs", is_default=True)
+
+    assert _cstore(broker, _ct_dataset("ACC-A-001", generate_uid())) == 0xA700
+    # ... but the instance is safely spooled anyway
+    assert len(spool.items(status="queued")) == 1
 
 
 # ── Worklist cache (outage bridge) ─────────────────────────────────────

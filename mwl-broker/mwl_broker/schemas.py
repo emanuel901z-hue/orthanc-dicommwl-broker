@@ -344,6 +344,52 @@ class SettingUpdateIn(BaseModel):
     )
 
 
+class SpoolStatsOut(BaseModel):
+    """Backlog overview of the C-STORE spool (store and forward)."""
+
+    queued: int = Field(description="Instances waiting for the first/next retry.")
+    failed: int = Field(description="Instances whose last attempt failed (retry scheduled).")
+    dead: int = Field(description="Instances that gave up — they need operator attention.")
+    sent: int = Field(description="Delivered instances still kept as a duplicate guard.")
+    open: int = Field(description="queued + failed (the actual backlog).")
+    bytes: int = Field(description="Bytes held on disk by queued/failed/dead instances.")
+    oldest_age_s: int | None = Field(
+        default=None, description="Age of the oldest undelivered instance (null = empty).",
+    )
+    capacity: dict = Field(description="Usage and limits: {items, bytes, max_items, max_bytes, full}.")
+    enabled: bool = Field(description="Whether the spool accepts instances at all.")
+    accept_when_queued: bool = Field(
+        description="Whether the modality is told 'success' once an instance is spooled.",
+    )
+
+
+class SpoolItemOut(BaseModel):
+    """One spooled C-STORE instance (metadata only — the payload stays on disk)."""
+
+    id: int = Field(description="Row ID (used for retry/discard).")
+    sop_instance_uid: str = Field(description="SOP Instance UID (the duplicate guard).")
+    study_uid: str = Field(description="Study Instance UID.")
+    accession: str = Field(description="Accession number (allowed by the PHI policy).")
+    source_id: int | None = Field(default=None, description="Originating worklist source.")
+    target_id: int | None = Field(default=None, description="Target it has to reach.")
+    target_name: str = Field(description="Name of that target (for the operator).")
+    status: str = Field(description="queued | failed | dead | sent.")
+    attempts: int = Field(description="Forwarding attempts so far.")
+    last_error: str = Field(description="Reason of the last failure.")
+    payload_bytes: int = Field(description="Size of the spooled payload (0 once delivered).")
+    age_s: int = Field(description="Age of the entry in seconds.")
+    next_attempt_at: datetime | None = Field(
+        default=None, description="When the next retry is due (UTC).",
+    )
+    sent_at: datetime | None = Field(default=None, description="When it was delivered (UTC).")
+
+
+class SpoolRetryOut(BaseModel):
+    """Result of a manual retry."""
+
+    requeued: int = Field(description="Number of instances put back into the queue.")
+
+
 class CacheSourceOut(BaseModel):
     """Cache state of one upstream source."""
 
@@ -421,7 +467,10 @@ class StoreLogOut(BaseModel):
     target_id: int | None = Field(
         description="Chosen routing target (null = unrouted, nothing forwarded).",
     )
-    status: str = Field(description="success | failed | unrouted.")
+    status: str = Field(
+        description="success | queued (spooled for retry) | duplicate (already "
+                    "spooled or delivered) | failed | unrouted.",
+    )
     error: str = Field(default="", description="Forward error detail, if any.")
     applied_transforms: list[str] = Field(
         default_factory=list,

@@ -31,6 +31,15 @@ cd mwl-broker && python -m pytest tests -q
 # …mit Coverage (aktuell 96 %)
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 
+# C-STORE-Spool (laufender Stack)
+curl -s http://127.0.0.1:18081/api/v1/spool/stats | python3 -m json.tool
+curl -s 'http://127.0.0.1:18081/api/v1/spool?status=dead' | python3 -m json.tool
+curl -X POST http://127.0.0.1:18081/api/v1/spool/retry-all
+curl -X DELETE 'http://127.0.0.1:18081/api/v1/spool/1?reason=duplicate'
+
+# Schema-Migrationen
+cd mwl-broker && .venv/bin/alembic current && .venv/bin/alembic history
+
 # Worklist-Cache (laufender Stack)
 curl -s http://127.0.0.1:18081/api/v1/cache/stats | python3 -m json.tool
 curl -s 'http://127.0.0.1:18081/api/v1/cache/items?limit=5' | python3 -m json.tool
@@ -159,9 +168,15 @@ Token rotieren = nur die Store-Datei neu schreiben:
   bleiben abgeschlossene Aufträge liegen. Stale nur bei Fehler/offenem Breaker,
   erledigte Schritte (`(0040,0020)`) nie aus dem Cache. Der Payload enthält PHI:
   nie loggen, nie über die API ausgeben (nur `cache.items()`-Metadaten).
-- **Nachträglich ergänzte Modellspalten brauchen einen Eintrag in
-  `_COLUMN_MIGRATIONS`** (`db.py`) — bestehende Postgres-Instanzen bekommen sie
-  sonst nicht und die API antwortet mit 500. `tests/test_db.py` erzwingt das.
+- **Nachträglich ergänzte Modellspalten brauchen eine Alembic-Revision** in
+  `migrations/versions/` — bestehende Postgres-Instanzen bekommen sie sonst
+  nicht (`create_all` ändert vorhandene Tabellen nie) und die API antwortet mit
+  500. Revisionen nach der Baseline müssen **defensiv** sein (Existenzprüfung),
+  weil eine frische DB das Schema schon hat. `tests/test_db.py` erzwingt das.
+- **Spool-Semantik**: Payload auf Platte (atomar geschrieben), DB nur Metadaten;
+  Datei nach Zustellung löschen, Zeile als Duplikatsschutz behalten. Bei vollem
+  Budget **abweisen**, nie still verwerfen. `spool.is_duplicate` im Live-Pfad
+  verhindert doppelte Zustellungen.
 - **Import ist Upsert-only** (`config_io`): nie implizit löschen; Referenzen im
   Export laufen über Namen, nicht IDs.
 - **Neue Endpunkte brauchen den vollen OpenAPI-Vertrag** (Summary, Tag,

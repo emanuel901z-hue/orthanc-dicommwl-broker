@@ -1,8 +1,14 @@
 import os
+import shutil
+from pathlib import Path
 
 os.environ["BROKER_DATABASE_URL"] = "sqlite:///./test_mwl.db"
 os.environ["BROKER_START_DICOM"] = "false"
 os.environ["BROKER_START_ECHO_LOOP"] = "false"
+os.environ["BROKER_START_SPOOL"] = "false"   # the worker is driven explicitly in tests
+# a writable spool directory (the production default lives under /var/lib)
+SPOOL_DIR = Path(__file__).resolve().parent.parent / ".pytest-spool"
+os.environ["BROKER_SPOOL_DIR"] = str(SPOOL_DIR)
 
 import pytest  # noqa: E402
 
@@ -15,6 +21,17 @@ def fresh_echo_state():
     echo.reset_for_tests()
     yield
     echo.reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
+def fresh_spool():
+    """Spooled payloads must not leak between tests."""
+    from mwl_broker import spool
+
+    shutil.rmtree(SPOOL_DIR, ignore_errors=True)
+    yield
+    spool.reset_for_tests()
+    shutil.rmtree(SPOOL_DIR, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)

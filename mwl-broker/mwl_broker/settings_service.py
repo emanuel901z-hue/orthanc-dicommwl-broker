@@ -34,6 +34,42 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "Interval of the C-ECHO monitoring loop in seconds.",
     ),
+    "spool_enabled": (
+        "bool",
+        "Spool C-STORE instances that cannot be forwarded and retry them later.",
+    ),
+    "accept_when_queued": (
+        "bool",
+        "Report success to the modality once the instance is safely spooled.",
+    ),
+    "spool_dir": (
+        "path",
+        "Directory the spooled DICOM files are written to (own volume recommended).",
+    ),
+    "spool_max_items": (
+        "int",
+        "Maximum number of spooled instances before the spool refuses new ones.",
+    ),
+    "spool_max_bytes": (
+        "int",
+        "Maximum spool size in bytes before it refuses new instances.",
+    ),
+    "spool_max_attempts": (
+        "int",
+        "Forwarding attempts before an instance becomes a dead letter.",
+    ),
+    "spool_backoff_s": (
+        "int",
+        "Base delay of the exponential retry backoff in seconds.",
+    ),
+    "spool_retention_s": (
+        "int",
+        "How long a forwarded entry stays as a duplicate guard (seconds).",
+    ),
+    "spool_poll_s": (
+        "int",
+        "Interval of the spool retry worker in seconds.",
+    ),
     "cache_enabled": (
         "bool",
         "Serve cached worklist answers when an upstream source is unreachable.",
@@ -63,22 +99,12 @@ KNOWN: dict[str, tuple[str, str]] = {
 _INT_RANGES = {
     "seen_item_ttl_days": (1, 3650),
     "echo_interval_s": (5, 3600),
-    "cache_enabled": (
-        "bool",
-        "Serve cached worklist answers when an upstream source is unreachable.",
-    ),
-    "cache_stale_max_s": (
-        "int",
-        "Hard cap for serving cached answers after the last successful query (0 = never).",
-    ),
-    "cache_hide_completed": (
-        "bool",
-        "Never return COMPLETED/DISCONTINUED steps from the cache.",
-    ),
-    "cache_max_items": (
-        "int",
-        "Maximum number of worklist items cached per source.",
-    ),
+    "spool_max_items": (1, 1000000),
+    "spool_max_bytes": (1048576, 1099511627776),
+    "spool_max_attempts": (1, 1000),
+    "spool_backoff_s": (5, 86400),
+    "spool_retention_s": (0, 2592000),
+    "spool_poll_s": (1, 3600),
     "cache_stale_max_s": (0, 86400),
     "cache_max_items": (1, 100000),
     "breaker_fail_threshold": (1, 100),
@@ -86,6 +112,15 @@ _INT_RANGES = {
 }
 _AET_RE = re.compile(r"^[A-Z0-9_-]{1,16}$")
 _BOOL_TRUE = {"true", "1", "yes", "on"}
+
+
+def _validate_path(value: str) -> list[str]:
+    """A spool directory must be absolute and free of traversal."""
+    if not value.startswith("/"):
+        return ["must be an absolute path"]
+    if ".." in value.split("/"):
+        return ["must not contain '..'"]
+    return []
 
 
 def validate_value(key: str, raw: str) -> list[str]:
@@ -105,6 +140,8 @@ def validate_value(key: str, raw: str) -> list[str]:
         lo, hi = _INT_RANGES.get(key, (0, 10**9))
         if not lo <= n <= hi:
             return [f"must be between {lo} and {hi}"]
+    elif kind == "path":
+        return _validate_path(raw)
     elif kind == "aets":
         bad = [p for p in (x.strip() for x in raw.split(",")) if p and not _AET_RE.match(p)]
         if bad:

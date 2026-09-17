@@ -3,7 +3,14 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY pyproject.toml ./
 COPY mwl_broker ./mwl_broker
+# Alembic migrations are part of the image: init_db() brings an existing
+# database to head on startup.
+COPY alembic.ini ./
+COPY migrations ./migrations
 RUN pip install --no-cache-dir .
+
+# the C-STORE spool keeps undeliverable instances on disk (mounted volume)
+RUN mkdir -p /var/lib/mwl-broker/spool
 
 EXPOSE 8081 11113
 

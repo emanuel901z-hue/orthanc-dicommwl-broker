@@ -79,6 +79,18 @@ services:
       BROKER_STRICT_STORE_STATUS: ${BROKER_STRICT_STORE_STATUS}
       BROKER_SEEN_ITEM_TTL_DAYS: ${BROKER_SEEN_ITEM_TTL_DAYS}
       BROKER_SEED_CONFIG_JSON: ${BROKER_SEED_CONFIG_JSON}
+      BROKER_SPOOL_DIR: ${BROKER_SPOOL_DIR:-/var/lib/mwl-broker/spool}
+      BROKER_SPOOL_MAX_ITEMS: ${BROKER_SPOOL_MAX_ITEMS:-20000}
+      BROKER_SPOOL_MAX_BYTES: ${BROKER_SPOOL_MAX_BYTES:-10737418240}
+      BROKER_SPOOL_MAX_ATTEMPTS: ${BROKER_SPOOL_MAX_ATTEMPTS:-10}
+      BROKER_SPOOL_BACKOFF_S: ${BROKER_SPOOL_BACKOFF_S:-60}
+      BROKER_SPOOL_RETENTION_S: ${BROKER_SPOOL_RETENTION_S:-86400}
+      BROKER_SPOOL_POLL_S: ${BROKER_SPOOL_POLL_S:-10}
+      BROKER_CACHE_STALE_MAX_S: ${BROKER_CACHE_STALE_MAX_S:-120}
+    volumes:
+      # store and forward: undeliverable instances survive a PACS outage and a
+      # container restart — keep this on real storage with enough headroom
+      - mwl-spool:/var/lib/mwl-broker/spool
     depends_on:
       postgres:
         condition: service_healthy
@@ -148,3 +160,5 @@ services:
 volumes:
   pgdata:
   orthanc-data:
+  # store and forward spool: holds undeliverable DICOM instances
+  mwl-spool:

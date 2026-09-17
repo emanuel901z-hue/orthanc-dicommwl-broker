@@ -209,6 +209,83 @@ def test_old_stale_serving_is_not_reported():
     assert "cache_serving_stale" not in _codes(_findings())
 
 
+def test_spool_dead_letters_are_an_error():
+    from pydicom.dataset import Dataset
+    from pydicom.uid import CTImageStorage
+
+    from mwl_broker import spool
+
+    _source()
+    target = _target()
+    ds = Dataset()
+    ds.SOPClassUID = CTImageStorage
+    ds.SOPInstanceUID = "1.2.3"
+    spool.enqueue(ds, None, target, "pacs", "boom")
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import StoreSpool
+
+    with session_factory()() as s:
+        s.get(StoreSpool, 1).status = "dead"
+        s.commit()
+
+    finding = next(f for f in _findings() if f["code"] == "spool_dead_letters")
+    assert finding["severity"] == "error"
+    assert finding["details"]["count"] == 1
+
+
+def test_spool_backlog_is_a_warning():
+    from datetime import datetime, timedelta, timezone
+
+    from pydicom.dataset import Dataset
+    from pydicom.uid import CTImageStorage
+
+    from mwl_broker import spool
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import StoreSpool
+
+    _source()
+    target = _target()
+    ds = Dataset()
+    ds.SOPClassUID = CTImageStorage
+    ds.SOPInstanceUID = "1.2.3"
+    spool.enqueue(ds, None, target, "pacs", "boom")
+    with session_factory()() as s:
+        s.get(StoreSpool, 1).created_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        s.commit()
+
+    finding = next(f for f in _findings() if f["code"] == "spool_backlog")
+    assert finding["severity"] == "warning"
+    assert finding["details"]["oldest_minutes"] >= 59
+
+
+def test_spool_full_is_an_error():
+    from pydicom.dataset import Dataset
+    from pydicom.uid import CTImageStorage
+
+    from mwl_broker import settings_service, spool
+
+    _source()
+    target = _target()
+    settings_service.set_value("spool_max_items", "1")
+    ds = Dataset()
+    ds.SOPClassUID = CTImageStorage
+    ds.SOPInstanceUID = "1.2.3"
+    spool.enqueue(ds, None, target, "pacs", "boom")
+
+    finding = next(f for f in _findings() if f["code"] == "spool_full")
+    assert finding["severity"] == "error"
+    assert finding["details"]["max_items"] == 1
+
+
+def test_healthy_spool_reports_nothing():
+    _source()
+    _target()
+
+    codes = _codes(_findings())
+
+    assert not {"spool_dead_letters", "spool_backlog", "spool_full"} & codes
+
+
 def test_findings_are_sorted_by_severity_and_summarised():
     _source(enabled=False)                        # warning: no_enabled_source
     _transform(target_id=_target(enabled=False))  # error: no_default_target

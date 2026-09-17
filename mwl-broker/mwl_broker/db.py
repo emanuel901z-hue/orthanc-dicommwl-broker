@@ -1,8 +1,9 @@
 """DB engine/session factory — lazy so tests can override DATABASE_URL
 via BROKER_DATABASE_URL before first use."""
 import logging
+from pathlib import Path
 
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import get_settings
@@ -46,32 +47,51 @@ def get_session() -> Session:
 
 
 # Idempotent column additions — this project intentionally has no Alembic;
-# new columns on existing tables are added here. `create_all` only creates
-# missing *tables*, never alters existing ones.
-_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
-    # columns added after the first release — an existing (Postgres) database
-    # needs these ALTERs, a fresh one gets them from create_all()
-    ("query_log", "served_stale", "JSON"),
-    ("mwl_source", "cache_stale_on_error", "BOOLEAN DEFAULT TRUE"),
-    ("mwl_source", "cache_refresh_s", "INTEGER DEFAULT 0"),
-    ("store_log", "applied_transforms", "JSON"),
-]
+# The base schema comes from the models (`create_all`). Ordered migrations for
+# *existing* installations live in `migrations/` (Alembic); every revision after
+# the baseline is defensive, because a fresh database already carries the
+# current schema when it runs. See migrations/versions/0001_baseline.py.
+BASELINE_REVISION = "0001_baseline"
+_PROJECT_DIR = Path(__file__).resolve().parent.parent
+_MIGRATIONS_DIR = _PROJECT_DIR / "migrations"
 
 
-def _apply_column_migrations(engine) -> None:
-    for table, column, ddl_type in _COLUMN_MIGRATIONS:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
-            log.info("migration: added %s.%s", table, column)
-        except Exception:
-            pass  # column already exists (fresh DB or previously migrated)
+def _alembic_config():
+    from alembic.config import Config
+
+    cfg = Config(str(_PROJECT_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
+    cfg.set_main_option("sqlalchemy.url", get_settings().database_url)
+    return cfg
+
+
+def upgrade_schema(engine=None) -> None:
+    """Bring the database to the latest revision (idempotent, defensive).
+
+    A database that predates Alembic has no version table: its base schema is
+    already in place, so the baseline is *stamped* and only the later revisions
+    run.
+    """
+    from alembic import command
+    from alembic.runtime.migration import MigrationContext
+
+    engine = engine or get_engine()
+    cfg = _alembic_config()
+    with engine.begin() as conn:
+        current = MigrationContext.configure(conn).get_current_revision()
+        cfg.attributes["connection"] = conn
+        if current is None and inspect(conn).has_table("mwl_source"):
+            log.info("migration: stamping baseline %s on an existing database",
+                     BASELINE_REVISION)
+            command.stamp(cfg, BASELINE_REVISION)
+        command.upgrade(cfg, "head")
 
 
 def init_db() -> None:
+    """Create missing tables, then migrate an existing schema to head."""
     engine = get_engine()
     Base.metadata.create_all(engine)
-    _apply_column_migrations(engine)
+    upgrade_schema(engine)
 
 
 def reset_for_tests() -> None:

@@ -235,14 +235,6 @@ def test_check_db_returns_false_when_engine_fails(monkeypatch):
     assert db.check_db() is False
 
 
-def test_column_migrations_are_idempotent():
-    from mwl_broker import db
-
-    engine = db.get_engine()
-    db._apply_column_migrations(engine)
-    db._apply_column_migrations(engine)  # already applied — must not raise
-
-
 def test_settings_second_override_updates_existing_row(client):
     client.put("/api/v1/settings/echo_interval_s", json={"value": "20"})
     r = client.put("/api/v1/settings/echo_interval_s", json={"value": "25"})
@@ -690,6 +682,7 @@ def test_cache_endpoints(client):
 
     # fill it through the internal API (the DIMSE path is covered elsewhere)
     from pydicom.dataset import Dataset
+    from pydicom.uid import CTImageStorage
 
     from mwl_broker import cache
 
@@ -754,6 +747,79 @@ def test_cache_settings_are_validated(client):
     assert rows["cache_hide_completed"]["default"] == "True"
 
 
+def test_spool_endpoints(client):
+    from pydicom.dataset import Dataset
+    from pydicom.uid import CTImageStorage
+
+    from mwl_broker import spool
+
+    target = client.post("/api/v1/targets", json=TARGET).json()
+
+    # empty spool
+    stats = client.get("/api/v1/spool/stats").json()
+    assert stats["open"] == 0 and stats["dead"] == 0 and stats["bytes"] == 0
+    assert stats["oldest_age_s"] is None
+    assert stats["capacity"]["full"] is False
+    assert stats["enabled"] is True and stats["accept_when_queued"] is True
+    assert client.get("/api/v1/spool").json() == []
+
+    ds = Dataset()
+    ds.SOPClassUID = CTImageStorage
+    ds.SOPInstanceUID = "1.2.3.4.5"
+    ds.StudyInstanceUID = "9.8.7"
+    ds.AccessionNumber = "ACC-1"
+    ds.PatientName = "Mueller^Hans"
+    assert spool.enqueue(ds, None, target["id"], target["name"], "connection refused") == "queued"
+
+    stats = client.get("/api/v1/spool/stats").json()
+    assert stats["queued"] == 1 and stats["open"] == 1
+    assert stats["oldest_age_s"] is not None
+    assert stats["capacity"]["items"] == 1
+
+    items = client.get("/api/v1/spool").json()
+    assert len(items) == 1
+    entry = items[0]
+    assert entry["sop_instance_uid"] == "1.2.3.4.5"
+    assert entry["status"] == "queued" and entry["attempts"] == 0
+    assert entry["last_error"] == "connection refused"
+    assert entry["target_name"] == target["name"]
+    # the payload stays on disk — the API never exposes patient data
+    assert "Mueller" not in json.dumps(items)
+    assert "payload_path" not in entry
+
+    assert len(client.get("/api/v1/spool?status=queued").json()) == 1
+    assert client.get("/api/v1/spool?status=dead").json() == []
+    assert client.get("/api/v1/spool?limit=0").status_code == 422
+
+    # retry one entry, then all of them
+    assert client.post(f"/api/v1/spool/{entry['id']}/retry").json() == {"requeued": 1}
+    assert client.post("/api/v1/spool/999/retry").status_code == 404
+    assert client.post("/api/v1/spool/retry-all").json() == {"requeued": 0}
+
+    # discarding requires a reason and is audited
+    assert client.delete(f"/api/v1/spool/{entry['id']}").status_code == 422
+    assert client.delete(f"/api/v1/spool/{entry['id']}?reason=duplicate").status_code == 204
+    assert client.get("/api/v1/spool").json() == []
+    assert client.delete(f"/api/v1/spool/{entry['id']}?reason=gone").status_code == 404
+
+    actions = [row["action"] for row in client.get("/api/v1/audit/config").json()]
+    assert "retry.spool" in actions and "discard.spool" in actions
+
+
+def test_spool_settings_are_validated(client):
+    assert client.put("/api/v1/settings/spool_dir",
+                      json={"value": "/var/lib/mwl-broker/spool"}).status_code == 200
+    assert client.put("/api/v1/settings/spool_dir",
+                      json={"value": "relative/path"}).status_code == 422
+    assert client.put("/api/v1/settings/spool_max_attempts",
+                      json={"value": "0"}).status_code == 422
+    assert client.put("/api/v1/settings/accept_when_queued",
+                      json={"value": "false"}).status_code == 200
+    rows = {s["key"]: s for s in client.get("/api/v1/settings").json()}
+    assert rows["spool_dir"]["kind"] == "path"
+    assert rows["spool_enabled"]["default"] == "True"
+
+
 def test_openapi_documents_all_endpoints(client):
     """Every path operation carries a summary/tag, query params and schema
     fields carry descriptions — keeps Swagger UI usable for integrators."""
@@ -763,7 +829,8 @@ def test_openapi_documents_all_endpoints(client):
     assert len(spec["info"]["description"]) > 100
     tag_names = {t["name"] for t in spec["tags"]}
     assert {"sources", "targets", "rules", "transforms", "settings",
-            "logs", "monitoring", "audit", "config", "simulation", "cache"} <= tag_names
+            "logs", "monitoring", "audit", "config", "simulation", "cache",
+            "spool"} <= tag_names
 
     for path, ops in spec["paths"].items():
         for method, op in ops.items():
@@ -817,6 +884,7 @@ def test_openapi_documents_all_endpoints(client):
         "SimulateTransformIn", "SimulateTransformOut", "TagChangeOut",
         "RuleByNameIn", "TransformImportIn",
         "CacheSourceOut", "CacheItemOut",
+        "SpoolStatsOut", "SpoolItemOut", "SpoolRetryOut",
     ]:
         schema = spec["components"]["schemas"][schema_name]
         for field, prop in schema["properties"].items():

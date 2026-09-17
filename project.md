@@ -93,6 +93,8 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
 - `GET /config/export`, `POST /config/import?dry_run=`, `POST /config/rollback/{audit_id}`
 - `POST /simulate/route`, `POST /simulate/transform` — Dry-Run von Routing und Modify-Regeln
 - `GET /cache/stats`, `GET /cache/items`, `DELETE /cache[/sources/{id}]` — Worklist-Cache
+- `GET /spool`, `GET /spool/stats`, `POST /spool/{id}/retry`, `POST /spool/retry-all`,
+  `DELETE /spool/{id}?reason=` — C-STORE-Spool (Store and Forward)
 - `GET /logs/queries`, `GET /logs/stores` (paged, Filter: aet, source, status, since)
 - `GET /status` — SCP-Listener, Echo-Matrix (Quellen+Ziele inkl. `breaker_state`), Zähler
 - `GET /healthz`, `GET /metrics` (Prometheus)
@@ -184,6 +186,30 @@ Produktionsfehler (kein Default-Ziel, Regeln auf deaktivierten Knoten, tote
 Quellen, offene Breaker, leere AET-Allowlist, AET-Kollision mit dem Broker
 selbst) und liefert Findings mit stabilem `code` — die UI übersetzt sie und
 verlinkt direkt ins betroffene Formular.
+
+### C-STORE-Spool (Store and Forward)
+
+Kann eine Instanz nicht zugestellt werden, wird sie **nicht verworfen**: der
+Payload wird atomar auf Platte geschrieben (`spool_dir`, eigenes Volume), die
+Metadaten landen in `store_spool`, und ein Worker wiederholt mit exponentiellem
+Backoff bis `spool_max_attempts` (danach Dead Letter). Nach erfolgreicher
+Zustellung wird die Datei gelöscht; die Zeile bleibt `spool_retention_s` als
+**Duplikatsschutz** — `spool.is_duplicate` greift deshalb auch im Live-Pfad, damit
+ein wiederholter C-STORE nicht doppelt ins PACS geht.
+
+Budget: `spool_max_items` (20000) und `spool_max_bytes` (10 GiB). Ist es
+erschöpft, **weist der Broker ab** (Modalität bekommt einen Fehler, Health-Finding
+`spool_full`) statt still zu verwerfen. `accept_when_queued` (Default an) meldet
+der Modalität Erfolg, sobald die Instanz sicher liegt.
+
+### Schema-Migrationen (Alembic)
+
+Das Basisschema kommt aus den Modellen (`Base.metadata.create_all()`).
+Geordnete Migrationen für **bestehende** Installationen liegen in `migrations/`:
+`0001_baseline` wird nur gestempelt, `0002_cache_columns` und `0003_store_spool`
+sind die ersten echten Revisionen und **defensiv** (Existenzprüfung), weil eine
+frische Datenbank das aktuelle Schema schon hat. `init_db()` führt beides aus:
+`create_all()` (fehlende Tabellen) + `alembic upgrade head`.
 
 ### Worklist-Cache mit Stale-Fallback
 
@@ -321,9 +347,9 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 198 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 386 Tests, 0 Errors |
-| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 35/35 grün, 0 Console-/Page-/Netzwerk-Fehler |
+| `pytest` | 240 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 395 Tests, 0 Errors |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 38/38 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
 
@@ -342,8 +368,8 @@ regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
 
 `ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
 Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
-backend pytest (198) → frontend tsc → lint → vitest (386) → docker-e2e
-(35 Browser-Tests + DIMSE-Smokes + Breaker-/Cache-Szenario). Verifiziert: alle Stages grün.
+backend pytest (240) → frontend tsc → lint → vitest (395) → docker-e2e
+(38 Browser-Tests + DIMSE-Smokes + Breaker-/Cache-/Spool-Szenario). Verifiziert: alle Stages grün.
 `--quick` überspringt die Docker-Stage.
 
 #### Coverage-Audit (2026-09)
@@ -352,8 +378,8 @@ Gemessen mit `pytest-cov` bzw. `vitest --coverage`:
 
 | Bereich | Statements | Anmerkung |
 |---|---|---|
-| Backend `mwl_broker/` | **97 %** | cache 99 %, api 97 %, main 100 %, settings_service/schemas/models/metrics 100 %, routing 100 %, breaker 99 %, audit 97 %, config_io 96 %, health_checks 98 %, echo 96 %, dimse 93 % |
-| Frontend Broker-UI | **98.1 %** | `api/broker.ts` 100 %, Diff-Helfer/Panels 100 %, Seiten 95-100 % |
+| Backend `mwl_broker/` | **97 %** | spool 93 %, cache 99 %, api 97 %, main 100 %, settings_service/schemas/models/metrics 100 %, routing 100 %, breaker 99 %, audit 97 %, config_io 96 %, health_checks 98 %, echo 96 %, dimse 93 % |
+| Frontend Broker-UI | **97.8 %** | `api/broker.ts` 100 %, Diff-Helfer/Panels 100 %, Seiten 95-100 % |
 
 Ergänzte Tests für zuvor ungedeckte Pfade: Rules-Update/Delete, Target-Echo,
 Log-Filter + Pagination-Validierung, `/metrics`, Lifespan (Seed + SCP-Bind),
@@ -420,6 +446,7 @@ Gefundene und behobene Defekte:
 | 8 | Sprint 1 der Roadmap: Circuit Breaker + Health-Panel + `/healthz/ready` | ✅ |
 | 9 | Sprint 2 der Roadmap: Simulation + Config-Audit/Export/Rollback | ✅ |
 | 10 | Sprint 3 der Roadmap: Worklist-Cache mit Stale-Fallback | ✅ |
+| 11 | Sprint 4 der Roadmap: C-STORE-Spool + Alembic-Migrationspfad | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert

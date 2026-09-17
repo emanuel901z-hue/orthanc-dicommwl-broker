@@ -28,6 +28,9 @@ from .schemas import (
     ConfigImportIn,
     ImportPlanOut,
     RollbackOut,
+    SpoolItemOut,
+    SpoolRetryOut,
+    SpoolStatsOut,
     SimulateRouteIn,
     SimulateRouteOut,
     SimulateTransformIn,
@@ -48,7 +51,7 @@ from .schemas import (
     TransformIn,
     TransformOut,
 )
-from . import audit, breaker, cache, config_io, health_checks, settings_service, simulate, transforms
+from . import audit, breaker, cache, config_io, health_checks, settings_service, simulate, spool, transforms
 from .models import BrokerSetting, ConfigAudit, SeenItem, SourceBreaker, TransformRule
 
 router = APIRouter(prefix="/api/v1")
@@ -465,6 +468,96 @@ def reset_setting(
     settings_service.reset(key)
     audit.record(s, _actor(request), "reset.setting", "setting", None, before,
                  None, _correlation(request))
+    s.commit()
+
+
+# ── C-STORE spool ──────────────────────────────────────────────────────
+
+
+@router.get(
+    "/spool/stats", response_model=SpoolStatsOut, tags=["spool"],
+    summary="C-STORE spool backlog",
+    description="Store-and-forward queue: instances that could not be delivered "
+                "are spooled and retried. Shows the backlog, the oldest entry and "
+                "the capacity of the spool.",
+    response_description="Backlog overview with usage and limits.",
+)
+def spool_stats(s: Session = _db_dep):
+    return spool.stats()
+
+
+@router.get(
+    "/spool", response_model=list[SpoolItemOut], tags=["spool"],
+    summary="Spooled C-STORE instances",
+    description="Metadata of the spooled instances (the DICOM payload stays on "
+                "disk). Patient identifiers are deliberately not exposed.",
+    response_description="Spooled instances, newest first.",
+)
+def spool_items(
+    s: Session = _db_dep,
+    status: str | None = Query(
+        default=None, description="Only entries with this status (queued | failed | dead | sent).",
+    ),
+    limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of entries."),
+):
+    return spool.items(status, limit)
+
+
+@router.post(
+    "/spool/{item_id}/retry", response_model=SpoolRetryOut, tags=["spool"],
+    summary="Retry one spooled instance",
+    description="Puts the entry back into the queue immediately instead of "
+                "waiting for the next backoff.",
+    response_description="Number of requeued instances (1 on success).",
+    responses={404: {"description": "No spool entry with this ID or already delivered."}},
+)
+def spool_retry(
+    request: Request,
+    item_id: Annotated[int, Path(description="ID of the spool entry to retry.")],
+    s: Session = _db_dep,
+):
+    if not spool.retry(item_id):
+        raise HTTPException(404, "not found or already delivered")
+    audit.record(s, _actor(request), "retry.spool", "spool", item_id, None, None,
+                 _correlation(request))
+    s.commit()
+    return {"requeued": 1}
+
+
+@router.post(
+    "/spool/retry-all", response_model=SpoolRetryOut, tags=["spool"],
+    summary="Retry every failed spooled instance",
+    description="Requeues all failed and dead-letter entries — the operator's "
+                "action after a PACS outage.",
+    response_description="Number of requeued instances.",
+)
+def spool_retry_all(request: Request, s: Session = _db_dep):
+    count = spool.retry_all()
+    audit.record(s, _actor(request), "retry_all.spool", "spool", None,
+                 None, {"requeued": count}, _correlation(request))
+    s.commit()
+    return {"requeued": count}
+
+
+@router.delete(
+    "/spool/{item_id}", tags=["spool"], status_code=204,
+    summary="Discard a spooled instance",
+    description="Deletes the payload and the entry. **This loses the instance** "
+                "— the reason is required and recorded in the change log.",
+    response_description="The entry was discarded.",
+    responses={404: {"description": "No spool entry with this ID."}},
+)
+def spool_discard(
+    request: Request,
+    item_id: Annotated[int, Path(description="ID of the spool entry to discard.")],
+    reason: str = Query(min_length=3, max_length=200,
+                        description="Why the instance is discarded (recorded in the change log)."),
+    s: Session = _db_dep,
+):
+    if not spool.discard(item_id, reason):
+        raise HTTPException(404, "not found")
+    audit.record(s, _actor(request), "discard.spool", "spool", item_id,
+                 {"reason": reason}, None, _correlation(request))
     s.commit()
 
 

@@ -13,7 +13,7 @@ from pynetdicom.presentation import build_context
 from pynetdicom.sop_class import ModalityWorklistInformationFind, Verification
 from sqlalchemy import select
 
-from . import breaker, cache, metrics, routing, settings_service, transforms
+from . import breaker, cache, cstore, metrics, routing, settings_service, spool, transforms
 from .config import Settings
 from .db import session_factory
 from .models import QueryLog, RoutingRule, SeenItem, StoreLog, MwlSource, PacsTarget
@@ -269,12 +269,37 @@ class BrokerSCP:
 
         applied = self._apply_transforms(ds, source_id, target.id)
 
+        # The instance is already spooled or was delivered before: a repeated
+        # C-STORE (the modality never saw a confirmation) must not store it twice.
+        if spool.is_duplicate(sop_uid):
+            self._write_store_log(calling, sop_uid, study_uid, accession, source_id,
+                                  target.id, "duplicate", "already spooled or delivered",
+                                  applied)
+            metrics.CSTORE_TOTAL.labels(target=target.name, status="duplicate").inc()
+            log.info("C-STORE %s is a duplicate — acknowledged without forwarding", sop_uid)
+            return S_SUCCESS
+
         error = ""
         try:
             self._forward_store(ds, target)
         except Exception as exc:
             error = str(exc)
             log.error("forward to %s failed: %s", target.name, exc)
+
+        if error:
+            # Store and forward: keep the instance instead of losing it.
+            outcome = spool.enqueue(ds, source_id, target.id, target.name, error)
+            if outcome in ("queued", "duplicate"):
+                self._write_store_log(calling, sop_uid, study_uid, accession, source_id,
+                                      target.id, "queued", error, applied)
+                metrics.CSTORE_TOTAL.labels(target=target.name, status="queued").inc()
+                log.warning("C-STORE spooled for %s (%s) — %s", target.name, outcome, error)
+                # the instance is safe: telling the modality "success" stops it
+                # from retrying what we will deliver anyway
+                if spool.accept_when_queued():
+                    return S_SUCCESS
+                return S_OUT_OF_RESOURCES if strict else S_SUCCESS
+            log.error("C-STORE not spooled (%s) — falling back to the store policy", outcome)
 
         status_str = "success" if not error else "failed"
         self._write_store_log(calling, sop_uid, study_uid, accession, source_id, target.id,
@@ -313,17 +338,8 @@ class BrokerSCP:
 
     @staticmethod
     def _forward_store(ds: Dataset, target: routing.TargetCfg) -> None:
-        ae = AE(ae_title=target.calling_aet)
-        ctx = build_context(ds.SOPClassUID, [ds.file_meta.TransferSyntaxUID])
-        assoc = ae.associate(target.host, target.port, ae_title=target.aet, contexts=[ctx])
-        if not assoc.is_established:
-            raise ConnectionError("association rejected")
-        try:
-            status = assoc.send_c_store(ds)
-            if status is None or status.Status != 0x0000:
-                raise ConnectionError(f"C-STORE status {getattr(status, 'Status', 'none')}")
-        finally:
-            assoc.release()
+        """Live forwarding — shares the code with the spool retry worker."""
+        cstore.send_store(ds, target)
 
     @staticmethod
     def _write_store_log(calling, sop_uid, study_uid, accession, source_id, target_id,

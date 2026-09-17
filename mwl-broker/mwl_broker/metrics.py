@@ -19,6 +19,22 @@ ECHO_UP = Gauge(
     "mwl_echo_up", "Last C-ECHO result (1=ok, 0=fail)", ["kind", "name"]
 )
 SEEN_ITEMS = Gauge("mwl_seen_items", "Rows in seen_items table")
+SPOOL_ITEMS = Gauge(
+    "mwl_spool_items", "Spooled C-STORE instances by status", ["status"]
+)
+SPOOL_BYTES = Gauge("mwl_spool_bytes", "Bytes held in the C-STORE spool")
+SPOOL_OLDEST = Gauge(
+    "mwl_spool_oldest_seconds", "Age of the oldest spooled instance"
+)
+SPOOL_QUEUED = Counter(
+    "mwl_spool_queued_total", "Instances spooled because forwarding failed", ["target"]
+)
+SPOOL_FORWARDED = Counter(
+    "mwl_spool_forwarded_total", "Spooled instances that reached their target", ["target"]
+)
+SPOOL_DEAD = Counter(
+    "mwl_spool_dead_total", "Instances that gave up (dead letter)", ["target"]
+)
 CACHE_ENTRIES = Gauge(
     "mwl_cache_entries", "Cached worklist items per source", ["source"]
 )

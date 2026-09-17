@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from . import breaker, echo, metrics, settings_service
+from . import breaker, echo, metrics, settings_service, spool
 from .models import MwlSource, PacsTarget, QueryLog, RoutingRule, TransformRule
 
 log = logging.getLogger("mwl_broker.health")
@@ -119,6 +119,39 @@ def config_findings(session, settings) -> list[dict]:
                 details={"retry_in_s": state["retry_in_s"], "failures": state["failures"],
                          "last_error": state["last_error"]},
             ))
+
+    # ── C-STORE spool ──────────────────────────────────────────────────────
+    spool_state = spool.stats()
+    if spool_state["dead"]:
+        findings.append(_finding(
+            "spool_dead_letters", "error",
+            f"{spool_state['dead']} spooled instance(s) could not be delivered and "
+            "gave up — retry them after fixing the target or discard them.",
+            details={"count": spool_state["dead"]},
+        ))
+    if spool_state["capacity"]["full"]:
+        findings.append(_finding(
+            "spool_full", "error",
+            "The C-STORE spool is full — new instances that cannot be forwarded "
+            "are refused instead of queued.",
+            details={
+                "items": spool_state["capacity"]["items"],
+                "max_items": spool_state["capacity"]["max_items"],
+                "bytes": spool_state["capacity"]["bytes"],
+                "max_bytes": spool_state["capacity"]["max_bytes"],
+            },
+        ))
+    if spool_state["open"] and (spool_state["oldest_age_s"] or 0) > 900:
+        findings.append(_finding(
+            "spool_backlog", "warning",
+            f"{spool_state['open']} instance(s) are waiting in the spool "
+            f"(oldest {int((spool_state['oldest_age_s'] or 0) / 60)} min) — check the "
+            "target PACS.",
+            details={
+                "open": spool_state["open"],
+                "oldest_minutes": int((spool_state["oldest_age_s"] or 0) / 60),
+            },
+        ))
 
     # ── worklist cache ─────────────────────────────────────────────────────
     stale_since = datetime.now(timezone.utc) - timedelta(minutes=5)

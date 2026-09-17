@@ -35,6 +35,17 @@ class Settings(BaseSettings):
     cache_hide_completed: bool = True   # never resurrect COMPLETED/DISCONTINUED steps
     cache_max_items: int = 5000         # safety cap per source snapshot
 
+    # C-STORE spool (store and forward) — never lose an image
+    spool_enabled: bool = True
+    accept_when_queued: bool = True     # ack the modality once the instance is safely spooled
+    spool_dir: str = "/var/lib/mwl-broker/spool"
+    spool_max_items: int = 20000        # capacity guard (queued + failed + dead)
+    spool_max_bytes: int = 10737418240  # 10 GiB
+    spool_max_attempts: int = 10        # then the entry becomes a dead letter
+    spool_backoff_s: int = 60           # base for the exponential retry backoff
+    spool_retention_s: int = 86400      # how long a sent entry stays as a duplicate guard
+    spool_poll_s: int = 10              # retry worker interval
+
     # Circuit breaker per upstream source (C-FIND fan-out)
     breaker_fail_threshold: int = 3   # consecutive failures before opening
     breaker_open_seconds: int = 60    # how long an open breaker stays open
@@ -42,6 +53,7 @@ class Settings(BaseSettings):
     # Local dev convenience: skip DICOM SCP + echo loop (tests)
     start_dicom: bool = True
     start_echo_loop: bool = True
+    start_spool: bool = True
 
     # Optional bootstrap: JSON list of sources/targets to upsert on startup
     seed_config_json: str = ""

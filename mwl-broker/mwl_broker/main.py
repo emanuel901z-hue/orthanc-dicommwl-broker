@@ -16,6 +16,7 @@ from .schemas import ReadyOut
 from .config import get_settings
 from .dimse import BrokerSCP
 from .echo import echo_loop
+from .spool import worker as spool_worker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("mwl_broker.main")
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI):
     scp = None
     stop = threading.Event()
     echo_thread = None
+    spool_thread = None
     if settings.start_dicom:
         scp = BrokerSCP(settings)
         scp.start()
@@ -43,12 +45,18 @@ async def lifespan(app: FastAPI):
             target=echo_loop, args=(settings.echo_interval_s, stop), daemon=True
         )
         echo_thread.start()
+    if settings.start_spool:
+        # store and forward: retries instances that could not be delivered
+        spool_thread = threading.Thread(target=spool_worker, args=(stop,), daemon=True)
+        spool_thread.start()
     try:
         yield
     finally:
         stop.set()
         if echo_thread is not None:
             echo_thread.join(timeout=2)
+        if spool_thread is not None:
+            spool_thread.join(timeout=2)
         if scp is not None:
             scp.shutdown()
 
@@ -78,6 +86,7 @@ def create_app() -> FastAPI:
             {"name": "rules", "description": "Routing rules: worklist source → store target."},
             {"name": "transforms", "description": "DICOM attribute modifications applied before forwarding (tag set/remove/prefix/suffix/replace/copy)."},
             {"name": "settings", "description": "Runtime settings — UI override over the deployment ENV default."},
+            {"name": "spool", "description": "C-STORE spool: store-and-forward queue with retries and dead letters."},
             {"name": "cache", "description": "Worklist cache: snapshots that bridge an unreachable RIS, with a bounded stale window."},
             {"name": "audit", "description": "Configuration change log (before/after snapshots)."},
             {"name": "config", "description": "Configuration export, import (dry-run) and rollback."},

@@ -34,7 +34,7 @@ auditierbar.
 | Prio | Funktion | Nutzen | Aufwand | Status |
 |---|---|---|---|---|
 | **P0** | Worklist-Cache mit Stale-Fallback | RIS-Ausfall legt den Modalitätenbetrieb nicht lahm | mittel | **✅ Sprint 3** |
-| **P0** | C-STORE-Spool mit Retry/Dead-Letter | kein Bildverlust bei PACS-Ausfall | hoch | offen (Sprint 4) |
+| **P0** | C-STORE-Spool mit Retry/Dead-Letter | kein Bildverlust bei PACS-Ausfall | hoch | **✅ Sprint 4** |
 | **P0** | Circuit Breaker pro Upstream | tote Quelle kostet keine Timeouts mehr | klein | **✅ Sprint 1** |
 | **P1** | Config-Audit + Export/Import/Rollback | Nachvollziehbarkeit, Staging→Prod, Notfall-Rollback | mittel | **✅ Sprint 2** |
 | **P1** | Simulation (Dry-Run) für Routing/Transform | Regeln gefahrlos prüfen, bevor sie greifen | klein | **✅ Sprint 2** |
@@ -129,56 +129,78 @@ Stale-Fenster könnte erledigte Aufträge kurz wieder zeigen (deshalb Default
 
 ### P0-2 C-STORE-Spool mit Retry und Dead-Letter
 
-**Wert in der Produktion.** Ist das Ziel-PACS nicht erreichbar, ist die
-Instanz heute verloren (die Modalität bekommt einen Fehler, wiederholt aber in
-der Regel nicht). Ein persistenter Spool mit Wiederholversuchen ist das
-klassische „kein Bildverlust"-Versprechen kommerzieller Router.
+**Wert in der Produktion.** Ist das Ziel-PACS nicht erreichbar, ist die Instanz
+ohne Spool verloren: die Modalität bekommt einen Fehler und wiederholt in der
+Regel nicht. Ein persistenter Spool mit Wiederholversuchen ist das klassische
+„kein Bildverlust"-Versprechen kommerzieller Router (Laurel Bridge/Compass,
+dcm4chee-Exporteure arbeiten genauso: lokal puffern, mit Backoff erneut senden).
+
+**Speicherkonzept (entschieden).** Die Bytes liegen **auf Platte**, die
+Metadaten in der Datenbank:
+
+- `spool_dir` (Default `/var/lib/mwl-broker/spool`) ist ein eigenes Volume. Der
+  Index, der die UI bedient, bleibt dadurch klein und schnell; das Spool-Volume
+  bekommt seine eigene Größe, Backup- und Aufbewahrungsstrategie.
+- **Datei-Lebensdauer**: eine Payload-Datei existiert nur, solange der Eintrag
+  `queued`/`failed`/`dead` ist. Nach erfolgreicher Zustellung wird sie gelöscht
+  — die Zeile bleibt `spool_retention_s` (Default 24 h) als **Duplikatsschutz**:
+  dieselbe SOPInstanceUID wird nie zweimal gesendet.
+- Geschrieben wird **atomar** (tmp → `fsync` → `rename`), damit ein Absturz nie
+  eine halbe Datei hinterlässt.
+- **Budget**: `spool_max_items` (Default 20000) und `spool_max_bytes`
+  (Default 10 GiB). Ist es erschöpft, **weist der Broker ab**, statt still zu
+  verwerfen: die Modalität bekommt einen Fehler (und wiederholt), der Betrieb
+  sieht `spool_full` im Health-Panel und in den Metriken. Bilder werden nie
+  heimlich verworfen.
+- `accept_when_queued` (Default an): die Modalität bekommt **Erfolg**, sobald
+  die Instanz sicher liegt. Das ist die klinisch richtige Antwort — nichts ist
+  verloren, die Instanz ist eingereiht. Wer das nicht will (die Modalität soll
+  erfahren, dass das PACS nicht erreicht wurde), setzt den Schalter aus; dann
+  gilt die bisherige Policy (`strict_store_status`).
+- **Dedupe in beiden Pfaden**: ein wiederholter C-STORE wird quittiert, ohne
+  erneut zu senden (`spool.is_duplicate`) — sonst käme eine Instanz doppelt ins
+  PACS, wenn sie zwischenzeitlich aus dem Spool zugestellt wurde.
+- Nach `spool_max_attempts` (Default 10) wird der Eintrag zum **Dead Letter**:
+  sichtbar in der Warteschlange, einzeln oder gesammelt wiederholbar,
+  verwerfbar nur mit Begründung (auditiert).
 
 **Backend.**
 
-- Tabelle `store_spool`: `sop_instance_uid` (unique → Dedupe, kein
-  Doppelversand), `study_uid`, `accession`, `source_id`, `target_id`,
-  `payload` (BYTEA), `status` (`queued|sent|failed|dead`), `attempts`,
-  `next_attempt_at`, `last_error`, `created_at`, `sent_at`.
-- Ein Worker-Thread (analog zum Echo-Loop) sendet fällige Einträge mit
-  exponentiellem Backoff; nach `spool_max_attempts` → `dead` + Alert.
-- `strict_store_status` bleibt erhalten, bekommt aber die Policy
-  `accept_when_queued`: ist der Spool aktiv und die Instanz sicher
-  persistiert, meldet der Broker der Modalität **Erfolg** — das verhindert
-  Wiederholungen auf Geräteseite und ist die klinisch richtige Semantik.
-- Dedupe: existiert die `sop_instance_uid` bereits (`queued|sent`), wird nur
-  der Status quittiert, nicht erneut gesendet.
-- API: `GET /api/v1/spool?status=&limit=`, `GET /api/v1/spool/stats`,
-  `POST /api/v1/spool/{id}/retry`, `DELETE /api/v1/spool/{id}`.
-- Settings: `spool_enabled`, `spool_max_attempts`, `spool_backoff_s`,
-  `spool_max_items`, `accept_when_queued`.
+- Tabelle `store_spool` (Metadaten, `payload_path`, Status, `attempts`,
+  `next_attempt_at`, `last_error`) + `spool.py` als einzige Schnittstelle.
+- C-STORE-Pfad: Fehler → `spool.enqueue`; Ergebnis `queued`/`duplicate` +
+  `accept_when_queued` → Erfolg an die Modalität, Store-Log `queued`.
+- Retry-Worker im Lifespan (Intervall `spool_poll_s`), exponentieller Backoff
+  (`spool_backoff_s * 2^(n-1)`, gekappt auf 1 h), Purge der zugestellten
+  Einträge nach `spool_retention_s`.
+- API: `GET /spool`, `GET /spool/stats`, `POST /spool/{id}/retry`,
+  `POST /spool/retry-all`, `DELETE /spool/{id}?reason=` (Pflicht-Begründung).
 - Metriken: `mwl_spool_items{status}`, `mwl_spool_oldest_seconds`,
-  `mwl_spool_forwarded_total{target}`, `mwl_spool_dead_total`.
+  `mwl_spool_bytes`, `mwl_spool_queued_total{target}`,
+  `mwl_spool_forwarded_total{target}`, `mwl_spool_dead_total{target}`.
+- Health-Findings: `spool_dead_letters` (error), `spool_full` (error),
+  `spool_backlog` (warning ab 15 min Rückstand).
 
 **Frontend (OE3).**
 
-- Monitoring: Karte „Weiterleitungs-Spool" (Warteschlange, ältester Eintrag,
-  Dead-Letter-Zahl) mit Warnfarbe ab Schwellwert.
-- Spool-Seite `/broker/spool`: Filter nach Status/Ziel, Detailansicht
-  (Accession, Study-UID, Ziel, letzter Fehler), Aktionen „Erneut senden" und
-  „Verwerfen" (Verwerfen nur mit Pflicht-Begründung → Audit).
-- DAU-Sicherheit: kein automatisches Verwerfen; Verwerfen erklärt den
-  Verlust („Die Instanz wird nicht ins PACS übertragen"); Backlog-Banner mit
-  Direktlink; `spool_max_items` verhindert unbegrenztes Wachstum, dann
-  greift wieder striktes Fehlermelden.
+- Spool-Karte im Dashboard: Rückstand, ältester Eintrag, Belegung, Dead-Letter-
+  Badge, „Alle erneut senden" (bestätigt, auditiert), Link zur Warteschlange.
+- Seite `/broker/spool`: Filter nach Status, Liste mit Ziel/Versuchen/Größe/
+  letztem Fehler, „Jetzt erneut senden" je Eintrag, „Verwerfen" mit
+  Pflicht-Begründung (Dialog erklärt, dass die Instanz verloren geht).
+- Mobile: Einträge als Cards.
 
-**Tests & Verifikation.**
+**Tests & Verifikation.** Enqueue/Dedupe/Budget/Ablehnung, atomares Schreiben,
+Payload-Roundtrip, Backoff-Wachstum, Dead Letter nach n Versuchen, fehlendes
+Ziel/unlesbare Datei, Retry/Retry-all/Discard/Purge, Worker-Stopp, API, UI;
+Integration: C-STORE bei totem Ziel → `queued` + Erfolg an die Modalität → Ziel
+gesund → Worker stellt zu (Instanz kommt wirklich an) → Wiederholung wird nicht
+doppelt gesendet; E2E-Szenario im Test-Stack inklusive Dead Letter und
+Retry über die UI.
 
-- pytest: Backoff-Berechnung, Dead-Letter, Dedupe, `accept_when_queued`,
-  Persistenz über Prozessneustart (SQLite/Postgres), Kapazitätsgrenze.
-- Integration: Ziel abschalten → C-STORE quittiert Erfolg + `queued` →
-  Ziel starten → Worker sendet → `sent` und Instanz im Ziel-PACS (HTTP-Zähler).
-- vitest/Playwright: Spool-Tabelle, Retry-Klick, Verwerfen mit Begründung.
-- `test-stack.sh`: das Szenario „Ziel down/up" als Smoke ergänzen.
-
-**Risiken.** Speicherbedarf (Payloads) → `spool_max_items` + Monitoring;
-Reihenfolge (FIFO je Study sinnvoll); Aufbewahrung nach `sent` (kurze
-Retention, damit die Dedupe-Wirkung bleibt).
+**Risiken.** Speicherbedarf (Budget + Monitoring), Duplikatsschutz-Fenster
+(`spool_retention_s` — danach wäre ein erneuter C-STORE wieder ein Neuzugang),
+Dead Letters brauchen einen Betreiber, der sie ansieht (deshalb Health-Error).
 
 ### P0-3 Circuit Breaker pro Upstream
 
@@ -431,9 +453,16 @@ ATNA-Schema.
 - **Retention.** `seen_items` (vorhanden), `query_log`/`store_log`,
   `store_spool` (nach `sent`), `worklist_cache`, `config_audit` (bewusst
   länger). Jede Retention über Settings steuerbar und im Health-Panel sichtbar.
-- **Migrationen.** Die Mini-Migration (`db._apply_column_migrations`) trägt
-  additive Spalten. Ab dem Spool (BYTEA, Indizes, Datenmigration) sollte auf
-  **Alembic** gewechselt werden — einmalig, dokumentiert, mit Revisionspfad.
+- **Migrationen — umgesetzt (Sprint 4).** Statt der handgeschriebenen
+  Spaltenliste gibt es jetzt **Alembic** mit Revisionspfad:
+  `0001_baseline` wird nur *gestempelt* (das Basisschema kommt weiter aus den
+  Modellen via `create_all`), `0002_cache_columns` und `0003_store_spool` sind
+  die ersten echten Revisionen. `init_db()` = `create_all()` (fehlende Tabellen)
+  - `alembic upgrade head` (geordnete Migrationen für bestehende Installationen).
+  Jede Revision nach der Baseline ist **defensiv** (Existenzprüfung), weil eine
+  frische Datenbank das aktuelle Schema bereits hat. Tests erzwingen den Pfad:
+  eine DB ohne Versionstabelle wird gestempelt und migriert, Spalten kommen
+  zurück, und jede Modellspalte über der Baseline hat eine Migration.
 - **Rollen/RBAC.** Die Broker-Konfiguration schreibt produktiv wirksame
   Zustände. Über die Fork-Feature-Flags eine Trennung „ansehen" vs.
   „konfigurieren" einführen (`brokerRead`/`brokerWrite`), serverseitig über
@@ -461,7 +490,7 @@ ATNA-Schema.
 | 1 | Circuit Breaker (P0-3) + Health-Panel (P1-3) | keine — schneller Nutzen, kleine Eingriffe | **✅ umgesetzt** |
 | 2 | Simulation (P1-2) + Config-Audit/Export/Rollback (P1-1) | keine | **✅ umgesetzt** |
 | 3 | Worklist-Cache (P0-1) | Löschkonzept/PHI-Entscheidung | **✅ umgesetzt** |
-| 4 | C-STORE-Spool (P0-2) | Alembic-Migration, Speicherkonzept | offen |
+| 4 | C-STORE-Spool (P0-2) | Alembic-Migration, Speicherkonzept | **✅ umgesetzt** |
 | 5 | Alerting (P1-4), dann P2 nach fachlicher Priorisierung | Betriebsentscheidung | offen |
 
 Jede Phase endet mit: pytest + vitest + Playwright (Desktop/Mobile) +
@@ -610,6 +639,45 @@ und konnten das nicht sehen; aufgefallen ist es beim Deep-Audit gegen den
 echten Stack. Ergänzt, plus ein Test, der erzwingt, dass jede nachträglich
 ergänzte Modellspalte eine Migration hat.
 
+### Sprint 4 — C-STORE-Spool mit Retry/Dead-Letter (umgesetzt)
+
+**Umgesetzt.**
+
+- `store_spool` + `spool.py`: Store-and-Forward mit **Payload auf Platte**
+  (atomar geschrieben), Metadaten in der DB, Budget (`spool_max_items`,
+  `spool_max_bytes`) und **Ablehnung statt stillem Verwerfen**, wenn es voll ist.
+- `accept_when_queued`: Erfolg an die Modalität, sobald die Instanz sicher
+  liegt; abschaltbar (dann gilt `strict_store_status`).
+- Retry-Worker im Lifespan mit exponentiellem Backoff, Dead Letter nach
+  `spool_max_attempts`, Purge nach `spool_retention_s`.
+- **Dedupe in beiden Pfaden** (`spool.is_duplicate`) — ein wiederholter C-STORE
+  wird quittiert, ohne doppelt zu senden. (Beim Testen aufgefallen: ohne diese
+  Prüfung kam eine Instanz, die zwischenzeitlich aus dem Spool zugestellt wurde,
+  beim Wiederholen ein zweites Mal ins PACS.)
+- API `GET /spool`, `GET /spool/stats`, `POST /spool/{id}/retry`,
+  `POST /spool/retry-all`, `DELETE /spool/{id}?reason=` (Pflicht-Begründung,
+  auditiert); Metriken `mwl_spool_*`; Health-Findings für Dead Letter, Voll und
+  Rückstand.
+- UI: Spool-Karte (Rückstand/Belegung/Retry-all) und Seite `/broker/spool`
+  (Filter, Retry, Verwerfen mit Begründung), Mobile als Cards, i18n en/de.
+
+**Alembic statt handgeschriebener Migrationen.** Siehe Querschnittsthema
+„Migrationen": Baseline wird gestempelt, Revisionen sind defensiv, `init_db()`
+führt `create_all` + `upgrade head` aus. Die Image-Build-Datei kopiert
+`alembic.ini` und `migrations/` mit; `alembic` ist eine echte Dependency
+(aufgefallen, weil der Container ohne sie unhealthy wurde — im venv war das
+Paket nur manuell installiert).
+
+**Tests & Verifikation.**
+
+| Ebene | Umfang |
+|---|---|
+| pytest | 240 Tests, 97 % Coverage (+42: Spool-Unit, Integration, API, Health, Migrationspfad) |
+| vitest | 395 Tests, 98 % Broker-UI-Coverage (+9: Spool-Karte, Warteschlange, Mobile, Client) |
+| Playwright | 38 Tests (Desktop + Mobile), inkl. Dead Letter und Retry über die UI |
+| test-stack.sh | Szenario „Ziel down → gepuffert → Ziel up → zugestellt" plus Dead Letter für die UI |
+| verify-ui.cjs | 77 Checks (Desktop 1400×900 + Mobile 375×812) |
+
 ## Offene Entscheidungen (an den Betreiber)
 
 1. **Cache und PHI — entschieden, aber bestätigen lassen:** Der Cache speichert
@@ -618,8 +686,12 @@ ergänzte Modellspalte eine Migration hat.
    Patientendaten, automatischer Purge, „Cache leeren" im UI, Stale nur im
    Fehlerfall. Wer das nicht möchte, setzt `cache_enabled = false` (dann
    antwortet der Broker im Fehlerfall leer) oder `cache_stale_max_s = 0`.
-2. **Spool:** erlaubte Größe/Speicherort und maximale Aufbewahrung nach
-   erfolgreichem Versand.
+2. **Spool — entschieden, aber bestätigen lassen:** Payloads liegen auf einem
+   eigenen Volume (`spool_dir`), Budget 20000 Einträge / 10 GiB, zugestellte
+   Einträge bleiben 24 h als Duplikatsschutz. Wer mehr/weniger braucht, ändert
+   `spool_max_items`, `spool_max_bytes`, `spool_retention_s` — oder schaltet den
+   Spool mit `spool_enabled = false` ganz ab (dann gilt wieder striktes
+   Fehlermelden an die Modalität).
 3. **Audit-Actor:** kommt der Benutzerkontext aus einem vorgelagerten Proxy
    (Header) oder bleibt das Audit rein technisch?
 4. **Alerting-Ziel:** Webhook (Teams/Slack) oder E-Mail/Syslog?

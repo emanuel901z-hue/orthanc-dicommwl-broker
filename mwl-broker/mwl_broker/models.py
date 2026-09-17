@@ -151,6 +151,43 @@ class WorklistCache(Base):
     )
 
 
+class StoreSpool(Base):
+    """Spooled C-STORE instances that could not be forwarded yet.
+
+    Store-and-forward: the payload is written to disk (`payload_path`) and the
+    row carries the metadata, so the database index stays small and the spool
+    can live on its own volume with its own size budget. The file is deleted
+    once the instance reached its target; the row stays for
+    `spool_retention_s` as a duplicate guard (the same SOPInstanceUID must not
+    be forwarded twice).
+
+    `target_id` is a plain integer (no FK): an instance must never be dropped
+    because somebody deleted a target — a missing target turns the entry into a
+    dead letter, which the operator sees and can retry or discard.
+    """
+
+    __tablename__ = "store_spool"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sop_instance_uid: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    study_uid: Mapped[str] = mapped_column(String(128), default="", index=True)
+    accession: Mapped[str] = mapped_column(String(64), default="", index=True)
+    source_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_name: Mapped[str] = mapped_column(String(64), default="")
+    payload_path: Mapped[str] = mapped_column(String(512), default="")
+    payload_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    # queued | sent | failed | dead
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    last_error: Mapped[str] = mapped_column(String(512), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ConfigAudit(Base):
     """Server-side change log for every configuration mutation.
 

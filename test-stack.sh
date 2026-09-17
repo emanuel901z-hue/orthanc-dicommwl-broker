@@ -155,6 +155,56 @@ row['port'] = 11114
 print(json.dumps(row))
 ")" > /dev/null
 
+echo "── C-STORE spool: store and forward ──"
+# The default target (orthanc) is taken down: the broker must spool the
+# instance instead of losing it and still confirm it to the modality.
+orthanc_target_id=$(curl -sf "$BROKER_API_URL/api/v1/targets" | python3 -c "
+import json, sys
+print(next(t['id'] for t in json.load(sys.stdin) if t['name'] == 'orthanc'))
+")
+set_target_port() {
+  curl -sf -X PUT "$BROKER_API_URL/api/v1/targets/$orthanc_target_id" \
+    -H 'Content-Type: application/json' \
+    -d "$(curl -sf "$BROKER_API_URL/api/v1/targets" | python3 -c "
+import json, sys
+row = next(t for t in json.load(sys.stdin) if t['id'] == $orthanc_target_id)
+row['port'] = $1
+print(json.dumps(row))
+")" > /dev/null
+}
+
+set_target_port 1                       # nothing listens there
+python3 mwl-broker/scripts/cstore_smoke.py "$BROKER_DICOM_HOST" "$BROKER_DICOM_PORT" MWLBROKER ACC-SPOOL-1 1.2.840.10008.5.1.4.1.1.2.3
+queued=$(curl -sf "$BROKER_API_URL/api/v1/spool/stats" | python3 -c "import json,sys; print(json.load(sys.stdin)['open'])")
+echo "   queued after a failed forward: $queued"
+[ "$queued" -ge 1 ] || { echo "FAIL: the instance was not spooled" >&2; exit 1; }
+
+# The target recovers → the retry worker delivers the instance.
+set_target_port 4242
+delivered=0
+for _ in $(seq 1 12); do
+  sleep 3
+  open=$(curl -sf "$BROKER_API_URL/api/v1/spool/stats" | python3 -c "import json,sys; print(json.load(sys.stdin)['open'])")
+  if [ "$open" -eq 0 ]; then delivered=1; break; fi
+done
+echo "   backlog after recovery: $(curl -sf "$BROKER_API_URL/api/v1/spool/stats" | python3 -c "import json,sys; print(json.load(sys.stdin)['open'])")"
+[ "$delivered" -eq 1 ] || { echo "FAIL: the spooled instance was never delivered" >&2; exit 1; }
+
+# Leave one *dead letter* for the UI test: the target is down while the worker
+# retries, and the test stack dead-letters after the first attempt. The target
+# is restored afterwards, so the rest of the suite sees a healthy stack.
+set_target_port 1
+python3 mwl-broker/scripts/cstore_smoke.py "$BROKER_DICOM_HOST" "$BROKER_DICOM_PORT" MWLBROKER ACC-SPOOL-2 1.2.840.10008.5.1.4.1.1.2.4
+dead=0
+for _ in $(seq 1 15); do
+  sleep 2
+  dead=$(curl -sf "$BROKER_API_URL/api/v1/spool/stats" | python3 -c "import json,sys; print(json.load(sys.stdin)['dead'])")
+  if [ "$dead" -ge 1 ]; then break; fi
+done
+set_target_port 4242
+echo "   dead letters for the UI test: $dead"
+[ "$dead" -ge 1 ] || { echo "FAIL: no dead letter was produced" >&2; exit 1; }
+
 echo "── Playwright (desktop + mobile) ──"
 (cd orthanc-explorer-3-usable && OE3_BASE="$OE3_BASE" \
   npx playwright test --config=e2e/stack/playwright.stack.config.ts)
