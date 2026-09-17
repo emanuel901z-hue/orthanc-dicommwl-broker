@@ -34,6 +34,10 @@ cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-mi
 # Broker-API + Swagger/OpenAPI (laufender Stack)
 curl -s http://127.0.0.1:18081/openapi.json | python3 -m json.tool | head
 #   Swagger UI: http://127.0.0.1:18081/docs
+#   Konfigurations-Checks / Readiness / Breaker-Reset:
+curl -s http://127.0.0.1:18081/api/v1/health/config | python3 -m json.tool
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18081/healthz/ready
+curl -X POST http://127.0.0.1:18081/api/v1/sources/1/reset-breaker
 
 # Broker lokal (Postgres via Docker, sonst BROKER_DATABASE_URL setzen)
 cd mwl-broker && uvicorn mwl_broker.main:app --port 8081
@@ -123,6 +127,16 @@ Token rotieren = nur die Store-Datei neu schreiben:
   `docker-compose.demo.yml`, nie in die Basis.
 
 ## Regeln für den Broker (`mwl-broker/`)
+
+- **Löschpfade räumen Abhängigkeiten auf.** `DELETE /sources|targets/{id}`
+  entfernt zuvor Regeln, Transforms, `seen_items` und Breaker-Zustand in
+  derselben Transaktion (`before_delete`-Hook in `api._crud`) — sonst schlägt
+  der Delete auf Postgres mit einem FK-Verstoß fehl.
+- **SQLite-Tests erzwingen Fremdschlüssel** (`PRAGMA foreign_keys=ON` in
+  `db.get_engine`), damit sich Tests wie Postgres verhalten.
+- **Neue Endpunkte brauchen den vollen OpenAPI-Vertrag** (Summary, Tag,
+  Response-Description ≠ Default, alle Path-/Query-Params, Schema-Felder) —
+  `test_openapi_documents_all_endpoints` erzwingt das.
 
 - **PHI**: `PatientName` niemals in Logs/Metriken/DB-Logs. Erlaubt für
   Matching: AccessionNumber, SPS-ID, StudyInstanceUID. PatientID nur in

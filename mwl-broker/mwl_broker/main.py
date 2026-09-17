@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from . import api, db
+from .schemas import ReadyOut
 from .config import get_settings
 from .dimse import BrokerSCP
 from .echo import echo_loop
@@ -100,6 +101,26 @@ def create_app() -> FastAPI:
     )
     def prometheus_metrics():
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+    @app.get(
+        "/healthz/ready", response_model=ReadyOut, tags=["monitoring"],
+        summary="Readiness probe",
+        description="Verifies that the required components are up: the config/log "
+                    "database and — when DICOM is enabled — the listening SCP. "
+                    "Returns 503 when not ready (for orchestrators/load balancers).",
+        response_description="`{ready, checks}` — 503 when a required component is down.",
+        responses={503: {"description": "At least one required component is down."}},
+    )
+    def healthz_ready(response: Response):
+        settings = get_settings()
+        checks = {
+            "db": db.check_db(),
+            "scp": api.scp_listening() if settings.start_dicom else True,
+        }
+        ready = all(checks.values())
+        if not ready:
+            response.status_code = 503
+        return {"ready": ready, "checks": checks}
 
     @app.get(
         "/healthz", tags=["monitoring"],

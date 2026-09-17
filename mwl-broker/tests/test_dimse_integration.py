@@ -3,6 +3,10 @@ against the broker SCP (ephemeral ports) with in-process mock upstreams.
 
 Uses the shared sqlite DB from conftest (BROKER_DATABASE_URL).
 """
+import socket
+import threading
+import time
+
 import pytest
 from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
 from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian, generate_uid
@@ -135,10 +139,11 @@ def _cstore(broker_port, ds: Dataset) -> int:
         assoc.release()
 
 
-def _seed_source(port: int, name="ris-a", aet="RIS_A") -> int:
+def _seed_source(port: int, name="ris-a", aet="RIS_A", timeout_s=10) -> int:
     with session_factory()() as s:
         row = MwlSource(name=name, aet=aet, host="127.0.0.1", port=port,
-                        calling_aet="MWLBROKER", charset="ISO_IR 100")
+                        calling_aet="MWLBROKER", charset="ISO_IR 100",
+                        timeout_s=timeout_s)
         s.add(row)
         s.commit()
         return row.id
@@ -458,3 +463,96 @@ def test_cfind_increments_metrics(broker):
     _cfind(broker, _wildcard_query())
     after = REGISTRY.get_sample_value("mwl_cfind_requests_total", labels)
     assert after == before + 1
+
+
+# ── Circuit breaker in the C-FIND fan-out ──────────────────────────────
+
+
+@pytest.fixture()
+def hanging_port():
+    """A TCP port that accepts connections but never answers DIMSE.
+
+    Simulates the expensive failure mode: a source that is reachable but
+    dead, so every query costs the full timeout.
+    """
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(16)
+    srv.settimeout(0.2)
+    conns: list[socket.socket] = []
+    stop = threading.Event()
+
+    def accept_loop():
+        while not stop.is_set():
+            try:
+                conn, _ = srv.accept()
+                conns.append(conn)  # hold it open, send nothing
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+
+    thread = threading.Thread(target=accept_loop, daemon=True)
+    thread.start()
+    try:
+        yield srv.getsockname()[1]
+    finally:
+        stop.set()
+        thread.join(timeout=2)
+        for conn in conns:
+            conn.close()
+        srv.close()
+
+
+def _last_query_log():
+    with session_factory()() as s:
+        return s.scalars(select(QueryLog).order_by(QueryLog.ts.desc())).all()[0]
+
+
+def test_breaker_skips_hanging_source_and_keeps_queries_fast(broker, mwl_scp, hanging_port):
+    settings_service.set_value("breaker_fail_threshold", "2")
+    settings_service.set_value("breaker_open_seconds", "60")
+    _seed_source(mwl_scp)
+    _seed_source(hanging_port, name="hanging", aet="HANG", timeout_s=1)
+
+    # two failing queries open the breaker (each pays the 1 s timeout)
+    for _ in range(2):
+        assert len(_cfind(broker, _wildcard_query())) == 2
+        assert _last_query_log().per_source["hanging"] == "error"
+    assert _last_query_log().status == "partial"
+
+    # the next query skips the source entirely — and is fast
+    started = time.monotonic()
+    answers = _cfind(broker, _wildcard_query())
+    elapsed = time.monotonic() - started
+
+    assert len(answers) == 2, "the live source must still answer"
+    assert elapsed < 0.5, f"breaker did not skip the hanging source ({elapsed:.2f}s)"
+    log_row = _last_query_log()
+    assert log_row.per_source["hanging"] == "breaker_open"
+    assert log_row.per_source["ris-a"] == 2
+    assert log_row.status == "partial"
+
+
+def test_breaker_reopens_only_after_the_cooldown(broker, mwl_scp, hanging_port):
+    settings_service.set_value("breaker_fail_threshold", "1")
+    settings_service.set_value("breaker_open_seconds", "3600")
+    _seed_source(mwl_scp)
+    _seed_source(hanging_port, name="hanging", aet="HANG", timeout_s=1)
+
+    _cfind(broker, _wildcard_query())  # trips the breaker
+    assert _last_query_log().per_source["hanging"] == "error"
+
+    _cfind(broker, _wildcard_query())
+    assert _last_query_log().per_source["hanging"] == "breaker_open"
+
+    # an operator reset puts the source back into the fan-out immediately
+    from mwl_broker import breaker
+
+    with session_factory()() as s:
+        source_id = s.scalars(select(MwlSource).where(MwlSource.name == "hanging")).one().id
+    breaker.reset(source_id)
+
+    _cfind(broker, _wildcard_query())
+    assert _last_query_log().per_source["hanging"] == "error"

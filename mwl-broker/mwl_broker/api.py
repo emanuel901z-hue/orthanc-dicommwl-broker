@@ -20,7 +20,9 @@ from .models import (
     StoreLog,
 )
 from .schemas import (
+    BreakerStateOut,
     EchoResult,
+    HealthOut,
     QueryLogOut,
     RuleIn,
     RuleOut,
@@ -35,8 +37,8 @@ from .schemas import (
     TransformIn,
     TransformOut,
 )
-from . import settings_service, transforms
-from .models import TransformRule
+from . import breaker, health_checks, settings_service, transforms
+from .models import SeenItem, SourceBreaker, TransformRule
 
 router = APIRouter(prefix="/api/v1")
 
@@ -46,6 +48,11 @@ _scp = None  # set by main.py for /status
 def bind_scp(scp) -> None:
     global _scp
     _scp = scp
+
+
+def scp_listening() -> bool:
+    """Whether the DICOM SCP is up (used by /status and /healthz/ready)."""
+    return _scp.listening if _scp is not None else False
 
 
 def _db() -> Session:
@@ -59,8 +66,14 @@ def _db() -> Session:
 _db_dep = Depends(_db)
 
 
-def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str):
-    """Register list/create/get/update/delete for a model with `name`."""
+def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
+          before_delete=None):
+    """Register list/create/get/update/delete for a model with `name`.
+
+    `before_delete(session, row_id)` runs inside the same transaction and
+    removes dependent rows (rules/transforms/seen_items/breaker state) — a
+    bare delete would violate the foreign keys on Postgres.
+    """
 
     @router.get(
         path, response_model=list[out_schema], name=f"list_{path[1:]}",
@@ -121,12 +134,40 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str)
         row = s.get(model, row_id)
         if row is None:
             raise HTTPException(404, "not found")
+        if before_delete is not None:
+            before_delete(s, row_id)
         s.delete(row)
         s.commit()
 
 
-_crud(router, "/sources", MwlSource, SourceIn, SourceOut, "source")
-_crud(router, "/targets", PacsTarget, TargetIn, TargetOut, "target")
+def _drop_source_dependencies(s: Session, source_id: int) -> None:
+    """Remove everything that references a source before it is deleted."""
+    for model, column in (
+        (RoutingRule, RoutingRule.source_id),
+        (TransformRule, TransformRule.source_id),
+        (SeenItem, SeenItem.source_id),
+        (SourceBreaker, SourceBreaker.source_id),
+    ):
+        for row in s.scalars(select(model).where(column == source_id)).all():
+            s.delete(row)
+    s.flush()
+
+
+def _drop_target_dependencies(s: Session, target_id: int) -> None:
+    """Remove everything that references a target before it is deleted."""
+    for model, column in (
+        (RoutingRule, RoutingRule.target_id),
+        (TransformRule, TransformRule.target_id),
+    ):
+        for row in s.scalars(select(model).where(column == target_id)).all():
+            s.delete(row)
+    s.flush()
+
+
+_crud(router, "/sources", MwlSource, SourceIn, SourceOut, "source",
+      before_delete=_drop_source_dependencies)
+_crud(router, "/targets", PacsTarget, TargetIn, TargetOut, "target",
+      before_delete=_drop_target_dependencies)
 
 
 # ── Routing rules ──────────────────────────────────────────────────────
@@ -432,6 +473,49 @@ def echo_target(
     return echo_one("target", row)
 
 
+@router.post(
+    "/sources/{source_id}/reset-breaker", response_model=BreakerStateOut,
+    tags=["monitoring"],
+    summary="Reset a source's circuit breaker",
+    description="Puts the source back into the C-FIND fan-out immediately "
+                "instead of waiting for the open window to expire.",
+    response_description="The breaker state after the reset (closed).",
+    responses={404: {"description": "No source with this ID."}},
+)
+def reset_breaker(
+    source_id: Annotated[int, Path(description="ID of the source whose breaker is reset.")],
+    s: Session = _db_dep,
+):
+    row = s.get(MwlSource, source_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    breaker.reset(source_id)
+    state = breaker.snapshot().get(source_id)
+    return {
+        "source_id": source_id,
+        "name": row.name,
+        "state": (state or {}).get("state", breaker.STATE_CLOSED),
+        "failures": (state or {}).get("failures", 0),
+        "retry_in_s": (state or {}).get("retry_in_s"),
+        "last_error": (state or {}).get("last_error", ""),
+    }
+
+
+@router.get(
+    "/health/config", response_model=HealthOut, tags=["monitoring"],
+    summary="Configuration consistency checks",
+    description="Checks the broker configuration for the typical production "
+                "mistakes (no default target, rules on disabled nodes, dead "
+                "sources, open circuit breakers, empty AET allowlist, …).",
+    response_description="Findings sorted by severity plus a severity summary.",
+)
+def health_config(s: Session = _db_dep):
+    from .config import get_settings
+
+    findings = health_checks.config_findings(s, get_settings())
+    return {"findings": findings, "summary": health_checks.summary(findings)}
+
+
 @router.get(
     "/status", response_model=StatusOut, tags=["monitoring"],
     summary="Broker status snapshot",
@@ -444,14 +528,20 @@ def status(s: Session = _db_dep):
     snap = snapshot()
     from .db import check_db
 
+    breakers = breaker.snapshot()
+
     def with_echo(model_rows, kind):
         by_id = {e["id"]: e for e in snap[kind]}
         out = []
         for r in model_rows:
-            e = by_id.get(r.id) or {
+            e = dict(by_id.get(r.id) or {
                 "kind": kind, "id": r.id, "name": r.name,
                 "ok": False, "rtt_ms": None, "last_check": None, "error": "never checked",
-            }
+            })
+            if kind == "source":
+                state = breakers.get(r.id) or {}
+                e["breaker_state"] = state.get("state", breaker.STATE_CLOSED)
+                e["breaker_retry_in_s"] = state.get("retry_in_s")
             out.append(e)
         return out
 

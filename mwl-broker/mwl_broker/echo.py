@@ -43,6 +43,13 @@ def echo_one(kind: str, row) -> dict:
         return dict(ECHO_STATUS[kind][row.id])
 
 
+def reset_for_tests() -> None:
+    """Clear the in-memory echo state (test isolation)."""
+    with _lock:
+        ECHO_STATUS["source"].clear()
+        ECHO_STATUS["target"].clear()
+
+
 def snapshot() -> dict[str, list[dict]]:
     with _lock:
         return {kind: list(items.values()) for kind, items in ECHO_STATUS.items()}

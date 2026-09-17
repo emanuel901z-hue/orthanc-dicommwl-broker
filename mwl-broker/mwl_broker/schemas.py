@@ -244,6 +244,51 @@ class StoreLogOut(BaseModel):
     )
 
 
+class BreakerStateOut(BaseModel):
+    """Circuit-breaker state of one upstream source."""
+
+    source_id: int = Field(description="Row ID of the source.")
+    name: str = Field(description="Display name of the source.")
+    state: str = Field(description="closed | half_open | open.")
+    failures: int = Field(description="Consecutive failures since the last success.")
+    retry_in_s: int | None = Field(
+        default=None, description="Seconds until the next probe (null unless open).",
+    )
+    last_error: str = Field(default="", description="Last upstream error message.")
+
+
+class FindingOut(BaseModel):
+    """One configuration consistency finding."""
+
+    code: str = Field(
+        description="Stable machine-readable code (the UI translates it).",
+        examples=["no_default_target"],
+    )
+    severity: str = Field(description="error | warning | info.")
+    message: str = Field(description="English fallback message.")
+    entity: dict = Field(
+        default_factory=dict,
+        description="Affected object for deep-linking: {kind, id, name}.",
+    )
+    details: dict = Field(
+        default_factory=dict, description="Check-specific values (counts, names, …).",
+    )
+
+
+class ReadyOut(BaseModel):
+    """Readiness of the broker for orchestration probes."""
+
+    ready: bool = Field(description="True when every required component is up.")
+    checks: dict = Field(description="Per-component result, e.g. {db: true, scp: true}.")
+
+
+class HealthOut(BaseModel):
+    """Result of the configuration consistency checks."""
+
+    findings: list[FindingOut] = Field(description="Findings, sorted by severity.")
+    summary: dict = Field(description="Counts per severity: error/warning/info.")
+
+
 class EchoResult(BaseModel):
     """Last C-ECHO result for one source or target."""
 
@@ -254,6 +299,14 @@ class EchoResult(BaseModel):
     rtt_ms: int | None = Field(default=None, description="Round-trip time in ms (null on failure).")
     last_check: datetime | None = Field(default=None, description="Timestamp of the last check (null = never checked).")
     error: str | None = Field(default=None, description="Error detail when ok=false.")
+    breaker_state: str | None = Field(
+        default=None,
+        description="Circuit-breaker state (sources only): closed | half_open | open.",
+    )
+    breaker_retry_in_s: int | None = Field(
+        default=None,
+        description="Seconds until the breaker probes the source again (sources only).",
+    )
 
 
 class StatusOut(BaseModel):

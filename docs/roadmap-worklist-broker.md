@@ -31,19 +31,19 @@ auditierbar.
 
 ## Priorisierung im Überblick
 
-| Prio | Funktion | Nutzen | Aufwand |
-|---|---|---|---|
-| **P0** | Worklist-Cache mit Stale-Fallback | RIS-Ausfall legt den Modalitätenbetrieb nicht lahm | mittel |
-| **P0** | C-STORE-Spool mit Retry/Dead-Letter | kein Bildverlust bei PACS-Ausfall | hoch |
-| **P0** | Circuit Breaker pro Upstream | tote Quelle kostet keine Timeouts mehr | klein |
-| **P1** | Config-Audit + Export/Import/Rollback | Nachvollziehbarkeit, Staging→Prod, Notfall-Rollback | mittel |
-| **P1** | Simulation (Dry-Run) für Routing/Transform | Regeln gefahrlos prüfen, bevor sie greifen | klein |
-| **P1** | Konsistenz-Checks / Health-Panel | Fehlkonfigurationen früh und sichtbar | klein |
-| **P1** | Alerting/Webhooks + Readiness-Endpoint | Betrieb erfährt Störungen, bevor Anwender anrufen | klein |
-| **P2** | Lokale Worklist-Items / HL7-ORM-Adapter | Notfälle und ungeplante Untersuchungen | hoch |
-| **P2** | Per-Station-Filter und -Priorität | jede Konsole sieht nur ihre Arbeitsliste | mittel |
-| **P2** | DICOM-TLS (mTLS) + Zertifikatsverwaltung | Segmentierung/Netzwerkanforderungen | mittel |
-| **P2** | ATNA-Audit-Export (syslog/TLS) | IHE-Compliance, zentrale Auditablage | mittel |
+| Prio | Funktion | Nutzen | Aufwand | Status |
+|---|---|---|---|---|
+| **P0** | Worklist-Cache mit Stale-Fallback | RIS-Ausfall legt den Modalitätenbetrieb nicht lahm | mittel | offen (Sprint 3) |
+| **P0** | C-STORE-Spool mit Retry/Dead-Letter | kein Bildverlust bei PACS-Ausfall | hoch | offen (Sprint 4) |
+| **P0** | Circuit Breaker pro Upstream | tote Quelle kostet keine Timeouts mehr | klein | **✅ Sprint 1** |
+| **P1** | Config-Audit + Export/Import/Rollback | Nachvollziehbarkeit, Staging→Prod, Notfall-Rollback | mittel | offen (Sprint 2) |
+| **P1** | Simulation (Dry-Run) für Routing/Transform | Regeln gefahrlos prüfen, bevor sie greifen | klein | offen (Sprint 2) |
+| **P1** | Konsistenz-Checks / Health-Panel | Fehlkonfigurationen früh und sichtbar | klein | **✅ Sprint 1** |
+| **P1** | Alerting/Webhooks + Readiness-Endpoint | Betrieb erfährt Störungen, bevor Anwender anrufen | klein | Readiness ✅ Sprint 1, Webhooks offen (Sprint 5) |
+| **P2** | Lokale Worklist-Items / HL7-ORM-Adapter | Notfälle und ungeplante Untersuchungen | hoch | offen |
+| **P2** | Per-Station-Filter und -Priorität | jede Konsole sieht nur ihre Arbeitsliste | mittel | offen |
+| **P2** | DICOM-TLS (mTLS) + Zertifikatsverwaltung | Segmentierung/Netzwerkanforderungen | mittel | offen |
+| **P2** | ATNA-Audit-Export (syslog/TLS) | IHE-Compliance, zentrale Auditablage | mittel | offen |
 
 ---
 
@@ -434,16 +434,67 @@ ATNA-Schema.
 
 ## Umsetzungsreihenfolge
 
-| Phase | Inhalt | Abhängigkeit |
-|---|---|---|
-| 1 | Circuit Breaker (P0-3) + Health-Panel (P1-3) | keine — schneller Nutzen, kleine Eingriffe |
-| 2 | Simulation (P1-2) + Config-Audit/Export/Rollback (P1-1) | keine |
-| 3 | Worklist-Cache (P0-1) | Löschkonzept/PHI-Entscheidung |
-| 4 | C-STORE-Spool (P0-2) | Alembic-Migration, Speicherkonzept |
-| 5 | Alerting (P1-4), dann P2 nach fachlicher Priorisierung | Betriebsentscheidung |
+| Phase | Inhalt | Abhängigkeit | Status |
+|---|---|---|---|
+| 1 | Circuit Breaker (P0-3) + Health-Panel (P1-3) | keine — schneller Nutzen, kleine Eingriffe | **✅ umgesetzt** |
+| 2 | Simulation (P1-2) + Config-Audit/Export/Rollback (P1-1) | keine | offen |
+| 3 | Worklist-Cache (P0-1) | Löschkonzept/PHI-Entscheidung | offen |
+| 4 | C-STORE-Spool (P0-2) | Alembic-Migration, Speicherkonzept | offen |
+| 5 | Alerting (P1-4), dann P2 nach fachlicher Priorisierung | Betriebsentscheidung | offen |
 
 Jede Phase endet mit: pytest + vitest + Playwright (Desktop/Mobile) +
 `verify-ui.cjs`, aktualisierter OpenAPI-Doku und aktualisiertem `project.md`.
+
+## Umsetzungs-Log
+
+### Sprint 1 — Circuit Breaker + Health-Panel (umgesetzt)
+
+**Backend.**
+
+- `SourceBreaker`-Modell (`source_breaker`-Tabelle) + `breaker.py`:
+  Zustandsmaschine `closed → open → half_open → closed`, persistiert
+  (Neustart vergisst eine tote Quelle nicht), Schwellen über Settings
+  (`breaker_fail_threshold`, `breaker_open_seconds`).
+- Integration in den C-FIND-Fan-out: offene Quellen werden übersprungen
+  (`per_source = "breaker_open"`), Erfolg schließt, Fehler öffnet; die
+  Query-Log-Statuslogik unterscheidet jetzt „geantwortet“ von „übersprungen“.
+- `health_checks.py` mit 10 Konsistenz-Checks (`no_default_target`,
+  `multiple_default_targets`, `rule_source_disabled`, `rule_target_disabled`,
+  `transform_target_disabled`, `no_enabled_source`, `no_working_source`,
+  `source_breaker_open`, `aet_whitelist_empty`, `broker_aet_collision`);
+  Findings tragen `code`/`severity`/`entity`/`details` — die UI übersetzt.
+- Neue Routen: `POST /api/v1/sources/{id}/reset-breaker`,
+  `GET /api/v1/health/config`, `GET /healthz/ready` (503 wenn DB/SCP fehlen);
+  `/api/v1/status` liefert `breaker_state` + `breaker_retry_in_s`.
+- Metriken: `mwl_upstream_breaker_state{source}`,
+  `mwl_config_findings{severity}`.
+- **Nebenbefund und behoben:** `DELETE /sources|targets/{id}` lieferte auf
+  Postgres 500 (FK-Verstoß), sobald Regeln, Transforms, `seen_items` oder
+  Breaker-Zustand die Zeile referenzierten. Der Endpunkt räumt Abhängigkeiten
+  jetzt in derselben Transaktion auf. Tests erzwingen dafür
+  `PRAGMA foreign_keys=ON` auf SQLite — dieselbe Fehlerklasse fällt damit
+  künftig in der Testsuite auf.
+
+**Frontend (OE3).**
+
+- `BreakerBadge` (Badge mit Restzeit + Reset-Button, Audit-Event
+  `broker.source.breaker_reset`) in Quellentabelle, Mobile-Cards und Monitoring.
+- `HealthPanel` auf `/broker`: Findings mit Schweregrad, lokalisiertem,
+  handlungsorientiertem Satz, Deep-Link („Beheben“) ins betroffene Formular und
+  englischem API-Text als Fallback.
+- Sidebar-Badge am „MWL Broker“-Eintrag (Fehler rot, sonst Warnungen).
+- Query-Log markiert `breaker_open` als „übersprungen (Breaker)“.
+- Löschdialog weist auf mitentfernte Abhängigkeiten hin (DAU-Sicherheit).
+
+**Tests & Verifikation.**
+
+| Ebene | Umfang |
+|---|---|
+| pytest | 123 Tests, 97 % Coverage (+35: Zustandsmaschine, hängende Quelle → schnelle Folge-Queries, Health-Checks je Code, API, FK-Regression) |
+| vitest | 348 Tests, 98,8 % Broker-UI-Coverage (+23: Badge, Panel, Mobile-Cards, Client, Audit) |
+| Playwright | 25 Tests (Desktop + Mobile), inkl. Health-Panel und Breaker-Reset |
+| test-stack.sh | Szenario „tote Quelle → Breaker offen → Finding → `/healthz/ready`“ |
+| verify-ui.cjs | 58 Checks (Desktop 1400×900 + Mobile 375×812) |
 
 ## Offene Entscheidungen (an den Betreiber)
 

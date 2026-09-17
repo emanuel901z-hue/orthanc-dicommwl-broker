@@ -13,7 +13,7 @@ from pynetdicom.presentation import build_context
 from pynetdicom.sop_class import ModalityWorklistInformationFind, Verification
 from sqlalchemy import select
 
-from . import metrics, settings_service, transforms
+from . import breaker, metrics, settings_service, transforms
 from .config import Settings
 from .db import session_factory
 from .models import QueryLog, RoutingRule, SeenItem, StoreLog, MwlSource, PacsTarget
@@ -129,10 +129,17 @@ class BrokerSCP:
         per_source: dict[str, int | str] = {}
         collected: list[tuple[SourceCfg, list[Dataset]]] = []
 
-        if sources:
-            with ThreadPoolExecutor(max_workers=len(sources)) as pool:
+        # Circuit breaker: skip sources that are known to be down instead of
+        # paying their timeout on every single query.
+        active = [src for src in sources if breaker.is_available(src.id)]
+        for src in sources:
+            if src not in active:
+                per_source[src.name] = breaker.SKIPPED
+
+        if active:
+            with ThreadPoolExecutor(max_workers=len(active)) as pool:
                 futures = {
-                    pool.submit(query_source, src, identifier): src for src in sources
+                    pool.submit(query_source, src, identifier): src for src in active
                 }
                 for fut in as_completed(futures):
                     src = futures[fut]
@@ -140,10 +147,12 @@ class BrokerSCP:
                         answers = fut.result(timeout=src.timeout_s + 5)
                         per_source[src.name] = len(answers)
                         metrics.UPSTREAM_ANSWERS.labels(source=src.name).inc(len(answers))
+                        breaker.record_success(src.id)
                         collected.append((src, answers))
                     except Exception as exc:  # dead RIS must not break the query
                         log.warning("upstream %s query failed: %s", src.name, exc)
                         per_source[src.name] = "error"
+                        breaker.record_failure(src.id, str(exc))
 
         # restore priority order for deterministic merge
         order = {src.id: i for i, src in enumerate(sources)}
@@ -153,9 +162,13 @@ class BrokerSCP:
         self._record_seen_items(merged)
 
         duration_ms = int((time.monotonic() - started) * 1000)
+        # "error" (query failed) and "breaker_open" (skipped) are both
+        # non-answer outcomes; any int means a source actually answered.
+        bad = [v for v in per_source.values() if isinstance(v, str)]
+        answered = [v for v in per_source.values() if isinstance(v, int)]
         status = (
-            "success" if not per_source or all(v != "error" for v in per_source.values())
-            else "partial" if any(v != "error" for v in per_source.values())
+            "success" if not bad
+            else "partial" if answered
             else "failed"
         )
         metrics.CFIND_REQUESTS.labels(result=status).inc()

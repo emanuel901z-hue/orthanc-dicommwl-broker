@@ -19,3 +19,13 @@ ECHO_UP = Gauge(
     "mwl_echo_up", "Last C-ECHO result (1=ok, 0=fail)", ["kind", "name"]
 )
 SEEN_ITEMS = Gauge("mwl_seen_items", "Rows in seen_items table")
+CONFIG_FINDINGS = Gauge(
+    "mwl_config_findings",
+    "Configuration consistency findings by severity",
+    ["severity"],
+)
+BREAKER_STATE = Gauge(
+    "mwl_upstream_breaker_state",
+    "Circuit breaker state per source (0=closed, 1=half_open, 2=open)",
+    ["source"],
+)

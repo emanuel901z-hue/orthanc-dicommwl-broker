@@ -34,9 +34,22 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "Interval of the C-ECHO monitoring loop in seconds.",
     ),
+    "breaker_fail_threshold": (
+        "int",
+        "Consecutive C-FIND failures per source before its circuit breaker opens.",
+    ),
+    "breaker_open_seconds": (
+        "int",
+        "How long an open circuit breaker skips a source before probing it again.",
+    ),
 }
 
-_INT_RANGES = {"seen_item_ttl_days": (1, 3650), "echo_interval_s": (5, 3600)}
+_INT_RANGES = {
+    "seen_item_ttl_days": (1, 3650),
+    "echo_interval_s": (5, 3600),
+    "breaker_fail_threshold": (1, 100),
+    "breaker_open_seconds": (5, 3600),
+}
 _AET_RE = re.compile(r"^[A-Z0-9_-]{1,16}$")
 _BOOL_TRUE = {"true", "1", "yes", "on"}
 

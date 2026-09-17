@@ -19,6 +19,18 @@ def get_engine():
     if _engine is None:
         url = get_settings().database_url
         _engine = create_engine(url, pool_pre_ping=True)
+        if url.startswith("sqlite"):
+            # SQLite disables FK enforcement by default; production runs on
+            # Postgres, so tests must fail the same way when a delete would
+            # violate a foreign key.
+            from sqlalchemy import event
+
+            @event.listens_for(_engine, "connect")
+            def _enable_sqlite_fks(dbapi_conn, _record):  # pragma: no cover
+                cur = dbapi_conn.cursor()
+                cur.execute("PRAGMA foreign_keys=ON")
+                cur.close()
+
     return _engine
 
 

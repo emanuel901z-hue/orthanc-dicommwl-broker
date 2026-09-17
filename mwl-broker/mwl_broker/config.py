@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # Restrict which calling AETs may query/store (empty = allow all)
     allowed_calling_aets: str = ""  # comma-separated
 
+    # Circuit breaker per upstream source (C-FIND fan-out)
+    breaker_fail_threshold: int = 3   # consecutive failures before opening
+    breaker_open_seconds: int = 60    # how long an open breaker stays open
+
     # Local dev convenience: skip DICOM SCP + echo loop (tests)
     start_dicom: bool = True
     start_echo_loop: bool = True

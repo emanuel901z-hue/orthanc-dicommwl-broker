@@ -8,6 +8,16 @@ import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def fresh_echo_state():
+    """The echo status lives in a module global — reset it per test."""
+    from mwl_broker import echo
+
+    echo.reset_for_tests()
+    yield
+    echo.reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def fresh_db():
     from mwl_broker import db
     from mwl_broker.models import Base

@@ -18,6 +18,11 @@ COMPOSE="docker compose --project-name mwl-test --env-file .env.test \
 OE3_BASE="${OE3_BASE:-http://127.0.0.1:19082}"
 BROKER_DICOM_HOST=127.0.0.1
 BROKER_DICOM_PORT=11123
+BROKER_API_URL="${BROKER_API_URL:-http://127.0.0.1:19081}"
+# Reachable from inside the compose network but NOT a DICOM endpoint: the
+# association hangs until the timeout — exactly what the circuit breaker is for.
+DEAD_SOURCE_HOST=orthanc
+DEAD_SOURCE_PORT=8042
 
 KEEP=0
 for arg in "$@"; do
@@ -71,6 +76,35 @@ orthanc_count=$(curl -sf http://127.0.0.1:19042/instances | python3 -c "import j
 echo "   pacs-peer instances: $peer_count | orthanc instances: $orthanc_count"
 [ "$peer_count" -ge 1 ]   || { echo "FAIL: routed store did not reach pacs-peer" >&2; exit 1; }
 [ "$orthanc_count" -ge 1 ] || { echo "FAIL: unrouted store did not reach orthanc (default)" >&2; exit 1; }
+
+echo "── Circuit breaker: dead source trips after repeated failures ──"
+curl -sf -X POST "$BROKER_API_URL/api/v1/sources" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"e2e-dead\",\"aet\":\"DEAD\",\"host\":\"$DEAD_SOURCE_HOST\",\"port\":$DEAD_SOURCE_PORT,\"calling_aet\":\"MWLBROKER\",\"charset\":\"ISO_IR 100\",\"enabled\":true,\"timeout_s\":1,\"priority\":50}" \
+  > /dev/null || true
+for _ in 1 2 3 4; do
+  python3 mwl-broker/scripts/cfind_smoke.py "$BROKER_DICOM_HOST" "$BROKER_DICOM_PORT" MWLBROKER > /dev/null 2>&1 || true
+done
+breaker_state=$(curl -sf "$BROKER_API_URL/api/v1/status" | python3 -c "
+import json, sys
+rows = [s for s in json.load(sys.stdin)['sources'] if s['name'] == 'e2e-dead']
+print(rows[0]['breaker_state'] if rows else 'missing')
+")
+echo "   breaker state for e2e-dead: $breaker_state"
+[ "$breaker_state" = "open" ] || { echo "FAIL: circuit breaker did not open" >&2; exit 1; }
+
+findings=$(curl -sf "$BROKER_API_URL/api/v1/health/config" | python3 -c "
+import json, sys
+print(','.join(f['code'] for f in json.load(sys.stdin)['findings']))
+")
+echo "   config findings: $findings"
+case "$findings" in
+  *source_breaker_open*) ;;
+  *) echo "FAIL: health checks did not report the open breaker" >&2; exit 1 ;;
+esac
+
+ready=$(curl -s -o /dev/null -w '%{http_code}' "$BROKER_API_URL/healthz/ready")
+echo "   /healthz/ready -> $ready"
+[ "$ready" = "200" ] || { echo "FAIL: readiness probe not ready" >&2; exit 1; }
 
 echo "── Playwright (desktop + mobile) ──"
 (cd orthanc-explorer-3-usable && OE3_BASE="$OE3_BASE" \

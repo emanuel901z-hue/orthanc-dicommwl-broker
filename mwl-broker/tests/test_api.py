@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from mwl_broker import settings_service
 from mwl_broker.main import create_app
 
 
@@ -487,6 +488,149 @@ def test_seed_setting_rejects_invalid_value(client):
     assert st["source"] == "env"
 
 
+def test_status_exposes_breaker_state_for_sources(client):
+    from mwl_broker import breaker
+
+    src_row = client.post("/api/v1/sources", json=SOURCE).json()
+    client.post("/api/v1/targets", json=TARGET)
+
+    body = client.get("/api/v1/status").json()
+    healthy = next(s for s in body["sources"] if s["id"] == src_row["id"])
+    assert healthy["breaker_state"] == "closed"
+    assert healthy["breaker_retry_in_s"] is None
+    # targets have no breaker
+    assert body["targets"][0]["breaker_state"] is None
+
+    settings_service.set_value("breaker_fail_threshold", "1")
+    settings_service.set_value("breaker_open_seconds", "30")
+    breaker.record_failure(src_row["id"], "connection refused")
+
+    body = client.get("/api/v1/status").json()
+    broken = next(s for s in body["sources"] if s["id"] == src_row["id"])
+    assert broken["breaker_state"] == "open"
+    assert 0 < broken["breaker_retry_in_s"] <= 30
+
+
+def test_reset_breaker_endpoint(client):
+    from mwl_broker import breaker
+
+    src_row = client.post("/api/v1/sources", json=SOURCE).json()
+    settings_service.set_value("breaker_fail_threshold", "1")
+    breaker.record_failure(src_row["id"], "boom")
+    assert breaker.is_available(src_row["id"]) is False
+
+    r = client.post(f"/api/v1/sources/{src_row['id']}/reset-breaker")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "closed" and body["source_id"] == src_row["id"]
+    assert breaker.is_available(src_row["id"]) is True
+
+    assert client.post("/api/v1/sources/999/reset-breaker").status_code == 404
+
+
+def test_deleting_a_source_removes_its_breaker_state(client):
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import SourceBreaker
+
+    src_row = client.post("/api/v1/sources", json=SOURCE).json()
+    settings_service.set_value("breaker_fail_threshold", "1")
+    from mwl_broker import breaker
+
+    breaker.record_failure(src_row["id"], "boom")
+    with session_factory()() as s:
+        assert s.get(SourceBreaker, src_row["id"]) is not None
+
+    assert client.delete(f"/api/v1/sources/{src_row['id']}").status_code == 204
+    with session_factory()() as s:
+        assert s.get(SourceBreaker, src_row["id"]) is None
+
+
+def test_deleting_a_source_removes_dependent_configuration(client):
+    """Postgres enforces the FKs — deleting a source must clean up first."""
+    from mwl_broker import breaker
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import SeenItem
+
+    src_row = client.post("/api/v1/sources", json=SOURCE).json()
+    tgt = client.post("/api/v1/targets", json=TARGET).json()
+    client.post("/api/v1/rules", json={"source_id": src_row["id"], "target_id": tgt["id"]})
+    client.post("/api/v1/transforms", json={**TRANSFORM, "source_id": src_row["id"]})
+    with session_factory()() as s:
+        s.add(SeenItem(accession="ACC-1", source_id=src_row["id"]))
+        s.commit()
+    breaker.record_failure(src_row["id"], "boom")
+
+    assert client.delete(f"/api/v1/sources/{src_row['id']}").status_code == 204
+
+    assert client.get("/api/v1/sources").json() == []
+    assert client.get("/api/v1/rules").json() == []
+    assert client.get("/api/v1/transforms").json() == []
+    with session_factory()() as s:
+        assert s.scalars(select(SeenItem)).all() == []
+
+
+def test_deleting_a_target_removes_dependent_configuration(client):
+    src_row = client.post("/api/v1/sources", json=SOURCE).json()
+    tgt = client.post("/api/v1/targets", json=TARGET).json()
+    client.post("/api/v1/rules", json={"source_id": src_row["id"], "target_id": tgt["id"]})
+    client.post("/api/v1/transforms", json={**TRANSFORM, "target_id": tgt["id"]})
+
+    assert client.delete(f"/api/v1/targets/{tgt['id']}").status_code == 204
+
+    assert client.get("/api/v1/targets").json() == []
+    assert client.get("/api/v1/rules").json() == []
+    assert client.get("/api/v1/transforms").json() == []
+
+
+def test_health_config_endpoint_reports_findings(client):
+    # nothing configured → the missing default target is an error
+    body = client.get("/api/v1/health/config").json()
+    codes = {f["code"] for f in body["findings"]}
+    assert "no_default_target" in codes
+    assert body["summary"]["error"] >= 1
+    finding = next(f for f in body["findings"] if f["code"] == "no_default_target")
+    assert finding["severity"] == "error" and finding["message"]
+
+    client.post("/api/v1/sources", json=SOURCE)
+    client.post("/api/v1/targets", json=TARGET)
+
+    body = client.get("/api/v1/health/config").json()
+    assert body["summary"]["error"] == 0
+    # the empty AET allowlist stays an info-level note
+    assert "aet_whitelist_empty" in {f["code"] for f in body["findings"]}
+
+
+def test_healthz_ready_reports_components(client):
+    r = client.get("/healthz/ready")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ready"] is True
+    assert body["checks"] == {"db": True, "scp": True}  # DICOM disabled in tests
+
+
+def test_healthz_ready_is_503_when_db_is_down(client, monkeypatch):
+    from mwl_broker import db as db_mod
+
+    monkeypatch.setattr(db_mod, "check_db", lambda: False)
+
+    r = client.get("/healthz/ready")
+
+    assert r.status_code == 503
+    assert r.json()["ready"] is False
+    assert r.json()["checks"]["db"] is False
+
+
+def test_breaker_settings_are_validated(client):
+    assert client.put("/api/v1/settings/breaker_fail_threshold",
+                      json={"value": "5"}).status_code == 200
+    assert client.put("/api/v1/settings/breaker_fail_threshold",
+                      json={"value": "0"}).status_code == 422
+    assert client.put("/api/v1/settings/breaker_open_seconds",
+                      json={"value": "1"}).status_code == 422
+    rows = {s["key"]: s for s in client.get("/api/v1/settings").json()}
+    assert rows["breaker_fail_threshold"]["source"] == "db"
+
+
 def test_openapi_documents_all_endpoints(client):
     """Every path operation carries a summary/tag, query params and schema
     fields carry descriptions — keeps Swagger UI usable for integrators."""
@@ -544,6 +688,7 @@ def test_openapi_documents_all_endpoints(client):
         "EchoResult", "StatusOut",
         "TransformIn", "TransformOut", "TransformOperation",
         "SettingOut", "SettingUpdateIn",
+        "BreakerStateOut", "FindingOut", "HealthOut", "ReadyOut",
     ]:
         schema = spec["components"]["schemas"][schema_name]
         for field, prop in schema["properties"].items():

@@ -173,10 +173,11 @@ def _add_rule(name, source_id, target_id, priority=100, enabled=True):
 
 def test_applicable_matches_scope_and_orders_by_priority():
     src_id, tgt_id = _seed("ris-a", "pacs-kh")
+    other_src_id, _ = _seed("ris-b", None)
     _add_rule("any", None, None, priority=30)
     _add_rule("src", src_id, None, priority=10)
     _add_rule("tgt", None, tgt_id, priority=20)
-    _add_rule("other-src", src_id + 99, None, priority=5)
+    _add_rule("other-src", other_src_id, None, priority=5)
     _add_rule("off", src_id, tgt_id, priority=1, enabled=False)
 
     with session_factory()() as s:

@@ -94,6 +94,28 @@ class TransformRule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class SourceBreaker(Base):
+    """Circuit-breaker state for one upstream source.
+
+    Persisted so a broker restart does not forget that a source is down.
+    A missing row means "closed" (healthy) — rows are created on the first
+    failure and removed when the source is deleted.
+    """
+
+    __tablename__ = "source_breaker"
+
+    source_id: Mapped[int] = mapped_column(
+        ForeignKey("mwl_source.id"), primary_key=True
+    )
+    state: Mapped[str] = mapped_column(String(16), default="closed")  # closed|half_open|open
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    open_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str] = mapped_column(String(512), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
 class BrokerSetting(Base):
     """Runtime setting overriding the ENV default (ENV stays the fallback).
 

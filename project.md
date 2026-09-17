@@ -86,8 +86,11 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
   SOP/Study/Series-UIDs sind gesperrt (PACS-Linkage)
 - `GET /settings` — effektiver Wert + ENV-Default + Quelle (`db`|`env`);
   `PUT /settings/{key}` (Override, typvalidiert), `DELETE /settings/{key}` (Reset)
+- `POST /sources/{id}/reset-breaker` — Breaker einer Quelle sofort schließen
+- `GET /health/config` — Konsistenz-Checks (Findings mit `code`/`severity`/`entity`)
+- `GET /healthz/ready` — Readiness (DB + SCP; 503 wenn nicht bereit)
 - `GET /logs/queries`, `GET /logs/stores` (paged, Filter: aet, source, status, since)
-- `GET /status` — SCP-Listener, Echo-Matrix (Quellen+Ziele), Zähler
+- `GET /status` — SCP-Listener, Echo-Matrix (Quellen+Ziele inkl. `breaker_state`), Zähler
 - `GET /healthz`, `GET /metrics` (Prometheus)
 
 ### Modify-Regeln (Tag-Transformation beim Weiterleiten)
@@ -162,6 +165,21 @@ ergänzen und neu bauen (der ältere Stand hatte alle 12).
 existiert der nicht — deshalb setzt `deploy/oe3-config.js` `viewerSession:
 false`; der Klick öffnet den Viewer direkt (verifiziert: 0 Calls, neuer Tab
 mit `/ohif/viewer?StudyInstanceUIDs=…`).
+
+### Circuit Breaker + Konsistenz-Checks
+
+`source_breaker` hält je Quelle Zustand (`closed|half_open|open`), Fehlerzähler
+und Sperrzeit — persistiert, damit ein Neustart eine tote Quelle nicht
+vergisst. Der C-FIND-Fan-out überspringt offene Quellen
+(`per_source = "breaker_open"`) statt pro Abfrage den vollen Timeout zu zahlen;
+nach `breaker_open_seconds` erfolgt ein Testversuch (half-open). Schwellen sind
+Settings (`breaker_fail_threshold`, `breaker_open_seconds`).
+
+`health_checks.py` prüft die Konfiguration auf die typischen
+Produktionsfehler (kein Default-Ziel, Regeln auf deaktivierten Knoten, tote
+Quellen, offene Breaker, leere AET-Allowlist, AET-Kollision mit dem Broker
+selbst) und liefert Findings mit stabilem `code` — die UI übersetzt sie und
+verlinkt direkt ins betroffene Formular.
 
 ### Laufzeit-Settings (ENV-Default + DB-Override)
 
@@ -264,9 +282,9 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 88 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 325 Tests, 0 Errors |
-| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 22/22 grün, 0 Console-/Page-/Netzwerk-Fehler |
+| `pytest` | 123 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 348 Tests, 0 Errors |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 25/25 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
 
@@ -285,8 +303,8 @@ regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
 
 `ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
 Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
-backend pytest (88) → frontend tsc → lint → vitest (325) → docker-e2e
-(22 Browser-Tests + DIMSE-Smokes). Verifiziert: alle Stages grün.
+backend pytest (123) → frontend tsc → lint → vitest (348) → docker-e2e
+(25 Browser-Tests + DIMSE-Smokes + Breaker-Szenario). Verifiziert: alle Stages grün.
 `--quick` überspringt die Docker-Stage.
 
 #### Coverage-Audit (2026-09)
@@ -295,8 +313,8 @@ Gemessen mit `pytest-cov` bzw. `vitest --coverage`:
 
 | Bereich | Statements | Anmerkung |
 |---|---|---|
-| Backend `mwl_broker/` | **96 %** | api 99 %, main 100 %, settings_service 100 %, models/schemas/metrics 100 %, echo 96 %, dimse 93 % |
-| Frontend Broker-UI | **98.9 %** | `api/broker.ts` 100 %, Hooks 98 %, Seiten 95-100 % |
+| Backend `mwl_broker/` | **97 %** | api 99 %, main 100 %, settings_service 100 %, models/schemas/metrics 100 %, breaker 99 %, health_checks 98 %, echo 96 %, dimse 93 % |
+| Frontend Broker-UI | **98.8 %** | `api/broker.ts` 100 %, BreakerBadge/HealthPanel 100 %, Seiten 96-100 % |
 
 Ergänzte Tests für zuvor ungedeckte Pfade: Rules-Update/Delete, Target-Echo,
 Log-Filter + Pagination-Validierung, `/metrics`, Lifespan (Seed + SCP-Bind),
@@ -360,6 +378,8 @@ Gefundene und behobene Defekte:
 | 5 | OE3: Editoren für Quellen/Ziele/Regeln/Modify/Settings + Audit-Events | ✅ |
 | 6 | Härtung: TLS, Alerting (Retention-Purge ist implementiert) | ☐ |
 | 7 | HL7-Adapter (ORM/ADT → lokale MWL-Quelle) | ☐ |
+| 8 | Sprint 1 der Roadmap: Circuit Breaker + Health-Panel + `/healthz/ready` | ✅ |
+| 9 | Sprint 2 der Roadmap: Simulation + Config-Audit/Export/Rollback | ☐ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert
