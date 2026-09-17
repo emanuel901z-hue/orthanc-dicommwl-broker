@@ -79,6 +79,10 @@ npx playwright test --config=e2e/stack/playwright.stack.config.ts
 # Ephermerer Test-Stack (eigener Projektname "mwl-test", Ports 19xxx/14xxx,
 # läuft parallel zum regulären Stack; up → C-FIND-Smoke → Playwright → down -v):
 ./test-stack.sh          # alles; --keep lässt ihn laufen, --down räumt ab
+
+# Lokale CI-Pipeline (alle Stages: backend pytest → tsc → lint → vitest →
+# docker-e2e auf dem Test-Stack; gleiche Images/Code-Basis wie Produktion):
+./ci-local.sh            # alles; --quick ohne Docker-Stage
 ```
 
 ## Status

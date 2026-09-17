@@ -165,13 +165,18 @@ Mobile-Projekt; Basis-URL via `OE3_BASE` env, Default
 Broker-Dashboard, Echo-Button, Sidebar-Navigation, DOM-Analyse, Screenshots
 pro Viewport unter `e2e/stack/screenshots/`).
 
-### Ephemerer Test-Stack
+### Ephemerer Test-Stack + lokale CI
 
 `test-stack.sh` + `.env.test`: isolierte Stack-Kopie (Projekt `mwl-test`,
 Ports `19xxx`/`14xxx`, eigene Volumes). Ablauf: `up -d --build` → Health-Wait
 → C-FIND-Smoke → Playwright (8 Tests) → `down -v`. Läuft parallel zum
-regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück —
-verifiziert: 8/8 grün inkl. Teardown.
+regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
+
+`ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
+Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
+backend pytest (15) → frontend tsc → lint → vitest (259) → docker-e2e
+(8 Browser-Tests + DIMSE-Smoke). Verifiziert: alle Stages grün.
+`--quick` überspringt die Docker-Stage.
 
 Gefundene und behobene Defekte:
 
