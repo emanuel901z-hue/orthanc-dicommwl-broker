@@ -85,6 +85,13 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
 - `GET /status` — SCP-Listener, Echo-Matrix (Quellen+Ziele), Zähler
 - `GET /healthz`, `GET /metrics` (Prometheus)
 
+**OpenAPI/Swagger**: vollständig dokumentiert — App-Description, Tags
+(sources/targets/rules/logs/monitoring), Summary + Response-Description pro
+Endpoint, Query-Param- und Schema-Feld-Descriptions. Spec unter
+`/openapi.json`, UI unter `/docs`. Ein Regressionstest
+(`test_openapi_documents_all_endpoints`) erzwingt Summary/Tag für jeden
+Endpoint und Descriptions für die Kern-Schemas.
+
 ## Metriken
 
 - `mwl_cfind_requests_total{result}`, `mwl_cfind_duration_seconds` (Histogram)

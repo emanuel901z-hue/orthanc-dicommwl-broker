@@ -141,3 +141,35 @@ def test_seed_rule_skips_unknown_names(client):
 
     seed_from_json([{"kind": "rule", "source": "nope", "target": "nope"}])
     assert client.get("/api/v1/rules").json() == []
+
+
+def test_openapi_documents_all_endpoints(client):
+    """Every path operation carries a summary/tag, query params and schema
+    fields carry descriptions — keeps Swagger UI usable for integrators."""
+    spec = client.get("/openapi.json").json()
+
+    assert spec["info"]["title"] == "MWL Broker"
+    assert len(spec["info"]["description"]) > 100
+    tag_names = {t["name"] for t in spec["tags"]}
+    assert {"sources", "targets", "rules", "logs", "monitoring"} <= tag_names
+
+    for path, ops in spec["paths"].items():
+        for method, op in ops.items():
+            assert op.get("summary"), f"{method.upper()} {path} missing summary"
+            assert op.get("tags"), f"{method.upper()} {path} missing tag"
+
+    # Query parameters documented
+    params = spec["paths"]["/api/v1/logs/queries"]["get"]["parameters"]
+    assert params and all(p.get("description") for p in params)
+
+    # Request/response schema fields documented
+    for schema_name, field in [
+        ("SourceIn", "aet"), ("SourceIn", "charset"), ("TargetIn", "is_default"),
+        ("RuleIn", "source_id"), ("QueryLogOut", "query_keys"),
+        ("StoreLogOut", "target_id"), ("EchoResult", "rtt_ms"),
+        ("StatusOut", "counts"),
+    ]:
+        schema = spec["components"]["schemas"][schema_name]
+        assert schema["properties"][field].get("description"), (
+            f"{schema_name}.{field} missing description"
+        )

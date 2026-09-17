@@ -35,7 +35,19 @@ npm install
 npm run dev                 # Vite-Proxy: /orthanc-proxy, /broker-api
 npm run test && npm run lint
 npx tsc --noEmit -p tsconfig.app.json
+
+# Vollständige lokale Pipeline / Test-Stack / Fork-Push-Guard
+./ci-local.sh               # pytest → tsc → lint → vitest → docker-e2e (--quick ohne Docker)
+./test-stack.sh             # ephemerer Stack: up → DIMSE-Smokes → Playwright → down -v
+./pre-push-fork.sh          # NUR so wird der OE3-Fork öffentlich gepusht (Audit + Secret-Scan)
 ```
+
+**Fork-Push-Regel**: Der public Fork (`orthanc-explorer-3-usable`) wird
+ausschließlich über `./pre-push-fork.sh` gepusht — das Script prüft
+Outgoing-Commits/-Dateien gegen eine Blacklist (.env, DBs, Keys, Screenshots,
+test-results), scannt den Diff auf Secret-Muster und verweigert Pushes an
+Upstream-Remotes. Workspace-Interna (Deployment, `.env`, Ports) gehören
+grundsätzlich nicht in den Fork.
 
 ## Deployment-Konventionen
 

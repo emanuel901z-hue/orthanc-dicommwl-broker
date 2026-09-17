@@ -51,14 +51,23 @@ def _db() -> Session:
 _db_dep = Depends(_db)
 
 
-def _crud(router: APIRouter, path: str, model, in_schema, out_schema):
+def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str):
     """Register list/create/get/update/delete for a model with `name`."""
 
-    @router.get(path, response_model=list[out_schema], name=f"list_{path[1:]}")
+    @router.get(
+        path, response_model=list[out_schema], name=f"list_{path[1:]}",
+        tags=[f"{path[1:]}"], summary=f"List {kind}s",
+        response_description=f"All {kind}s ordered by ID.",
+    )
     def _list(s: Session = _db_dep):
         return s.scalars(select(model).order_by(model.id)).all()
 
-    @router.post(path, response_model=out_schema, status_code=201, name=f"create_{path[1:]}")
+    @router.post(
+        path, response_model=out_schema, status_code=201, name=f"create_{path[1:]}",
+        tags=[f"{path[1:]}"], summary=f"Create a {kind}",
+        response_description=f"The created {kind}.",
+        responses={409: {"description": f"A {kind} with this name already exists."}},
+    )
     def _create(body: in_schema, s: Session = _db_dep):
         if s.scalar(select(model).where(model.name == body.name)):
             raise HTTPException(409, f"{body.name} already exists")
@@ -68,7 +77,12 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema):
         s.refresh(row)
         return row
 
-    @router.put(path + "/{row_id}", response_model=out_schema, name=f"update_{path[1:]}")
+    @router.put(
+        path + "/{row_id}", response_model=out_schema, name=f"update_{path[1:]}",
+        tags=[f"{path[1:]}"], summary=f"Update a {kind}",
+        response_description=f"The updated {kind}.",
+        responses={404: {"description": f"No {kind} with this ID."}},
+    )
     def _update(row_id: int, body: in_schema, s: Session = _db_dep):
         row = s.get(model, row_id)
         if row is None:
@@ -79,7 +93,11 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema):
         s.refresh(row)
         return row
 
-    @router.delete(path + "/{row_id}", status_code=204, name=f"delete_{path[1:]}")
+    @router.delete(
+        path + "/{row_id}", status_code=204, name=f"delete_{path[1:]}",
+        tags=[f"{path[1:]}"], summary=f"Delete a {kind}",
+        responses={404: {"description": f"No {kind} with this ID."}},
+    )
     def _delete(row_id: int, s: Session = _db_dep):
         row = s.get(model, row_id)
         if row is None:
@@ -88,19 +106,28 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema):
         s.commit()
 
 
-_crud(router, "/sources", MwlSource, SourceIn, SourceOut)
-_crud(router, "/targets", PacsTarget, TargetIn, TargetOut)
+_crud(router, "/sources", MwlSource, SourceIn, SourceOut, "source")
+_crud(router, "/targets", PacsTarget, TargetIn, TargetOut, "target")
 
 
 # ── Routing rules ──────────────────────────────────────────────────────
 
 
-@router.get("/rules", response_model=list[RuleOut])
+@router.get(
+    "/rules", response_model=list[RuleOut], tags=["rules"],
+    summary="List routing rules",
+    response_description="All rules ordered by priority, then ID.",
+)
 def list_rules(s: Session = _db_dep):
     return s.scalars(select(RoutingRule).order_by(RoutingRule.priority, RoutingRule.id)).all()
 
 
-@router.post("/rules", response_model=RuleOut, status_code=201)
+@router.post(
+    "/rules", response_model=RuleOut, status_code=201, tags=["rules"],
+    summary="Create a routing rule",
+    response_description="The created rule.",
+    responses={404: {"description": "Referenced source or target does not exist."}},
+)
 def create_rule(body: RuleIn, s: Session = _db_dep):
     for mid, label in ((body.source_id, "source"), (body.target_id, "target")):
         model = MwlSource if label == "source" else PacsTarget
@@ -113,7 +140,12 @@ def create_rule(body: RuleIn, s: Session = _db_dep):
     return row
 
 
-@router.put("/rules/{rule_id}", response_model=RuleOut)
+@router.put(
+    "/rules/{rule_id}", response_model=RuleOut, tags=["rules"],
+    summary="Update a routing rule",
+    response_description="The updated rule.",
+    responses={404: {"description": "No rule with this ID."}},
+)
 def update_rule(rule_id: int, body: RuleIn, s: Session = _db_dep):
     row = s.get(RoutingRule, rule_id)
     if row is None:
@@ -125,7 +157,11 @@ def update_rule(rule_id: int, body: RuleIn, s: Session = _db_dep):
     return row
 
 
-@router.delete("/rules/{rule_id}", status_code=204)
+@router.delete(
+    "/rules/{rule_id}", status_code=204, tags=["rules"],
+    summary="Delete a routing rule",
+    responses={404: {"description": "No rule with this ID."}},
+)
 def delete_rule(rule_id: int, s: Session = _db_dep):
     row = s.get(RoutingRule, rule_id)
     if row is None:
@@ -137,13 +173,17 @@ def delete_rule(rule_id: int, s: Session = _db_dep):
 # ── Logs ───────────────────────────────────────────────────────────────
 
 
-@router.get("/logs/queries", response_model=list[QueryLogOut])
+@router.get(
+    "/logs/queries", response_model=list[QueryLogOut], tags=["logs"],
+    summary="C-FIND query log",
+    response_description="Query log entries, newest first.",
+)
 def query_logs(
     s: Session = _db_dep,
-    limit: int = Query(default=50, le=500),
-    offset: int = 0,
-    calling_aet: str | None = None,
-    status: str | None = None,
+    limit: int = Query(default=50, ge=1, le=500, description="Maximum number of entries."),
+    offset: int = Query(default=0, ge=0, description="Number of entries to skip."),
+    calling_aet: str | None = Query(default=None, description="Only entries from this calling AE title."),
+    status: str | None = Query(default=None, description="Only entries with this status (success | partial | failed)."),
 ):
     q = select(QueryLog).order_by(QueryLog.ts.desc()).limit(limit).offset(offset)
     if calling_aet:
@@ -153,12 +193,16 @@ def query_logs(
     return s.scalars(q).all()
 
 
-@router.get("/logs/stores", response_model=list[StoreLogOut])
+@router.get(
+    "/logs/stores", response_model=list[StoreLogOut], tags=["logs"],
+    summary="C-STORE forward log",
+    response_description="Store log entries, newest first.",
+)
 def store_logs(
     s: Session = _db_dep,
-    limit: int = Query(default=50, le=500),
-    offset: int = 0,
-    status: str | None = None,
+    limit: int = Query(default=50, ge=1, le=500, description="Maximum number of entries."),
+    offset: int = Query(default=0, ge=0, description="Number of entries to skip."),
+    status: str | None = Query(default=None, description="Only entries with this status (success | failed | unrouted)."),
 ):
     q = select(StoreLog).order_by(StoreLog.ts.desc()).limit(limit).offset(offset)
     if status:
@@ -169,7 +213,12 @@ def store_logs(
 # ── Echo + status ──────────────────────────────────────────────────────
 
 
-@router.post("/sources/{source_id}/echo", response_model=EchoResult)
+@router.post(
+    "/sources/{source_id}/echo", response_model=EchoResult, tags=["monitoring"],
+    summary="C-ECHO a source now",
+    response_description="Echo result with RTT (or the error detail).",
+    responses={404: {"description": "No source with this ID."}},
+)
 def echo_source(source_id: int, s: Session = _db_dep):
     row = s.get(MwlSource, source_id)
     if row is None:
@@ -177,7 +226,12 @@ def echo_source(source_id: int, s: Session = _db_dep):
     return echo_one("source", row)
 
 
-@router.post("/targets/{target_id}/echo", response_model=EchoResult)
+@router.post(
+    "/targets/{target_id}/echo", response_model=EchoResult, tags=["monitoring"],
+    summary="C-ECHO a target now",
+    response_description="Echo result with RTT (or the error detail).",
+    responses={404: {"description": "No target with this ID."}},
+)
 def echo_target(target_id: int, s: Session = _db_dep):
     row = s.get(PacsTarget, target_id)
     if row is None:
@@ -185,7 +239,14 @@ def echo_target(target_id: int, s: Session = _db_dep):
     return echo_one("target", row)
 
 
-@router.get("/status", response_model=StatusOut)
+@router.get(
+    "/status", response_model=StatusOut, tags=["monitoring"],
+    summary="Broker status snapshot",
+    description="SCP/DB health, per-source and per-target echo results "
+                "(with RTT), and query/store/seen_items counters. "
+                "Polled by the OE3 broker dashboard.",
+    response_description="Current status snapshot.",
+)
 def status(s: Session = _db_dep):
     snap = snapshot()
     from .db import check_db

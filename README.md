@@ -86,6 +86,10 @@ npx playwright test --config=e2e/stack/playwright.stack.config.ts
 
 # Optionaler pre-push-Hook (Quick-Stages lokal, da CI nur bei PRs läuft):
 git config core.hooksPath .githooks
+
+# Fork-Push-Guard: auditiert, was der OE3-Fork öffentlich machen würde
+# (Blacklist + Secret-Scan + Upstream-Schutz) — nur so wird der Fork gepusht:
+./pre-push-fork.sh --dry-run
 ```
 
 GitHub-CI (`.github/workflows/ci.yml`) läuft als PR-Gate auf `main`/`develop`
