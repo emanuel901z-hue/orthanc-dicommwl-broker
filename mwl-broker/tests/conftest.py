@@ -28,3 +28,14 @@ def fresh_db():
     Base.metadata.create_all(engine)
     yield
     db.reset_for_tests()
+
+
+@pytest.fixture()
+def client():
+    """FastAPI test client with the app's lifespan (seed + SCP off in tests)."""
+    from fastapi.testclient import TestClient
+
+    from mwl_broker.main import create_app
+
+    with TestClient(create_app()) as c:
+        yield c

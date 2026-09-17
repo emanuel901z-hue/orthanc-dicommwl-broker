@@ -5,7 +5,7 @@ keeps them consistent with the synchronous DIMSE handlers.
 """
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,16 @@ from .models import (
     StoreLog,
 )
 from .schemas import (
+    AuditEntryOut,
     BreakerStateOut,
+    ConfigExportOut,
+    ConfigImportIn,
+    ImportPlanOut,
+    RollbackOut,
+    SimulateRouteIn,
+    SimulateRouteOut,
+    SimulateTransformIn,
+    SimulateTransformOut,
     EchoResult,
     HealthOut,
     QueryLogOut,
@@ -37,8 +46,8 @@ from .schemas import (
     TransformIn,
     TransformOut,
 )
-from . import breaker, health_checks, settings_service, transforms
-from .models import SeenItem, SourceBreaker, TransformRule
+from . import audit, breaker, config_io, health_checks, settings_service, simulate, transforms
+from .models import BrokerSetting, ConfigAudit, SeenItem, SourceBreaker, TransformRule
 
 router = APIRouter(prefix="/api/v1")
 
@@ -66,6 +75,14 @@ def _db() -> Session:
 _db_dep = Depends(_db)
 
 
+def _actor(request: Request) -> str:
+    return audit.actor_from(request.headers)
+
+
+def _correlation(request: Request) -> str:
+    return request.headers.get("X-Request-Id", "")[:64]
+
+
 def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
           before_delete=None):
     """Register list/create/get/update/delete for a model with `name`.
@@ -90,6 +107,7 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
         responses={409: {"description": f"A {kind} with this name already exists."}},
     )
     def _create(
+        request: Request,
         body: Annotated[in_schema, Body(description=f"{kind.capitalize()} definition.")],
         s: Session = _db_dep,
     ):
@@ -97,6 +115,9 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
             raise HTTPException(409, f"{body.name} already exists")
         row = model(**body.model_dump())
         s.add(row)
+        s.flush()
+        audit.record(s, _actor(request), f"create.{kind}", kind, row.id,
+                     None, audit.snapshot(kind, row), _correlation(request))
         s.commit()
         s.refresh(row)
         return row
@@ -108,6 +129,7 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
         responses={404: {"description": f"No {kind} with this ID."}},
     )
     def _update(
+        request: Request,
         row_id: Annotated[int, Path(description=f"ID of the {kind} to update.")],
         body: Annotated[in_schema, Body(description=f"Complete {kind} definition (replace semantics).")],
         s: Session = _db_dep,
@@ -115,8 +137,12 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
         row = s.get(model, row_id)
         if row is None:
             raise HTTPException(404, "not found")
+        before = audit.snapshot(kind, row)
         for k, v in body.model_dump().items():
             setattr(row, k, v)
+        s.flush()
+        audit.record(s, _actor(request), f"update.{kind}", kind, row.id,
+                     before, audit.snapshot(kind, row), _correlation(request))
         s.commit()
         s.refresh(row)
         return row
@@ -128,15 +154,19 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
         responses={404: {"description": f"No {kind} with this ID."}},
     )
     def _delete(
+        request: Request,
         row_id: Annotated[int, Path(description=f"ID of the {kind} to delete.")],
         s: Session = _db_dep,
     ):
         row = s.get(model, row_id)
         if row is None:
             raise HTTPException(404, "not found")
+        before = audit.snapshot(kind, row)
         if before_delete is not None:
             before_delete(s, row_id)
         s.delete(row)
+        audit.record(s, _actor(request), f"delete.{kind}", kind, row_id,
+                     before, None, _correlation(request))
         s.commit()
 
 
@@ -189,6 +219,7 @@ def list_rules(s: Session = _db_dep):
     responses={404: {"description": "Referenced source or target does not exist."}},
 )
 def create_rule(
+    request: Request,
     body: Annotated[RuleIn, Body(description="Routing rule definition.")],
     s: Session = _db_dep,
 ):
@@ -198,6 +229,9 @@ def create_rule(
             raise HTTPException(404, f"{label} {mid} not found")
     row = RoutingRule(**body.model_dump())
     s.add(row)
+    s.flush()
+    audit.record(s, _actor(request), "create.rule", "rule", row.id, None,
+                 audit.snapshot("rule", row), _correlation(request))
     s.commit()
     s.refresh(row)
     return row
@@ -210,6 +244,7 @@ def create_rule(
     responses={404: {"description": "No rule with this ID."}},
 )
 def update_rule(
+    request: Request,
     rule_id: Annotated[int, Path(description="ID of the rule to update.")],
     body: Annotated[RuleIn, Body(description="Routing rule definition (replace semantics).")],
     s: Session = _db_dep,
@@ -217,8 +252,12 @@ def update_rule(
     row = s.get(RoutingRule, rule_id)
     if row is None:
         raise HTTPException(404, "not found")
+    before = audit.snapshot("rule", row)
     for k, v in body.model_dump().items():
         setattr(row, k, v)
+    s.flush()
+    audit.record(s, _actor(request), "update.rule", "rule", row.id, before,
+                 audit.snapshot("rule", row), _correlation(request))
     s.commit()
     s.refresh(row)
     return row
@@ -231,13 +270,17 @@ def update_rule(
     responses={404: {"description": "No rule with this ID."}},
 )
 def delete_rule(
+    request: Request,
     rule_id: Annotated[int, Path(description="ID of the rule to delete.")],
     s: Session = _db_dep,
 ):
     row = s.get(RoutingRule, rule_id)
     if row is None:
         raise HTTPException(404, "not found")
+    before = audit.snapshot("rule", row)
     s.delete(row)
+    audit.record(s, _actor(request), "delete.rule", "rule", rule_id, before,
+                 None, _correlation(request))
     s.commit()
 
 
@@ -283,6 +326,7 @@ def list_transforms(s: Session = _db_dep):
     },
 )
 def create_transform(
+    request: Request,
     body: Annotated[TransformIn, Body(description="Transform rule definition (operations are validated against the DICOM dictionary).")],
     s: Session = _db_dep,
 ):
@@ -295,6 +339,9 @@ def create_transform(
         operations=_ops_payload(body),
     )
     s.add(row)
+    s.flush()
+    audit.record(s, _actor(request), "create.transform", "transform", row.id, None,
+                 audit.snapshot("transform", row), _correlation(request))
     s.commit()
     s.refresh(row)
     return row
@@ -310,6 +357,7 @@ def create_transform(
     },
 )
 def update_transform(
+    request: Request,
     rule_id: Annotated[int, Path(description="ID of the transform rule to update.")],
     body: Annotated[TransformIn, Body(description="Transform rule definition (replace semantics).")],
     s: Session = _db_dep,
@@ -318,12 +366,16 @@ def update_transform(
     if row is None:
         raise HTTPException(404, "not found")
     _check_scope(s, body)
+    before = audit.snapshot("transform", row)
     row.name = body.name
     row.enabled = body.enabled
     row.priority = body.priority
     row.source_id = body.source_id
     row.target_id = body.target_id
     row.operations = _ops_payload(body)
+    s.flush()
+    audit.record(s, _actor(request), "update.transform", "transform", row.id, before,
+                 audit.snapshot("transform", row), _correlation(request))
     s.commit()
     s.refresh(row)
     return row
@@ -336,13 +388,17 @@ def update_transform(
     responses={404: {"description": "No rule with this ID."}},
 )
 def delete_transform(
+    request: Request,
     rule_id: Annotated[int, Path(description="ID of the transform rule to delete.")],
     s: Session = _db_dep,
 ):
     row = s.get(TransformRule, rule_id)
     if row is None:
         raise HTTPException(404, "not found")
+    before = audit.snapshot("transform", row)
     s.delete(row)
+    audit.record(s, _actor(request), "delete.transform", "transform", rule_id, before,
+                 None, _correlation(request))
     s.commit()
 
 
@@ -372,16 +428,22 @@ def list_settings():
     },
 )
 def update_setting(
+    request: Request,
     key: Annotated[str, Path(description="Setting key (see GET /settings for the allowlist).")],
     body: Annotated[SettingUpdateIn, Body(description="New value — validated against the setting type.")],
+    s: Session = _db_dep,
 ):
     if key not in settings_service.KNOWN:
         raise HTTPException(404, f"unknown setting {key!r}")
     errors = settings_service.validate_value(key, body.value)
     if errors:
         raise HTTPException(422, detail=errors)
-    settings_service.set_value(key, body.value)
-    return next(s for s in settings_service.list_all() if s["key"] == key)
+    before = audit.snapshot("setting", s.get(BrokerSetting, key))
+    settings_service.set_value(key, body.value, session=s)
+    audit.record(s, _actor(request), "update.setting", "setting", None, before,
+                 {"key": key, "value": body.value}, _correlation(request))
+    s.commit()
+    return next(s2 for s2 in settings_service.list_all() if s2["key"] == key)
 
 
 @router.delete(
@@ -391,11 +453,172 @@ def update_setting(
     responses={404: {"description": "Unknown setting key."}},
 )
 def reset_setting(
+    request: Request,
     key: Annotated[str, Path(description="Setting key whose override should be removed.")],
+    s: Session = _db_dep,
 ):
     if key not in settings_service.KNOWN:
         raise HTTPException(404, f"unknown setting {key!r}")
+    before = audit.snapshot("setting", s.get(BrokerSetting, key))
     settings_service.reset(key)
+    audit.record(s, _actor(request), "reset.setting", "setting", None, before,
+                 None, _correlation(request))
+    s.commit()
+
+
+# ── Change log, export/import, rollback ────────────────────────────────
+
+
+@router.get(
+    "/audit/config", response_model=list[AuditEntryOut], tags=["audit"],
+    summary="Configuration change log",
+    description="Every configuration mutation with its before/after snapshot "
+                "(basis for the diff view and for rollback).",
+    response_description="Change-log entries, newest first.",
+)
+def list_config_audit(
+    s: Session = _db_dep,
+    limit: int = Query(default=50, ge=1, le=500, description="Maximum number of entries."),
+    offset: int = Query(default=0, ge=0, description="Number of entries to skip."),
+    entity: str | None = Query(default=None, description="Only entries for this entity (source | target | rule | transform | setting)."),
+):
+    return audit.list_entries(s, entity=entity, limit=limit, offset=offset)
+
+
+@router.get(
+    "/config/export", response_model=ConfigExportOut, tags=["config"],
+    summary="Export the configuration",
+    description="Portable document: rules and modify rules reference sources and "
+                "targets by name, so it can be imported into another environment.",
+    response_description="The complete broker configuration.",
+)
+def export_configuration(s: Session = _db_dep):
+    return config_io.export_config(s)
+
+
+@router.post(
+    "/config/import", response_model=ImportPlanOut, tags=["config"],
+    summary="Import a configuration (dry-run by default)",
+    description="Upsert-only: existing entries are updated by name, missing ones "
+                "are created. Nothing is ever deleted. With `dry_run=true` "
+                "(the default) the response is the diff instead of applying it.",
+    response_description="The planned (dry-run) or applied changes plus a summary.",
+    responses={422: {"description": "Unsupported `schema_version` or invalid document."}},
+)
+def import_configuration(
+    request: Request,
+    body: ConfigImportIn,
+    dry_run: bool = Query(default=True, description="Only compute the diff; write nothing."),
+    s: Session = _db_dep,
+):
+    if body.schema_version != config_io.SCHEMA_VERSION:
+        raise HTTPException(422, [
+            f"schema_version {body.schema_version} is not supported "
+            f"(this broker expects {config_io.SCHEMA_VERSION})"
+        ])
+    payload = body.model_dump()
+    if dry_run:
+        return {**config_io.plan_import(s, payload), "dry_run": True}
+    return {**config_io.apply_import(s, payload, _actor(request)), "dry_run": False}
+
+
+@router.post(
+    "/config/rollback/{audit_id}", response_model=RollbackOut, tags=["config"],
+    summary="Roll a configuration change back",
+    description="Restores the state before that change-log entry: an update is "
+                "reverted, a deletion is re-created, a creation is removed. The "
+                "rollback itself is recorded in the change log.",
+    response_description="What the rollback did.",
+    responses={
+        404: {"description": "No change-log entry with this ID."},
+        422: {"description": "The entry cannot be rolled back."},
+    },
+)
+def rollback_configuration(
+    request: Request,
+    audit_id: Annotated[int, Path(description="ID of the change-log entry to roll back.")],
+    s: Session = _db_dep,
+):
+    entry = s.get(ConfigAudit, audit_id)
+    if entry is None:
+        raise HTTPException(404, "not found")
+    serializer = audit.SERIALIZERS.get(entry.entity)
+    if serializer is None:
+        raise HTTPException(422, f"entity {entry.entity!r} cannot be rolled back")
+    model, _ = serializer
+
+    if entry.entity == "setting":
+        key = (entry.before_json or entry.after_json or {}).get("key", "")
+        row = s.get(BrokerSetting, key)
+        before_now = audit.snapshot("setting", row)
+        if entry.before_json is None:
+            if row is not None:
+                s.delete(row)
+            action, after = "delete", None
+        elif row is None:
+            row = BrokerSetting(**entry.before_json)
+            s.add(row)
+            action = "recreate"
+        else:
+            row.value = entry.before_json["value"]
+            action = "restore"
+        s.flush()
+        after = audit.snapshot("setting", row) if entry.before_json is not None else None
+    else:
+        row = s.get(model, entry.entity_id) if entry.entity_id is not None else None
+        before_now = audit.snapshot(entry.entity, row)
+        if entry.before_json is None:          # the change created it → remove it
+            if row is not None:
+                s.delete(row)
+            action, after = "delete", None
+        elif row is None:                      # the change deleted it → recreate it
+            row = model(**entry.before_json)
+            s.add(row)
+            s.flush()
+            action, after = "recreate", audit.snapshot(entry.entity, row)
+        else:                                  # the change updated it → restore
+            for key_name, value in entry.before_json.items():
+                setattr(row, key_name, value)
+            action, after = "restore", audit.snapshot(entry.entity, row)
+
+    audit.record(s, _actor(request), f"rollback.{entry.entity}", entry.entity,
+                 entry.entity_id, before_now, after, _correlation(request))
+    s.commit()
+    return {
+        "audit_id": audit_id,
+        "entity": entry.entity,
+        "action": action,
+        "message": f"{action} {entry.entity} (change-log entry {audit_id})",
+    }
+
+
+# ── Simulation (dry-run) ───────────────────────────────────────────────
+
+
+@router.post(
+    "/simulate/route", response_model=SimulateRouteOut, tags=["simulation"],
+    summary="Simulate store routing",
+    description="Runs the **same** resolver as the live C-STORE path: which "
+                "target would receive an instance with this accession/study, "
+                "and which rule decided it. Nothing is sent or stored.",
+    response_description="The routing decision with its reason.",
+)
+def simulate_routing(body: SimulateRouteIn, s: Session = _db_dep):
+    return simulate.simulate_route(s, body.accession, body.study_uid)
+
+
+@router.post(
+    "/simulate/transform", response_model=SimulateTransformOut, tags=["simulation"],
+    summary="Simulate the modify rules",
+    description="Applies the modify rules that would match this case to the "
+                "supplied tag values and returns the tag-level diff. Uses the "
+                "same functions as the forwarding path.",
+    response_description="The routing decision plus the tag changes and any failing operations.",
+)
+def simulate_transformation(body: SimulateTransformIn, s: Session = _db_dep):
+    return simulate.simulate_transform(
+        s, body.values, body.accession, body.study_uid, body.source_id, body.target_id,
+    )
 
 
 # ── Logs ───────────────────────────────────────────────────────────────

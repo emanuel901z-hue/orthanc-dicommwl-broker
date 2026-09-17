@@ -89,6 +89,9 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
 - `POST /sources/{id}/reset-breaker` — Breaker einer Quelle sofort schließen
 - `GET /health/config` — Konsistenz-Checks (Findings mit `code`/`severity`/`entity`)
 - `GET /healthz/ready` — Readiness (DB + SCP; 503 wenn nicht bereit)
+- `GET /audit/config` — Änderungsprotokoll (Before/After je Konfigurationsmutation)
+- `GET /config/export`, `POST /config/import?dry_run=`, `POST /config/rollback/{audit_id}`
+- `POST /simulate/route`, `POST /simulate/transform` — Dry-Run von Routing und Modify-Regeln
 - `GET /logs/queries`, `GET /logs/stores` (paged, Filter: aet, source, status, since)
 - `GET /status` — SCP-Listener, Echo-Matrix (Quellen+Ziele inkl. `breaker_state`), Zähler
 - `GET /healthz`, `GET /metrics` (Prometheus)
@@ -180,6 +183,25 @@ Produktionsfehler (kein Default-Ziel, Regeln auf deaktivierten Knoten, tote
 Quellen, offene Breaker, leere AET-Allowlist, AET-Kollision mit dem Broker
 selbst) und liefert Findings mit stabilem `code` — die UI übersetzt sie und
 verlinkt direkt ins betroffene Formular.
+
+### Simulation (Dry-Run) — Routing und Modify-Regeln
+
+`simulate.py` beantwortet „wohin geht dieser Fall und wie sehen die Kopfdaten
+danach aus“ **ohne** Versand. Entscheidend: die Zielauflösung liegt in
+`routing.py` und wird vom C-STORE-Pfad (`dimse`) **und** der Simulation
+aufgerufen — ein Dry-Run kann also nicht von der Realität abweichen (per Test
+`test_simulation_matches_the_live_resolver` abgesichert). Modify-Regeln laufen
+über dieselben `transforms.applicable`/`apply_transforms`.
+
+### Änderungsprotokoll, Export/Import, Rollback
+
+`config_audit` protokolliert jede Konfigurationsmutation mit serialisiertem
+Before/After (zentral in der API-Schicht). Darauf setzen drei Funktionen auf:
+Diff-Ansicht, Rollback (`before` wiederherstellen; Create → löschen,
+Delete → neu anlegen) und der portable Export (`schema_version`, Referenzen
+**per Name**). Der Import ist Upsert-only mit Dry-Run-Diff — er löscht nie
+implizit, weil ein fehlender Eintrag in einer Datei keine Aussage über die
+Produktion ist.
 
 ### Laufzeit-Settings (ENV-Default + DB-Override)
 
@@ -282,9 +304,9 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 123 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 348 Tests, 0 Errors |
-| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 25/25 grün, 0 Console-/Page-/Netzwerk-Fehler |
+| `pytest` | 163 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 378 Tests, 0 Errors |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 31/31 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
 
@@ -303,8 +325,8 @@ regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
 
 `ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
 Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
-backend pytest (123) → frontend tsc → lint → vitest (348) → docker-e2e
-(25 Browser-Tests + DIMSE-Smokes + Breaker-Szenario). Verifiziert: alle Stages grün.
+backend pytest (163) → frontend tsc → lint → vitest (378) → docker-e2e
+(31 Browser-Tests + DIMSE-Smokes + Breaker-Szenario). Verifiziert: alle Stages grün.
 `--quick` überspringt die Docker-Stage.
 
 #### Coverage-Audit (2026-09)
@@ -313,8 +335,8 @@ Gemessen mit `pytest-cov` bzw. `vitest --coverage`:
 
 | Bereich | Statements | Anmerkung |
 |---|---|---|
-| Backend `mwl_broker/` | **97 %** | api 99 %, main 100 %, settings_service 100 %, models/schemas/metrics 100 %, breaker 99 %, health_checks 98 %, echo 96 %, dimse 93 % |
-| Frontend Broker-UI | **98.8 %** | `api/broker.ts` 100 %, BreakerBadge/HealthPanel 100 %, Seiten 96-100 % |
+| Backend `mwl_broker/` | **97 %** | api 96 %, main 100 %, settings_service/schemas/models/metrics 100 %, routing 100 %, breaker 99 %, audit 97 %, config_io 96 %, health_checks 98 %, echo 96 %, dimse 93 % |
+| Frontend Broker-UI | **98 %** | `api/broker.ts` 100 %, Diff-Helfer/Panels 100 %, Seiten 95-100 % |
 
 Ergänzte Tests für zuvor ungedeckte Pfade: Rules-Update/Delete, Target-Echo,
 Log-Filter + Pagination-Validierung, `/metrics`, Lifespan (Seed + SCP-Bind),
@@ -379,7 +401,7 @@ Gefundene und behobene Defekte:
 | 6 | Härtung: TLS, Alerting (Retention-Purge ist implementiert) | ☐ |
 | 7 | HL7-Adapter (ORM/ADT → lokale MWL-Quelle) | ☐ |
 | 8 | Sprint 1 der Roadmap: Circuit Breaker + Health-Panel + `/healthz/ready` | ✅ |
-| 9 | Sprint 2 der Roadmap: Simulation + Config-Audit/Export/Rollback | ☐ |
+| 9 | Sprint 2 der Roadmap: Simulation + Config-Audit/Export/Rollback | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert

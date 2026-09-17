@@ -116,6 +116,27 @@ class SourceBreaker(Base):
     )
 
 
+class ConfigAudit(Base):
+    """Server-side change log for every configuration mutation.
+
+    `before_json`/`after_json` hold the serialized row; they are the basis for
+    the diff view and for the rollback endpoint. Configuration only — never
+    patient data.
+    """
+
+    __tablename__ = "config_audit"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    actor: Mapped[str] = mapped_column(String(128), default="api")
+    action: Mapped[str] = mapped_column(String(64), index=True)
+    entity: Mapped[str] = mapped_column(String(32), index=True)
+    entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    before_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    after_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    correlation_id: Mapped[str] = mapped_column(String(64), default="")
+
+
 class BrokerSetting(Base):
     """Runtime setting overriding the ENV default (ENV stays the fallback).
 

@@ -631,6 +631,52 @@ def test_breaker_settings_are_validated(client):
     assert rows["breaker_fail_threshold"]["source"] == "db"
 
 
+def test_simulate_route_endpoint(client):
+    src_row = client.post("/api/v1/sources", json=SOURCE).json()
+    tgt = client.post("/api/v1/targets", json=TARGET).json()
+    client.post("/api/v1/rules", json={"source_id": src_row["id"], "target_id": tgt["id"]})
+
+    # no seen_items yet → default target
+    body = client.post("/api/v1/simulate/route", json={"accession": "ACC-1"}).json()
+    assert body["matched_via"] == "default"
+    assert body["target_name"] == TARGET["name"]
+
+    # with a worklist history the rule wins
+    from datetime import datetime, timezone
+
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import SeenItem
+
+    with session_factory()() as s:
+        s.add(SeenItem(accession="ACC-1", source_id=src_row["id"],
+                       ts=datetime.now(timezone.utc)))
+        s.commit()
+
+    body = client.post("/api/v1/simulate/route", json={"accession": "ACC-1"}).json()
+    assert body["matched_via"] == "accession"
+    assert body["source_name"] == SOURCE["name"]
+    assert body["rule_id"] is not None
+
+
+def test_simulate_transform_endpoint(client):
+    src_row = client.post("/api/v1/sources", json=SOURCE).json()
+    client.post("/api/v1/targets", json=TARGET)
+    client.post("/api/v1/transforms", json={
+        **TRANSFORM, "source_id": src_row["id"],
+        "operations": [{"op": "prefix", "tag": "PatientID", "value": "KH_"}],
+    })
+
+    body = client.post("/api/v1/simulate/transform", json={
+        "source_id": src_row["id"], "values": {"PatientID": "P1"},
+    }).json()
+
+    assert body["rules_applied"] == [TRANSFORM["name"]]
+    assert body["changes"] == [{"tag": "PatientID", "before": "P1", "after": "KH_P1"}]
+    assert body["errors"] == []
+    # nothing was stored
+    assert client.get("/api/v1/logs/stores").json() == []
+
+
 def test_openapi_documents_all_endpoints(client):
     """Every path operation carries a summary/tag, query params and schema
     fields carry descriptions — keeps Swagger UI usable for integrators."""
@@ -640,7 +686,7 @@ def test_openapi_documents_all_endpoints(client):
     assert len(spec["info"]["description"]) > 100
     tag_names = {t["name"] for t in spec["tags"]}
     assert {"sources", "targets", "rules", "transforms", "settings",
-            "logs", "monitoring"} <= tag_names
+            "logs", "monitoring", "audit", "config", "simulation"} <= tag_names
 
     for path, ops in spec["paths"].items():
         for method, op in ops.items():
@@ -689,6 +735,10 @@ def test_openapi_documents_all_endpoints(client):
         "TransformIn", "TransformOut", "TransformOperation",
         "SettingOut", "SettingUpdateIn",
         "BreakerStateOut", "FindingOut", "HealthOut", "ReadyOut",
+        "AuditEntryOut", "RollbackOut", "ConfigImportIn", "ConfigExportOut",
+        "ImportPlanOut", "ImportChangeOut", "SimulateRouteIn", "SimulateRouteOut",
+        "SimulateTransformIn", "SimulateTransformOut", "TagChangeOut",
+        "RuleByNameIn", "TransformImportIn",
     ]:
         schema = spec["components"]["schemas"][schema_name]
         for field, prop in schema["properties"].items():

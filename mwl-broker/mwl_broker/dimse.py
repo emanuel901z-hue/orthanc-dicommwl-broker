@@ -13,7 +13,7 @@ from pynetdicom.presentation import build_context
 from pynetdicom.sop_class import ModalityWorklistInformationFind, Verification
 from sqlalchemy import select
 
-from . import breaker, metrics, settings_service, transforms
+from . import breaker, metrics, routing, settings_service, transforms
 from .config import Settings
 from .db import session_factory
 from .models import QueryLog, RoutingRule, SeenItem, StoreLog, MwlSource, PacsTarget
@@ -278,52 +278,19 @@ class BrokerSCP:
                      f" — {len(errors)} op(s) failed" if errors else "")
         return applied
 
-    def _resolve_target(self, accession: str, study_uid: str):
-        """seen_items lookup → routing rule → target; else default target."""
-        with session_factory()() as s:
-            seen = None
-            if accession:
-                seen = s.scalars(
-                    select(SeenItem)
-                    .where(SeenItem.accession == accession)
-                    .order_by(SeenItem.ts.desc())
-                ).first()
-            if seen is None and study_uid:
-                seen = s.scalars(
-                    select(SeenItem)
-                    .where(SeenItem.study_uid == study_uid)
-                    .order_by(SeenItem.ts.desc())
-                ).first()
+    @staticmethod
+    def _resolve_target(accession: str, study_uid: str):
+        """seen_items lookup → routing rule → default target.
 
-            target = None
-            if seen is not None:
-                rule = s.scalars(
-                    select(RoutingRule)
-                    .where(RoutingRule.source_id == seen.source_id, RoutingRule.enabled.is_(True))
-                    .order_by(RoutingRule.priority, RoutingRule.id)
-                ).first()
-                if rule is not None:
-                    target = s.get(PacsTarget, rule.target_id)
-            if target is None:
-                target = s.scalars(
-                    select(PacsTarget).where(
-                        PacsTarget.is_default.is_(True), PacsTarget.enabled.is_(True)
-                    )
-                ).first()
-            if target is not None and not target.enabled:
-                target = None
-            # detach
-            if target is not None:
-                t = PacsTarget(
-                    id=target.id, name=target.name, aet=target.aet, host=target.host,
-                    port=target.port, calling_aet=target.calling_aet, enabled=target.enabled,
-                    is_default=target.is_default,
-                )
-                return (seen.source_id if seen else None), t
-            return (seen.source_id if seen else None), None
+        Uses the shared resolver in `routing.py` — the simulator runs exactly
+        the same code, so a dry-run cannot drift from the live path.
+        """
+        with session_factory()() as s:
+            decision = routing.resolve(s, accession, study_uid)
+        return decision.source_id, decision.target
 
     @staticmethod
-    def _forward_store(ds: Dataset, target: PacsTarget) -> None:
+    def _forward_store(ds: Dataset, target: routing.TargetCfg) -> None:
         ae = AE(ae_title=target.calling_aet)
         ctx = build_context(ds.SOPClassUID, [ds.file_meta.TransferSyntaxUID])
         assoc = ae.associate(target.host, target.port, ae_title=target.aet, contexts=[ctx])

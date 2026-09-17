@@ -31,6 +31,14 @@ cd mwl-broker && python -m pytest tests -q
 # …mit Coverage (aktuell 96 %)
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 
+# Simulation + Änderungsprotokoll (laufender Stack)
+curl -s -X POST http://127.0.0.1:18081/api/v1/simulate/route \
+  -H 'Content-Type: application/json' -d '{"accession":"ACC-A-001"}' | python3 -m json.tool
+curl -s http://127.0.0.1:18081/api/v1/audit/config?limit=5 | python3 -m json.tool
+curl -s http://127.0.0.1:18081/api/v1/config/export > /tmp/broker-config.json
+curl -s -X POST 'http://127.0.0.1:18081/api/v1/config/import?dry_run=true' \
+  -H 'Content-Type: application/json' -d @/tmp/broker-config.json | python3 -m json.tool
+
 # Broker-API + Swagger/OpenAPI (laufender Stack)
 curl -s http://127.0.0.1:18081/openapi.json | python3 -m json.tool | head
 #   Swagger UI: http://127.0.0.1:18081/docs
@@ -134,6 +142,15 @@ Token rotieren = nur die Store-Datei neu schreiben:
   der Delete auf Postgres mit einem FK-Verstoß fehl.
 - **SQLite-Tests erzwingen Fremdschlüssel** (`PRAGMA foreign_keys=ON` in
   `db.get_engine`), damit sich Tests wie Postgres verhalten.
+- **Simulation und Echtbetrieb teilen den Code.** Zielauflösung liegt in
+  `routing.py`, Modify-Regeln in `transforms.py` — beides wird vom C-STORE-Pfad
+  *und* von `simulate.py` aufgerufen. Nie eine zweite Auflösung implementieren,
+  sonst ist der Dry-Run wertlos.
+- **Konfigurationsmutationen werden protokolliert** (`audit.record` in der
+  API-Schicht, Before/After-Snapshot). Neue Mutationen ohne Audit-Eintrag sind
+  unvollständig.
+- **Import ist Upsert-only** (`config_io`): nie implizit löschen; Referenzen im
+  Export laufen über Namen, nicht IDs.
 - **Neue Endpunkte brauchen den vollen OpenAPI-Vertrag** (Summary, Tag,
   Response-Description ≠ Default, alle Path-/Query-Params, Schema-Felder) —
   `test_openapi_documents_all_endpoints` erzwingt das.

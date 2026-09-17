@@ -182,6 +182,140 @@ class TransformOut(TransformIn):
     created_at: datetime = Field(description="Creation timestamp (UTC).")
 
 
+class RuleByNameIn(BaseModel):
+    """Routing rule in the portable export format (referenced by name)."""
+
+    source: str = Field(description="Name of the upstream source.")
+    target: str = Field(description="Name of the store target.")
+    priority: int = Field(default=100, description="Lower values win.")
+    enabled: bool = Field(default=True, description="Disabled rules are ignored.")
+
+
+class TransformImportIn(BaseModel):
+    """Modify rule in the portable export format (scope referenced by name)."""
+
+    name: str = Field(min_length=1, max_length=64, description="Unique rule name.")
+    enabled: bool = Field(default=True, description="Disabled rules are not applied.")
+    priority: int = Field(default=100, description="Application order — lower runs first.")
+    source: str | None = Field(default=None, description="Scope: source name (null = any).")
+    target: str | None = Field(default=None, description="Scope: target name (null = any).")
+    operations: list[TransformOperation] = Field(description="DICOM modifications in order.")
+
+
+class ConfigImportIn(BaseModel):
+    """Portable configuration document (see GET /config/export)."""
+
+    schema_version: int = Field(description="Export format version — must match the broker's.")
+    sources: list[SourceIn] = Field(default_factory=list, description="Upstream sources.")
+    targets: list[TargetIn] = Field(default_factory=list, description="Store targets.")
+    rules: list[RuleByNameIn] = Field(default_factory=list, description="Routing rules.")
+    transforms: list[TransformImportIn] = Field(default_factory=list, description="Modify rules.")
+    settings: dict[str, str] = Field(
+        default_factory=dict, description="Runtime setting overrides (key → value).",
+    )
+
+
+class ConfigExportOut(ConfigImportIn):
+    """Full configuration as exported by the broker."""
+
+    exported_at: datetime | None = Field(
+        default=None, description="When the document was created (UTC).",
+    )
+
+
+class ImportChangeOut(BaseModel):
+    """One change an import would make."""
+
+    entity: str = Field(description="source | target | rule | transform | setting.")
+    action: str = Field(description="create | update.")
+    name: str = Field(description="Name (or key) of the affected entry.")
+    fields: dict = Field(description="Field values the import would apply.")
+
+
+class ImportPlanOut(BaseModel):
+    """Result of an import: the dry-run diff or the applied changes."""
+
+    schema_version: int = Field(description="Format version of the document.")
+    dry_run: bool = Field(description="True when nothing was written.")
+    changes: list[ImportChangeOut] = Field(description="Planned/applied changes.")
+    skipped: list[str] = Field(description="Entries that could not be applied (with reason).")
+    summary: dict = Field(description="Counts: create / update / skipped.")
+
+
+class AuditEntryOut(BaseModel):
+    """One configuration change-log entry."""
+
+    id: int = Field(description="Row ID (use it for rollback).")
+    ts: datetime = Field(description="When the change happened (UTC).")
+    actor: str = Field(description="Operator identity (header) or 'api'.")
+    action: str = Field(description="e.g. create.source, update.rule, import.transform.")
+    entity: str = Field(description="source | target | rule | transform | setting.")
+    entity_id: int | None = Field(default=None, description="Row ID of the affected entry.")
+    before_json: dict | None = Field(default=None, description="State before the change.")
+    after_json: dict | None = Field(default=None, description="State after the change.")
+    correlation_id: str = Field(default="", description="Request correlation ID.")
+
+
+class RollbackOut(BaseModel):
+    """Result of rolling a change-log entry back."""
+
+    audit_id: int = Field(description="The change-log entry that was rolled back.")
+    entity: str = Field(description="Affected entity type.")
+    action: str = Field(description="What the rollback did (delete | recreate | restore).")
+    message: str = Field(description="Human-readable result.")
+
+
+class SimulateRouteIn(BaseModel):
+    """A case to check against the routing rules."""
+
+    accession: str = Field(default="", description="Accession number of the case.", examples=["ACC-A-001"])
+    study_uid: str = Field(default="", description="Study Instance UID (used if the accession is unknown).")
+
+
+class SimulateRouteOut(BaseModel):
+    """Where an instance would go and why."""
+
+    accession: str = Field(description="Accession that was checked.")
+    study_uid: str = Field(description="Study UID that was checked.")
+    matched_via: str = Field(description="accession | study_uid | default | none.")
+    source_id: int | None = Field(default=None, description="Worklist source the case came from.")
+    source_name: str | None = Field(default=None, description="Name of that source.")
+    target_id: int | None = Field(default=None, description="Target the instance would be sent to.")
+    target_name: str | None = Field(default=None, description="Name of that target.")
+    rule_id: int | None = Field(default=None, description="Rule that matched (null = default target).")
+    reason: str = Field(description="Human-readable explanation of the decision.")
+
+
+class SimulateTransformIn(BaseModel):
+    """A case plus tag values to test the modify rules against."""
+
+    accession: str = Field(default="", description="Accession number of the case.")
+    study_uid: str = Field(default="", description="Study Instance UID of the case.")
+    source_id: int | None = Field(default=None, description="Override the source scope.")
+    target_id: int | None = Field(default=None, description="Override the target scope.")
+    values: dict[str, str] = Field(
+        default_factory=dict,
+        description="Tag/value pairs to run the rules against, e.g. {PatientID: 'P1'}.",
+        examples=[{"PatientID": "P1", "InstitutionName": "ALT"}],
+    )
+
+
+class TagChangeOut(BaseModel):
+    """One tag modification the rules would apply."""
+
+    tag: str = Field(description="DICOM keyword.")
+    before: str = Field(description="Value before the rules.")
+    after: str = Field(description="Value after the rules.")
+
+
+class SimulateTransformOut(SimulateRouteOut):
+    """Which modify rules would apply and how the tags would change."""
+
+    rules_applied: list[str] = Field(description="Names of the rules that would run.")
+    changes: list[TagChangeOut] = Field(description="Tag changes the rules would make.")
+    errors: list[str] = Field(description="Operations/tags that would fail (they are skipped).")
+
+
 class SettingOut(BaseModel):
     """One runtime setting: DB override if present, otherwise the ENV default."""
 

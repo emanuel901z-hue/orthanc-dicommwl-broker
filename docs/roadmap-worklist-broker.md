@@ -36,8 +36,8 @@ auditierbar.
 | **P0** | Worklist-Cache mit Stale-Fallback | RIS-Ausfall legt den Modalitätenbetrieb nicht lahm | mittel | offen (Sprint 3) |
 | **P0** | C-STORE-Spool mit Retry/Dead-Letter | kein Bildverlust bei PACS-Ausfall | hoch | offen (Sprint 4) |
 | **P0** | Circuit Breaker pro Upstream | tote Quelle kostet keine Timeouts mehr | klein | **✅ Sprint 1** |
-| **P1** | Config-Audit + Export/Import/Rollback | Nachvollziehbarkeit, Staging→Prod, Notfall-Rollback | mittel | offen (Sprint 2) |
-| **P1** | Simulation (Dry-Run) für Routing/Transform | Regeln gefahrlos prüfen, bevor sie greifen | klein | offen (Sprint 2) |
+| **P1** | Config-Audit + Export/Import/Rollback | Nachvollziehbarkeit, Staging→Prod, Notfall-Rollback | mittel | **✅ Sprint 2** |
+| **P1** | Simulation (Dry-Run) für Routing/Transform | Regeln gefahrlos prüfen, bevor sie greifen | klein | **✅ Sprint 2** |
 | **P1** | Konsistenz-Checks / Health-Panel | Fehlkonfigurationen früh und sichtbar | klein | **✅ Sprint 1** |
 | **P1** | Alerting/Webhooks + Readiness-Endpoint | Betrieb erfährt Störungen, bevor Anwender anrufen | klein | Readiness ✅ Sprint 1, Webhooks offen (Sprint 5) |
 | **P2** | Lokale Worklist-Items / HL7-ORM-Adapter | Notfälle und ungeplante Untersuchungen | hoch | offen |
@@ -437,7 +437,7 @@ ATNA-Schema.
 | Phase | Inhalt | Abhängigkeit | Status |
 |---|---|---|---|
 | 1 | Circuit Breaker (P0-3) + Health-Panel (P1-3) | keine — schneller Nutzen, kleine Eingriffe | **✅ umgesetzt** |
-| 2 | Simulation (P1-2) + Config-Audit/Export/Rollback (P1-1) | keine | offen |
+| 2 | Simulation (P1-2) + Config-Audit/Export/Rollback (P1-1) | keine | **✅ umgesetzt** |
 | 3 | Worklist-Cache (P0-1) | Löschkonzept/PHI-Entscheidung | offen |
 | 4 | C-STORE-Spool (P0-2) | Alembic-Migration, Speicherkonzept | offen |
 | 5 | Alerting (P1-4), dann P2 nach fachlicher Priorisierung | Betriebsentscheidung | offen |
@@ -495,6 +495,57 @@ Jede Phase endet mit: pytest + vitest + Playwright (Desktop/Mobile) +
 | Playwright | 25 Tests (Desktop + Mobile), inkl. Health-Panel und Breaker-Reset |
 | test-stack.sh | Szenario „tote Quelle → Breaker offen → Finding → `/healthz/ready`“ |
 | verify-ui.cjs | 58 Checks (Desktop 1400×900 + Mobile 375×812) |
+
+### Sprint 2 — Simulation + Config-Audit/Export/Import/Rollback (umgesetzt)
+
+**Backend.**
+
+- `ConfigAudit`-Tabelle + `audit.py`: **jede** Konfigurationsmutation wird mit
+  Before/After-Snapshot protokolliert (zentral in der API-Schicht, inklusive
+  CRUD-Factory-Hooks). Actor aus `X-OE3-User` (Setting `audit_actor_header`),
+  Correlation-ID aus `X-Request-Id`.
+- `routing.py`: die Zielauflösung (seen_items → Regel → Default) ist aus
+  `dimse` herausgezogen — **Echtbetrieb und Simulation nutzen dieselbe
+  Funktion**, ein Dry-Run kann nicht driften (per Test abgesichert).
+- `config_io.py`: Export als portables Dokument (`schema_version`, Regeln und
+  Modify-Regeln referenzieren Quellen/Ziele **per Name**), Import als
+  **Upsert-only** mit Dry-Run-Diff — nichts wird je implizit gelöscht.
+  Ein Dokument darf die Knoten, auf die es verweist, selbst anlegen.
+- `simulate.py`: `POST /simulate/route` und `POST /simulate/transform` liefern
+  Entscheidung, Begründung, angewendete Regeln und den Tag-Diff.
+- Rollback: `POST /config/rollback/{audit_id}` stellt den Zustand vor der
+  Änderung wieder her (Update → zurücksetzen, Delete → neu anlegen,
+  Create → entfernen) und protokolliert sich selbst.
+- Neue Routen: `GET /audit/config`, `GET /config/export`,
+  `POST /config/import?dry_run=`, `POST /config/rollback/{id}`,
+  `POST /simulate/route`, `POST /simulate/transform` (Tags `audit`, `config`,
+  `simulation`, vollständiger OpenAPI-Vertrag).
+
+**Frontend (OE3).**
+
+- Seite **`/broker/audit`** („Änderungsprotokoll"): Filter nach Objekttyp,
+  Diff-Dialog (Feld/Vorher/Nachher), Rollback mit Bestätigung, Export als
+  Datei-Download, Import mit **Pflicht-Dry-Run** (Diff + übersprungene
+  Einträge sichtbar, erst dann „Import anwenden").
+- **Fall prüfen (Simulation)** auf `/broker`: Accession/Study-UID plus
+  optionale `Tag=Wert`-Zeilen → Routing-Entscheidung, angewendete Regeln,
+  Tag-Diff und fehlschlagende Operationen.
+- Mobile: Audit-Einträge als Cards; Schreibzugriffe (Rollback, Import) laufen
+  über auditierte Mutations (`broker.config.*`).
+
+**Tests & Verifikation.**
+
+| Ebene | Umfang |
+|---|---|
+| pytest | 163 Tests, 97 % Coverage (+40: Audit je Mutation, Filter/Pagination, Rollback für Create/Update/Delete/Setting, Export/Import-Roundtrip, Idempotenz, Dry-Run ohne Schreibzugriff, Schema-Version, Simulation == Echtpfad) |
+| vitest | 378 Tests, 98 % Broker-UI-Coverage (+30: Audit-Seite, Diff-Helfer, Fall-Prüfen-Panel, Audit-Hooks, Client) |
+| Playwright | 31 Tests (Desktop + Mobile), inkl. Change-Log-Roundtrip (UI anlegen → Audit → Rollback → weg) und Fall-Prüfen |
+| verify-ui.cjs | 66 Checks (Desktop 1400×900 + Mobile 375×812) |
+
+**Nebenbefunde und behoben:** Import war für Dokumente, die ihre eigenen
+Quellen mitbringen, fälschlich „übersprungen“; Operations wurden beim Import
+mit `None`-Feldern normalisiert und damit nicht idempotent; `resourceId` im
+Audit-Hook warf bei Dokumenten ohne Arrays.
 
 ## Offene Entscheidungen (an den Betreiber)
 
