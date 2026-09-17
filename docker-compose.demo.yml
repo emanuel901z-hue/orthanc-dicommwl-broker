@@ -21,14 +21,15 @@ services:
     build: ./mwl-broker
     command: ["python", "-m", "mwl_broker.mock_ris", "--aet", "RIS_A", "--port", "11114", "--variant", "a"]
     ports:
-      - "${MOCK_RIS_A_PORT}:11114"
+      # Loopback only — demo services must not be reachable from the LAN.
+      - "127.0.0.1:${MOCK_RIS_A_PORT}:11114"
     restart: unless-stopped
 
   mock-ris-b:
     build: ./mwl-broker
     command: ["python", "-m", "mwl_broker.mock_ris", "--aet", "RIS_B", "--port", "11115", "--variant", "b"]
     ports:
-      - "${MOCK_RIS_B_PORT}:11115"
+      - "127.0.0.1:${MOCK_RIS_B_PORT}:11115"
     restart: unless-stopped
 
   # Second PACS for routing demos
@@ -36,8 +37,8 @@ services:
     image: orthancteam/orthanc:latest
     restart: unless-stopped
     ports:
-      - "${PEER_HTTP_PORT}:8042"
-      - "${PEER_DICOM_PORT}:4242"
+      - "127.0.0.1:${PEER_HTTP_PORT}:8042"
+      - "127.0.0.1:${PEER_DICOM_PORT}:4242"
     environment:
       ORTHANC__NAME: "PACS Peer"
       ORTHANC__DICOM_AET: "PEER"

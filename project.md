@@ -160,9 +160,18 @@ orthanc-dicommwl-broker/
 ### Browser-Verifikation (Playwright, Chromium headless)
 
 `e2e/stack/` im Frontend-Repo: `playwright.stack.config.ts` (Desktop- +
-Mobile-Projekt gegen `http://127.0.0.1:18082`) + `stack-viewport.spec.ts`
-(Study-Liste, Broker-Dashboard, Echo-Button, Sidebar-Navigation, DOM-Analyse,
-Screenshots pro Viewport unter `e2e/stack/screenshots/`).
+Mobile-Projekt; Basis-URL via `OE3_BASE` env, Default
+`http://127.0.0.1:18082`) + `stack-viewport.spec.ts` (Study-Liste,
+Broker-Dashboard, Echo-Button, Sidebar-Navigation, DOM-Analyse, Screenshots
+pro Viewport unter `e2e/stack/screenshots/`).
+
+### Ephemerer Test-Stack
+
+`test-stack.sh` + `.env.test`: isolierte Stack-Kopie (Projekt `mwl-test`,
+Ports `19xxx`/`14xxx`, eigene Volumes). Ablauf: `up -d --build` → Health-Wait
+→ C-FIND-Smoke → Playwright (8 Tests) → `down -v`. Läuft parallel zum
+regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück —
+verifiziert: 8/8 grün inkl. Teardown.
 
 Gefundene und behobene Defekte:
 

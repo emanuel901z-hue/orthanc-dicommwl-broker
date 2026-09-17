@@ -75,6 +75,10 @@ cd orthanc-explorer-3-usable && npm run test      # 259 Tests
 cd orthanc-explorer-3-usable
 npx playwright test --config=e2e/stack/playwright.stack.config.ts
 # Screenshots + DOM-Reports: e2e/stack/screenshots/
+
+# Ephermerer Test-Stack (eigener Projektname "mwl-test", Ports 19xxx/14xxx,
+# läuft parallel zum regulären Stack; up → C-FIND-Smoke → Playwright → down -v):
+./test-stack.sh          # alles; --keep lässt ihn laufen, --down räumt ab
 ```
 
 ## Status
