@@ -148,13 +148,20 @@ Der gehärtete OHIF-v3.12.5-Build aus dem Vorgängerprojekt ist angebunden:
 Hinweis: Der Viewer braucht Instanzen **mit PixelData** — die synthetischen
 C-STORE-Smoke-Instanzen (nur zum Routing-Test) liefern bei WADO-RS 400.
 
-**Offen (Entscheidung)**: Der Dockerfile patcht 7 der 12 von der Extension
-registrierten Panels in die Mode-Layouts (`dicomTagBrowserPanel`,
+**Panel-Umfang (entschieden)**: Der Dockerfile patcht 7 der 12 von der
+Extension registrierten Panels in die Mode-Layouts (`dicomTagBrowserPanel`,
 `hotkeyHelpPanel`, `measurementExportPanel`, `mprSlabPanel`, `roiStatsPanel`,
-`studyComparePanel`, `wlPresetsPanel`). Nicht im Layout: `pacsBrowserPanel`,
-`cineNavPanel`, `ticPanel`, `mismatchPanel`, `vesselTrackingPanel` — sie sind
-im Bundle vorhanden, erscheinen aber nicht als Tabs (der ältere Dockerfile-
-Stand hatte alle 12).
+`studyComparePanel`, `wlPresetsPanel`). Bewusst **nicht** im Layout:
+`pacsBrowserPanel`, `cineNavPanel`, `ticPanel`, `mismatchPanel`,
+`vesselTrackingPanel` — sie sind im Bundle vorhanden, erscheinen aber nicht
+als Tabs. Zum Aktivieren die Namen in der `panelNames`-Liste des Dockerfiles
+ergänzen und neu bauen (der ältere Stand hatte alle 12).
+
+**OE3-Anbindung**: OE3s „In OHIF öffnen" ruft vorher
+`POST /api/v1/pacs/viewer-session` (Backend-Proxy-Endpoint). In diesem Stack
+existiert der nicht — deshalb setzt `deploy/oe3-config.js` `viewerSession:
+false`; der Klick öffnet den Viewer direkt (verifiziert: 0 Calls, neuer Tab
+mit `/ohif/viewer?StudyInstanceUIDs=…`).
 
 ### Laufzeit-Settings (ENV-Default + DB-Override)
 

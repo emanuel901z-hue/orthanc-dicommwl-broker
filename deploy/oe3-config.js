@@ -5,6 +5,8 @@ window.__OE3_CONFIG__ = {
   authMode: "none",
   // No backend proxy in this stack — skip the /oe3-me gate (local admin).
   authCheck: false,
+  // …and skip the viewer-session POST (endpoint only exists behind the proxy).
+  viewerSession: false,
   features: {
     enableMwlBroker: true,
     enableModalityConfig: true,
