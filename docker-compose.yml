@@ -69,6 +69,8 @@ services:
     ports:
       - "${BROKER_API_BIND:-127.0.0.1}:${BROKER_API_PORT}:8081"
       - "${BROKER_DICOM_PORT}:11113"
+      # DICOM TLS listener (off by default; the port is simply unused then)
+      - "${BROKER_TLS_PORT:-2762}:2762"
     environment:
       BROKER_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/mwl
       BROKER_AET: ${BROKER_AET}

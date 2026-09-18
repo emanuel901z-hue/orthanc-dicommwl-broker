@@ -18,7 +18,11 @@ def send_store(ds: Dataset, target: routing.TargetCfg) -> None:
     """Send one instance; raises on any failure."""
     ae = AE(ae_title=target.calling_aet)
     ctx = build_context(ds.SOPClassUID, [ds.file_meta.TransferSyntaxUID])
-    assoc = ae.associate(target.host, target.port, ae_title=target.aet, contexts=[ctx])
+    from .upstream import _tls_args
+
+    assoc = ae.associate(target.host, target.port, ae_title=target.aet, contexts=[ctx],
+                         tls_args=_tls_args(getattr(target, "tls", False),
+                                            getattr(target, "tls_verify", True), target.host))
     if not assoc.is_established:
         raise ConnectionError("association rejected")
     try:

@@ -9,3 +9,4 @@ dist/
 coverage.json
 htmlcov/
 .pytest-spool/
+.pytest-tls/

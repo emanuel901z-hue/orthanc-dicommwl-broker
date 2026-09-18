@@ -34,6 +34,50 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "Interval of the C-ECHO monitoring loop in seconds.",
     ),
+    "tls_inbound_enabled": (
+        "bool",
+        "Offer a TLS listener for the modalities (next to the plain port).",
+    ),
+    "tls_inbound_port": (
+        "int",
+        "Port of the TLS listener (2762 is the usual DICOM TLS port).",
+    ),
+    "tls_inbound_cert_file": (
+        "path",
+        "Server certificate the modalities verify (PEM).",
+    ),
+    "tls_inbound_key_file": (
+        "path",
+        "Private key of the server certificate (PEM, unencrypted).",
+    ),
+    "tls_inbound_ca_file": (
+        "path",
+        "CA bundle used to verify modality certificates (for mTLS).",
+    ),
+    "tls_inbound_client_auth": (
+        "enum:none,optional,required",
+        "Whether modalities must present a certificate (mTLS).",
+    ),
+    "tls_outbound_ca_file": (
+        "path",
+        "CA bundle used to verify RIS/PACS certificates (empty = system store).",
+    ),
+    "tls_outbound_client_cert_file": (
+        "path",
+        "Certificate the broker presents to RIS/PACS (for mTLS).",
+    ),
+    "tls_outbound_client_key_file": (
+        "path",
+        "Private key of that certificate (PEM, unencrypted).",
+    ),
+    "tls_outbound_verify": (
+        "bool",
+        "Verify the remote certificate on outgoing connections.",
+    ),
+    "tls_dir": (
+        "path",
+        "Directory for certificates the broker generates itself.",
+    ),
     "local_priority": (
         "int",
         "Merge priority of local worklist items (lower wins; default before every source).",
@@ -167,6 +211,51 @@ KNOWN: dict[str, tuple[str, str]] = {
 _INT_RANGES = {
     "seen_item_ttl_days": (1, 3650),
     "echo_interval_s": (5, 3600),
+    "tls_inbound_enabled": (
+        "bool",
+        "Offer a TLS listener for the modalities (next to the plain port).",
+    ),
+    "tls_inbound_port": (
+        "int",
+        "Port of the TLS listener (2762 is the usual DICOM TLS port).",
+    ),
+    "tls_inbound_cert_file": (
+        "path",
+        "Server certificate the modalities verify (PEM).",
+    ),
+    "tls_inbound_key_file": (
+        "path",
+        "Private key of the server certificate (PEM, unencrypted).",
+    ),
+    "tls_inbound_ca_file": (
+        "path",
+        "CA bundle used to verify modality certificates (for mTLS).",
+    ),
+    "tls_inbound_client_auth": (
+        "enum:none,optional,required",
+        "Whether modalities must present a certificate (mTLS).",
+    ),
+    "tls_outbound_ca_file": (
+        "path",
+        "CA bundle used to verify RIS/PACS certificates (empty = system store).",
+    ),
+    "tls_outbound_client_cert_file": (
+        "path",
+        "Certificate the broker presents to RIS/PACS (for mTLS).",
+    ),
+    "tls_outbound_client_key_file": (
+        "path",
+        "Private key of that certificate (PEM, unencrypted).",
+    ),
+    "tls_outbound_verify": (
+        "bool",
+        "Verify the remote certificate on outgoing connections.",
+    ),
+    "tls_dir": (
+        "path",
+        "Directory for certificates the broker generates itself.",
+    ),
+    "tls_inbound_port": (1, 65535),
     "local_priority": (-1000, 1000),
     "local_default_validity_days": (0, 3650),
     "hl7_mllp_port": (1, 65535),

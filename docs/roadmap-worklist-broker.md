@@ -42,7 +42,7 @@ auditierbar.
 | **P1** | Alerting/Webhooks + Readiness-Endpoint | Betrieb erfährt Störungen, bevor Anwender anrufen | klein | **✅ Sprint 5** |
 | **P2** | Lokale Worklist-Items / HL7-ORM-Adapter | Notfälle und ungeplante Untersuchungen | hoch | **✅ Sprint 6** |
 | **P2** | Per-Station-Filter und -Priorität | jede Konsole sieht nur ihre Arbeitsliste | mittel | **✅ Sprint 6** |
-| **P2** | DICOM-TLS (mTLS) + Zertifikatsverwaltung | Segmentierung/Netzwerkanforderungen | mittel | offen |
+| **P2** | DICOM-TLS (mTLS) + Zertifikatsverwaltung | Segmentierung/Netzwerkanforderungen | mittel | **✅ Sprint 7** |
 | **P2** | ATNA-Audit-Export (syslog/TLS) | IHE-Compliance, zentrale Auditablage | mittel | **✅ Sprint 6** |
 
 ---
@@ -499,19 +499,67 @@ und Audit; UI (Desktop + Mobile); Test-Stack: Regel anlegen und Vorschau prüfen
 
 ### P2-3 DICOM-TLS (mTLS) und Zertifikatsverwaltung
 
-**Wert.** Segmentierung/Netzwerkanforderungen im Krankenhaus; teils Pflicht
-für Verkehr über Segmentgrenzen.
+**Wert in der Produktion.** Verschlüsselte Strecken sind heute nicht nötig (LAN,
+VPN, direkte IPs/Ports) — für die Zukunft aber unvermeidlich. Deshalb ist alles
+**standardmäßig aus** und wird pro Richtung eingeschaltet, ohne den Bestand zu
+berühren.
 
-**Backend.** TLS-Kontext je Quelle/Ziel (CA, Client-Zertifikat, Schlüssel,
-`verify_peer`); Upload der Zertifikate über die API (nur Metadaten in der DB,
-Dateien im gemounteten Secret-Verzeichnis); Health-Check der Zertifikats­
-gültigkeit.
-**Frontend.** Dialog je Knoten mit Zertifikatsstatus (gültig bis …),
-Warnung bei Ablauf < 30 Tage.
-**Tests.** pytest mit Testzertifikaten (Handshake ok/abgelehnt/abgelaufen),
-UI-Tests.
-**Risiko.** Key-Material darf nie in der DB oder im Log landen — nur Pfade,
-Dateirechte restriktiv, kein Export über die API.
+**Zwei Richtungen, getrennt schaltbar.**
+
+- **Eingehend** (`tls_inbound_*`): ein **zweiter Listener** auf eigenem Port
+  (Default 2762) neben dem Klartext-Port. Das ist die Voraussetzung für eine
+  **stufenweise Umstellung**: eine Modalität nach der anderen, die übrigen
+  laufen unverändert weiter. `tls_inbound_client_auth` schaltet mTLS
+  (`none|optional|required`); bei `optional`/`required` ist eine CA-Datei
+  Pflicht — sonst würde der Broker jede Modalität abweisen.
+- **Ausgehend** (`tls_outbound_*` + **je Quelle/Ziel** `tls`/`tls_verify`):
+  Der Broker verifiziert RIS/PACS-Zertifikate gegen eine CA (leer =
+  System-Truststore) und kann sich per Client-Zertifikat ausweisen (mTLS).
+  `tls_verify=false` ist ein **bewusster** Ausnahmeschalter für ein
+  selbstsigniertes Testsystem und wird im Health-Panel als Warnung geführt.
+
+**Für Betreiber, die nicht in der Materie stecken.**
+
+- **Zertifikat selbst erzeugen** (`POST /tls/self-signed` + Dialog): Common Name,
+  Gültigkeit, SANs (IPs/Hostnamen), optional als CA. Der öffentliche Teil wird
+  angezeigt und an den Lieferanten weitergegeben; der private Schlüssel wird mit
+  Modus 0600 geschrieben und **nie über die API ausgegeben**.
+- **Zustandsübersicht** (`GET /tls/overview` + Karte): existiert die Datei, ist
+  sie lesbar, wem gehört sie, wann läuft sie ab, passt der Schlüssel zum
+  Zertifikat, ist der Schlüssel für andere lesbar — in Klartext.
+- **Endpunkt prüfen** (`POST /tls/test` + Knopf): echter TLS-Handshake mit
+  Protokoll, Cipher, Peer-Subject/Issuer/Ablauf und optional einem **C-ECHO über
+  TLS**. Fehlermeldungen sagen, was zu tun ist („Zertifikat in die CA-Datei
+  importieren oder 'prüfen' für diesen Knoten abschalten").
+- **Ablaufüberwachung**: Health-Findings (`tls_certificate_expiring` ab 30 Tagen,
+  `tls_certificate_expired`), Metrik `mwl_tls_certificate_days_left`, neues
+  Alerting-Ereignis `tls_certificate_expiring` sowie Warnungen für
+  `tls_verification_disabled`, `tls_key_world_readable`, `tls_key_mismatch` und
+  unvollständige Konfigurationen.
+
+**Backend.** `tls.py` (Kontexte für Server/Client, Inspektion, Erzeugung,
+Endpunkt-Check), `ssl_context` am zweiten pynetdicom-Listener, `tls_args` an
+allen ausgehenden Assoziationen (C-FIND, C-ECHO, C-STORE inkl. Spool-Worker),
+Alembic-Revision `0006` für die Knoten-Felder, Settings mit den Validierungsarten
+`enum` und `path`, `cryptography` als Dependency (auch für pynetdicom-TLS).
+
+**Tests & Verifikation.** Kontexte (Server/Client, Verify-Modi, mTLS-Pflicht),
+Zertifikatsinspektion (Ablauf, SANs, CA-Flag, Schlüssel-Modus, Schlüssel/
+Zertifikat-Zuordnung), Erzeugung (0600, PEM, SANs), Übersicht, Endpunkt-Check
+gegen einen **echten TLS-Server** (Handshake, Peer-Zertifikat, Verifikation mit
+und ohne CA, mTLS mit Client-Zertifikat, unerreichbarer Port); Integration mit
+**echten DICOM-TLS-Assoziationen**: C-FIND über den TLS-Listener, mTLS
+(ohne Zertifikat abgewiesen, mit Zertifikat angenommen), ausgehender C-FIND über
+TLS (inkl. Fehlschlag ohne CA), C-ECHO und C-STORE über TLS, Durchreichen der
+Knoten-Flags aus der Datenbank; Health-, API- und UI-Tests. Im Test-Stack:
+Zertifikat erzeugen, Listener aktivieren, **C-FIND über TLS mit
+CA-Verifikation**, Endpunkt-Check (TLSv1.3 + C-ECHO).
+
+**Risiken.** Ein falsch gesetztes `tls_verify=false` schwächt die
+Authentifizierung (deshalb Warnung + Health-Finding); abgelaufene Zertifikate
+legen die Strecke lahm (deshalb Ablaufüberwachung und Alerting); die
+Klartext- und die TLS-Strecke existieren parallel, solange nicht alle Geräte
+umgestellt sind (bewusst, für die Migration).
 
 ### P2-4 ATNA-Audit-Export (IHE, syslog/TLS)
 
@@ -854,6 +902,48 @@ jeweils Backend, API, DAU-sichere OE3-Oberfläche, Tests und Verifikation:
 | Playwright | 44 Tests (Desktop + Mobile), inkl. Notfall in der Liste, HL7-Trockenlauf, Stationsvorschau, ATNA-Beispielnachricht + Testversand |
 | test-stack.sh | Notfall erscheint in der C-FIND-Antwort, HL7 Trockenlauf/Anwenden, Stationsvorschau, **echter Syslog-Empfänger** mit Audit-Nachrichten (42, Query-Events enthalten) |
 | verify-ui.cjs | 100 Checks (Desktop 1400×900 + Mobile 375×812) |
+
+### Sprint 7 — DICOM-TLS/mTLS + Zertifikatsverwaltung (umgesetzt)
+
+**Umgesetzt.**
+
+- `tls.py`: Server-/Client-Kontexte (TLS ≥ 1.2, mTLS `none|optional|required`),
+  Zertifikats- und Schlüsselinspektion, Erzeugung selbstsignierter Zertifikate
+  (0600, SANs, optional CA), Endpunkt-Check mit echtem Handshake und optionalem
+  C-ECHO, Ablauf- und Konfigurationsdiagnose.
+- **Zweiter Listener** für eingehendes TLS (`tls_inbound_port`, Default 2762)
+  neben dem Klartext-Port — stufenweise Umstellung pro Modalität.
+- **Je Knoten** `tls`/`tls_verify` für Quellen und Ziele (Alembic `0006`),
+  globale Trust-/Identitätsdateien für ausgehend, `tls_args` an C-FIND, C-ECHO
+  und C-STORE (auch im Spool-Worker).
+- API `GET /tls/overview`, `POST /tls/self-signed`, `POST /tls/test`
+  (auditiert); Health-Findings und Alerting-Ereignis für Ablauf/Fehlkonfiguration;
+  Metriken `mwl_tls_*`.
+- UI: **TLS-Karte** (Listener, mTLS, Zertifikate mit Ablauf-Badges, Erzeugungs-
+  dialog mit PEM-Anzeige, Endpunkt-Prüfung) und eine TLS-Gruppe im Quellen-/
+  Ziel-Dialog. Defaults: alles aus, Verifikation an.
+
+**Beim Umsetzen gefunden und behoben.**
+
+| Fund | Fix |
+|---|---|
+| Ausgehendes TLS scheiterte, weil `tls_args` ohne Server-Namen kam (Python verweigert die Hostnamen-Prüfung ohne Namen, SNI fehlt) | `client_tls_args(..., server_name=host)`; der Host wird an allen Aufrufen durchgereicht |
+| Bei `verify=false` liefert Python **kein** Peer-Zertifikat — die Prüfung zeigte nichts an | Peer-Zertifikat als DER holen und selbst parsen (funktioniert in beiden Modi) |
+| `overview()` listete per Operator-Präzedenz auch nicht konfigurierte CA-Einträge | Liste über die Rollen gefiltert |
+| Die neuen TLS-Felder fehlten im Audit-Serializer → Konfigurations-Import war nicht mehr idempotent | Felder ergänzt (Contract-Test aktualisiert) |
+| TLS-Endpunkte und Health-Checks lasen den 2-s-Settings-Cache → Änderungen wirkten verzögert | `tls.reload()` in den Endpunkten und im Health-Check |
+| Der Endpunkt-Check im Test-Stack prüfte den Host-Port statt des Container-Ports | interner Port (der Broker prüft seinen eigenen Listener) |
+| `cryptography` fehlte in den Dependencies → Container unhealthy | als Dependency ergänzt (`cryptography>=42,<51`) |
+
+**Tests & Verifikation.**
+
+| Ebene | Umfang |
+|---|---|
+| pytest | 377 Tests, 96 % Coverage (tls.py 95 %; +38: Kontexte, Inspektion, Erzeugung, Endpunkt-Check, echte TLS-Assoziationen, Health, API) |
+| vitest | 435 Tests, 98 % Broker-UI-Coverage (+7: TLS-Karte, Client) |
+| Playwright | 46 Tests (Desktop + Mobile), inkl. Zertifikatsliste und Endpunkt-Check über die UI |
+| test-stack.sh | Zertifikat erzeugen → Listener aktiv → **C-FIND über TLS mit CA-Verifikation** → Endpunkt-Check `TLSv1.3` + C-ECHO |
+| verify-ui.cjs | 104 Checks (Desktop 1400×900 + Mobile 375×812) |
 
 ## Offene Entscheidungen (an den Betreiber)
 

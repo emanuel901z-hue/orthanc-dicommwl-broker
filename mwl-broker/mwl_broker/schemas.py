@@ -59,6 +59,16 @@ class SourceIn(BaseModel):
         description="Background refresh interval for the cached snapshot in "
                     "seconds (0 = off, refreshed only by live queries).",
     )
+    tls: bool = Field(
+        default=False,
+        description="Use DICOM TLS towards this source (off = the plain LAN/VPN default).",
+    )
+    tls_verify: bool = Field(
+        default=True,
+        description="Verify the server certificate. Only switch off for a "
+                    "self-signed lab system — the connection is then encrypted "
+                    "but the peer is not authenticated.",
+    )
 
 
 class SourceOut(SourceIn):
@@ -98,6 +108,15 @@ class TargetIn(BaseModel):
         default=False,
         description="Fallback target for stores without a matching routing rule "
                     "(exactly one target should be the default).",
+    )
+    tls: bool = Field(
+        default=False,
+        description="Use DICOM TLS towards this PACS (off = the plain LAN/VPN default).",
+    )
+    tls_verify: bool = Field(
+        default=True,
+        description="Verify the PACS certificate. Only switch off for a "
+                    "self-signed lab system.",
     )
 
 
@@ -342,6 +361,110 @@ class SettingUpdateIn(BaseModel):
         description="New value (validated per key).",
         examples=["CT_01,MR_01"],
     )
+
+
+class TlsCertificateOut(BaseModel):
+    """State of one configured certificate file (never key material)."""
+
+    path: str = Field(description="Configured file path.")
+    exists: bool = Field(description="Whether the file is there.")
+    ok: bool = Field(description="Whether it could be read as a certificate.")
+    error: str = Field(default="", description="Why it could not be used.")
+    subject: str = Field(default="", description="Subject (CN, O, OU, C).")
+    issuer: str = Field(default="", description="Issuer — equals the subject for self-signed.")
+    self_signed: bool = Field(default=False, description="Subject == issuer.")
+    serial: str = Field(default="", description="Serial number (hex).")
+    not_before: str = Field(default="", description="Valid from (ISO 8601, UTC).")
+    not_after: str = Field(default="", description="Valid until (ISO 8601, UTC).")
+    days_left: int | None = Field(default=None, description="Days until expiry (negative = expired).")
+    expired: bool = Field(default=False, description="Already expired.")
+    expiring_soon: bool = Field(default=False, description="Expires within 30 days.")
+    san: list[str] = Field(default_factory=list, description="Subject alternative names.")
+    is_ca: bool = Field(default=False, description="Whether it is a CA certificate.")
+    signature_algorithm: str = Field(default="", description="Signature algorithm.")
+
+
+class TlsKeyOut(BaseModel):
+    """State of one private key file — never the key itself."""
+
+    path: str = Field(description="Configured file path.")
+    exists: bool = Field(description="Whether the file is there.")
+    ok: bool = Field(description="Whether it could be read as an unencrypted key.")
+    error: str = Field(default="", description="Why it could not be used.")
+    mode: str = Field(default="", description="File permissions (octal).")
+    world_readable: bool = Field(default=False, description="Readable by other users — should not be.")
+    type: str = Field(default="", description="Key type, e.g. RSAPrivateKey.")
+    bits: int | None = Field(default=None, description="Key size.")
+
+
+class TlsOverviewOut(BaseModel):
+    """Certificate management overview."""
+
+    inbound_enabled: bool = Field(description="Whether the TLS listener is switched on.")
+    inbound_port: int = Field(description="Port of the TLS listener.")
+    inbound_client_auth: str = Field(description="none | optional | required (mTLS).")
+    outbound_verify: bool = Field(description="Whether outgoing certificates are verified.")
+    directory: str = Field(description="Directory for self-generated certificates.")
+    entries: dict = Field(description="State of every configured file (certificates and keys).")
+    certificates: list[dict] = Field(description="Short list of the usable certificates.")
+
+
+class TlsSelfSignedIn(BaseModel):
+    """Request to generate a self-signed certificate."""
+
+    common_name: str = Field(min_length=1, max_length=128,
+                             description="Name the modality will see (e.g. the broker host).",
+                             examples=["mwl-broker.hospital.local"])
+    days: int = Field(default=3650, ge=1, le=36500, description="Validity in days.")
+    san: list[str] = Field(default_factory=list,
+                           description="Additional names/IPs the certificate is valid for.")
+    is_ca: bool = Field(default=False,
+                        description="Also usable as a trust anchor for several devices.")
+    filename: str = Field(default="mwl-broker", max_length=64,
+                          description="Base name of the generated files.")
+
+
+class TlsSelfSignedOut(BaseModel):
+    """The generated certificate — the public part only."""
+
+    certificate_path: str = Field(description="Path of the generated certificate.")
+    key_path: str = Field(description="Path of the generated private key (mode 0600).")
+    certificate_pem: str = Field(description="The public certificate — hand this to the vendor.")
+    certificate: TlsCertificateOut = Field(description="What was generated.")
+    key: TlsKeyOut = Field(description="State of the private key file.")
+    is_ca: bool = Field(description="Whether it was generated as a CA.")
+
+
+class TlsTestIn(BaseModel):
+    """Check an endpoint: handshake, certificate, optional C-ECHO."""
+
+    host: str = Field(min_length=1, description="Host to check.")
+    port: int = Field(ge=1, le=65535, description="Port to check.")
+    verify: bool | None = Field(
+        default=None, description="Override verification for this check (null = the configured default).",
+    )
+    ca_file: str = Field(default="", description="CA bundle for this check (empty = configured/system).")
+    server_name: str = Field(default="", description="Name to verify against (empty = the host).")
+    echo_aet: str = Field(default="", description="If set, also run a C-ECHO against this AE title.")
+    calling_aet: str = Field(default="", description="Calling AE title for the C-ECHO.")
+    timeout_s: int = Field(default=10, ge=1, le=120, description="Timeout in seconds.")
+
+
+class TlsTestOut(BaseModel):
+    """Result of an endpoint check."""
+
+    host: str = Field(description="Checked host.")
+    port: int = Field(description="Checked port.")
+    ok: bool = Field(description="Whether the handshake succeeded.")
+    error: str = Field(default="", description="What went wrong (in plain words).")
+    protocol: str = Field(default="", description="Negotiated TLS version.")
+    cipher: str = Field(default="", description="Negotiated cipher.")
+    peer_subject: str = Field(default="", description="Common name of the peer certificate.")
+    peer_issuer: str = Field(default="", description="Issuer of the peer certificate.")
+    peer_not_after: str = Field(default="", description="Peer certificate expiry.")
+    peer_san: list[str] = Field(default_factory=list, description="Peer subject alternative names.")
+    echo_ok: bool | None = Field(default=None, description="Result of the C-ECHO, if requested.")
+    echo_error: str = Field(default="", description="C-ECHO error, if any.")
 
 
 class LocalItemIn(BaseModel):

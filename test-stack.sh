@@ -18,6 +18,10 @@ COMPOSE="docker compose --project-name mwl-test --env-file .env.test \
 OE3_BASE="${OE3_BASE:-http://127.0.0.1:19082}"
 BROKER_DICOM_HOST=127.0.0.1
 BROKER_DICOM_PORT=11123
+BROKER_TLS_PORT=19083
+BROKER_AET=MWLBROKER
+# the broker checks its own listener from inside the container
+BROKER_TLS_INTERNAL_PORT=2762
 BROKER_API_URL="${BROKER_API_URL:-http://127.0.0.1:19081}"
 # Reachable from inside the compose network but NOT a DICOM endpoint: the
 # association hangs until the timeout — exactly what the circuit breaker is for.
@@ -144,7 +148,7 @@ while True:
     threading.Thread(target=handle, args=(conn,), daemon=True).start()
 PY
 ATNA_PID=$!
-trap 'kill $WEBHOOK_PID $ATNA_PID 2>/dev/null; rm -f "$WEBHOOK_LOG" "$ATNA_LOG"' EXIT
+trap 'kill $WEBHOOK_PID $ATNA_PID 2>/dev/null; rm -f "$WEBHOOK_LOG" "$ATNA_LOG" "$TLS_CA_FILE"' EXIT
 sleep 1
 
 curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/atna_syslog_host" \
@@ -308,6 +312,66 @@ done
 set_target_port 4242
 echo "   dead letters for the UI test: $dead"
 [ "$dead" -ge 1 ] || { echo "FAIL: no dead letter was produced" >&2; exit 1; }
+
+echo "── DICOM TLS: a certified C-FIND ──"
+# the generated certificate is copied out of the container so the smoke client
+# can verify it as well
+TLS_CA_FILE=$(mktemp)
+# Generate a certificate for the broker, enable the TLS listener and run a real
+# TLS C-FIND against it — the staged rollout a modality would go through.
+tls_cert=$(curl -sf -X POST "$BROKER_API_URL/api/v1/tls/self-signed" \
+  -H 'Content-Type: application/json' \
+  -d '{"common_name":"127.0.0.1","days":365,"san":["127.0.0.1","host.docker.internal"]}')
+tls_cert_path=$(echo "$tls_cert" | python3 -c "import json,sys; print(json.load(sys.stdin)['certificate_path'])")
+tls_key_path=$(echo "$tls_cert" | python3 -c "import json,sys; print(json.load(sys.stdin)['key_path'])")
+echo "$tls_cert" | python3 -c "import json,sys; d=json.load(sys.stdin); print('   generated:', d['certificate']['subject'], '| days left:', d['certificate']['days_left'])"
+
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/tls_inbound_cert_file" \
+  -H 'Content-Type: application/json' -d "{\"value\":\"$tls_cert_path\"}" > /dev/null
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/tls_inbound_key_file" \
+  -H 'Content-Type: application/json' -d "{\"value\":\"$tls_key_path\"}" > /dev/null
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/tls_inbound_enabled" \
+  -H 'Content-Type: application/json' -d '{"value":"true"}' > /dev/null
+# the operator's next step: trust the generated certificate (the same file works
+# as its own CA here) — then verification can stay on
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/tls_outbound_ca_file" \
+  -H 'Content-Type: application/json' -d "{\"value\":\"$tls_cert_path\"}" > /dev/null
+echo "$tls_cert" | python3 -c "import json,sys; print(json.load(sys.stdin)['certificate_pem'], end='')" > "$TLS_CA_FILE"
+# the listener starts with the next association; the broker is restarted here so
+# the test proves the startup path as well
+$COMPOSE restart mwl-broker > /dev/null 2>&1
+for i in $(seq 1 30); do
+  curl -sf "$BROKER_API_URL/healthz" >/dev/null 2>&1 && break
+  sleep 1
+done
+sleep 2
+
+tls_overview=$(curl -sf "$BROKER_API_URL/api/v1/tls/overview" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print('listener', d['inbound_enabled'], 'port', d['inbound_port'],
+      'client-auth', d['inbound_client_auth'])")
+echo "   $tls_overview"
+case "$tls_overview" in
+  "listener True"*) ;;
+  *) echo "FAIL: the TLS listener is not enabled" >&2; exit 1 ;;
+esac
+
+# trust the generated certificate and query the TLS port
+curl -sf "$BROKER_API_URL/api/v1/tls/overview" > /dev/null
+tls_answers=$(python3 mwl-broker/scripts/cfind_smoke.py "$BROKER_DICOM_HOST" "$BROKER_TLS_PORT" MWLBROKER --tls --ca "$TLS_CA_FILE" 2>&1 | grep -c 'acc=' || true)
+echo "   C-FIND over TLS: $tls_answers answer(s)"
+[ "$tls_answers" -ge 1 ] || { echo "FAIL: no answers over TLS" >&2; exit 1; }
+
+tls_check=$(curl -sf -X POST "$BROKER_API_URL/api/v1/tls/test" \
+  -H 'Content-Type: application/json' \
+  -d "{\"host\":\"127.0.0.1\",\"port\":$BROKER_TLS_INTERNAL_PORT,\"echo_aet\":\"$BROKER_AET\"}" \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['protocol'], d['ok'], 'echo', d['echo_ok'])")
+echo "   endpoint check: $tls_check"
+case "$tls_check" in
+  TLSv1*) ;;
+  *) echo "FAIL: the TLS endpoint check did not succeed" >&2; exit 1 ;;
+esac
 
 echo "── Local worklist items + HL7 ORM ──"
 # A locally scheduled emergency must appear in the worklist the modality gets.

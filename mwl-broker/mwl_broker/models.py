@@ -36,6 +36,9 @@ class MwlSource(Base):
     cache_stale_on_error: Mapped[bool] = mapped_column(Boolean, default=True)
     # Optional background refresh of the cached snapshot (0 = off, seconds).
     cache_refresh_s: Mapped[int] = mapped_column(Integer, default=0)  # lower = queried first
+    # DICOM TLS for this node (off = the LAN/VPN default)
+    tls: Mapped[bool] = mapped_column(Boolean, default=False)
+    tls_verify: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -52,6 +55,8 @@ class PacsTarget(Base):
     calling_aet: Mapped[str] = mapped_column(String(16), default="MWLBROKER")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    tls: Mapped[bool] = mapped_column(Boolean, default=False)
+    tls_verify: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 

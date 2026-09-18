@@ -89,8 +89,8 @@ python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 339 Tests (API + DIMSE e2e + HL7/ATNA/Spool/Cache/Health)
-cd orthanc-explorer-3-usable && npm run test      # 428 Tests
+cd mwl-broker && python -m pytest tests -q        # 377 Tests (API + DIMSE e2e + TLS/HL7/ATNA/Spool/Cache)
+cd orthanc-explorer-3-usable && npm run test      # 435 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -154,6 +154,11 @@ Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
       MLLP), Per-Station-Filter/-Priorität, ATNA-Audit-Export (Syslog/TLS an die
       eigene Gegenstelle) — Details im
       [Umsetzungs-Log](docs/roadmap-worklist-broker.md#sprint-6--p2-lokale-worklisthl7-stationsregeln-atna-umgesetzt)
-- [ ] Offen: DICOM-TLS/mTLS (P2-3) — hängt an der Netzwerk- und
-      Zertifikatsentscheidung des Hauses
+- [x] Sprint 7 (Roadmap): DICOM-TLS/mTLS mit Zertifikatsverwaltung — zweiter
+      TLS-Listener neben dem Klartext-Port, TLS je Quelle/Ziel, Erzeugung
+      selbstsignierter Zertifikate, Ablaufüberwachung und Endpunkt-Prüfung —
+      Details im [Umsetzungs-Log](docs/roadmap-worklist-broker.md#sprint-7--dicom-tlsmtls--zertifikatsverwaltung-umgesetzt)
+- [ ] Alle Roadmap-Themen (P0/P1/P2) sind umgesetzt. Offen sind nur noch die
+      Betreiberentscheidungen (u. a. RBAC-Trennung, Retention) —
+      siehe [Roadmap](docs/roadmap-worklist-broker.md#offene-entscheidungen-an-den-betreiber)
 - [ ] HL7-ORM/ADT-Adapter (Worklist-Einträge ohne Upstream-C-FIND)

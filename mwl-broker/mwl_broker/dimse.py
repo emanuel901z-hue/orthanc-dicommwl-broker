@@ -13,7 +13,8 @@ from pynetdicom.presentation import build_context
 from pynetdicom.sop_class import ModalityWorklistInformationFind, Verification
 from sqlalchemy import select
 
-from . import atna, breaker, cache, cstore, local_worklist, metrics, routing, settings_service, spool, station_rules, transforms
+from . import (atna, breaker, cache, cstore, local_worklist, metrics, routing,
+               settings_service, spool, station_rules, tls, transforms)
 from .config import Settings
 from .db import session_factory
 from .models import QueryLog, RoutingRule, SeenItem, StoreLog, MwlSource, PacsTarget
@@ -48,6 +49,7 @@ class BrokerSCP:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.server = None
+        self.tls_server = None
         self.ae = self._build_ae(settings)
 
     @staticmethod
@@ -76,11 +78,36 @@ class BrokerSCP:
             self.settings.dicom_port,
         )
 
+        # Optional TLS listener *next to* the plain one: a staged rollout can
+        # move one modality at a time without touching the others.
+        self.tls_server = None
+        if tls.inbound_enabled():
+            try:
+                context = tls.build_server_context()
+            except Exception as exc:
+                log.error("DICOM TLS listener not started: %s", exc)
+            else:
+                self.tls_server = self.ae.start_server(
+                    ("0.0.0.0", tls.inbound_port()),
+                    block=False,
+                    evt_handlers=handlers,
+                    ssl_context=context,
+                )
+                log.info("DICOM SCP with TLS listening: AET=%s port=%s (client auth: %s)",
+                         self.settings.broker_aet, tls.inbound_port(),
+                         tls.describe()["inbound_client_auth"])
+
     @property
     def listening(self) -> bool:
         return self.server is not None
 
+    @property
+    def tls_listening(self) -> bool:
+        return self.tls_server is not None
+
     def shutdown(self) -> None:
+        if self.tls_server is not None:
+            self.tls_server.shutdown()
         if self.server is not None:
             self.server.shutdown()
             self.server = None
@@ -102,6 +129,8 @@ class BrokerSCP:
                 id=r.id, name=r.name, aet=r.aet, host=r.host, port=r.port,
                 calling_aet=r.calling_aet, charset=r.charset, timeout_s=r.timeout_s,
                 priority=r.priority,
+                tls=r.tls,
+                tls_verify=r.tls_verify,
             )
             for r in rows
         ]

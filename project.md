@@ -101,6 +101,7 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
 - `GET/POST /station-rules`, `PUT/DELETE /station-rules/{id}` — Per-Station-Regeln
 - `POST /simulate/station` — Vorschau: welche Quellen sieht eine Konsole?
 - `GET /atna/stats`, `POST /atna/test`, `GET /atna/sample` — ATNA-Audit-Trail
+- `GET /tls/overview`, `POST /tls/self-signed`, `POST /tls/test` — DICOM-TLS und Zertifikatsverwaltung
 - `GET /logs/queries`, `GET /logs/stores` (paged, Filter: aet, source, status, since)
 - `GET /status` — SCP-Listener, Echo-Matrix (Quellen+Ziele inkl. `breaker_state`), Zähler
 - `GET /healthz`, `GET /metrics` (Prometheus)
@@ -192,6 +193,22 @@ Produktionsfehler (kein Default-Ziel, Regeln auf deaktivierten Knoten, tote
 Quellen, offene Breaker, leere AET-Allowlist, AET-Kollision mit dem Broker
 selbst) und liefert Findings mit stabilem `code` — die UI übersetzt sie und
 verlinkt direkt ins betroffene Formular.
+
+### DICOM-TLS (mTLS) und Zertifikatsverwaltung
+
+Zwei Richtungen, getrennt schaltbar, **standardmäßig aus**: eingehend über einen
+**zweiten Listener** (`tls_inbound_port`, Default 2762) neben dem Klartext-Port —
+das erlaubt die stufenweise Umstellung einer Modalität nach der anderen — und
+ausgehend je Quelle/Ziel (`tls`, `tls_verify`) mit globalen Trust-/Identitäts-
+dateien. `tls_inbound_client_auth` schaltet mTLS (`none|optional|required`).
+
+Für Betreiber ohne PKI: `POST /tls/self-signed` erzeugt ein Zertifikat (SANs,
+optional als CA), der private Schlüssel wird mit 0600 geschrieben und nie über
+die API ausgegeben. `GET /tls/overview` zeigt Zustand und Ablauf jedes
+konfigurierten Zertifikats, `POST /tls/test` macht einen **echten Handshake** mit
+Protokoll, Cipher und Peer-Zertifikat und optional einem C-ECHO über TLS.
+Ablauf und Fehlkonfigurationen erscheinen als Health-Findings und lösen das
+Alerting-Ereignis `tls_certificate_expiring` aus.
 
 ### Lokale Worklist-Items und HL7-ORM
 
@@ -397,9 +414,9 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 339 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 428 Tests, 0 Errors |
-| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 44/44 grün, 0 Console-/Page-/Netzwerk-Fehler |
+| `pytest` | 377 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 435 Tests, 0 Errors |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 46/46 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
 
@@ -418,8 +435,8 @@ regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
 
 `ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
 Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
-backend pytest (339) → frontend tsc → lint → vitest (428) → docker-e2e
-(44 Browser-Tests + DIMSE-Smokes + Breaker-/Cache-/Spool-/Webhook-/HL7-/ATNA-Szenario). Verifiziert: alle Stages grün.
+backend pytest (377) → frontend tsc → lint → vitest (435) → docker-e2e
+(46 Browser-Tests + DIMSE-Smokes + Breaker-/Cache-/Spool-/Webhook-/HL7-/ATNA-/TLS-Szenario). Verifiziert: alle Stages grün.
 `--quick` überspringt die Docker-Stage.
 
 #### Coverage-Audit (2026-09)
@@ -428,8 +445,8 @@ Gemessen mit `pytest-cov` bzw. `vitest --coverage`:
 
 | Bereich | Statements | Anmerkung |
 |---|---|---|
-| Backend `mwl_broker/` | **96 %** | station_rules 100 %, atna 97 %, local_worklist 97 %, hl7 96 %, notify 100 %, cache 99 %, api 97 %, main 100 %, settings_service/schemas/models/metrics 100 %, routing 100 %, breaker 99 %, audit 97 %, config_io 96 %, health_checks 98 %, echo 96 %, dimse 93 % |
-| Frontend Broker-UI | **97.9 %** | `api/broker.ts` 100 %, Diff-Helfer/Panels 100 %, Seiten 95-100 % |
+| Backend `mwl_broker/` | **96 %** | tls 95 %, station_rules 100 %, atna 97 %, local_worklist 97 %, hl7 96 %, notify 100 %, cache 99 %, api 97 %, main 100 %, settings_service/schemas/models/metrics 100 %, routing 100 %, breaker 99 %, audit 97 %, config_io 96 %, health_checks 98 %, echo 96 %, dimse 93 % |
+| Frontend Broker-UI | **98 %** | `api/broker.ts` 100 %, Diff-Helfer/Panels 100 %, Seiten 95-100 % |
 
 Ergänzte Tests für zuvor ungedeckte Pfade: Rules-Update/Delete, Target-Echo,
 Log-Filter + Pagination-Validierung, `/metrics`, Lifespan (Seed + SCP-Bind),
@@ -499,6 +516,7 @@ Gefundene und behobene Defekte:
 | 11 | Sprint 4 der Roadmap: C-STORE-Spool + Alembic-Migrationspfad | ✅ |
 | 12 | Sprint 5 der Roadmap: Alerting/Webhooks | ✅ |
 | 13 | Sprint 6 der Roadmap: lokale Worklist + HL7-ORM, Stationsregeln, ATNA | ✅ |
+| 14 | Sprint 7 der Roadmap: DICOM-TLS/mTLS + Zertifikatsverwaltung | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert

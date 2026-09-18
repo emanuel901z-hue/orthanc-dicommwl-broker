@@ -35,6 +35,7 @@ EVENTS: dict[str, tuple[str, str]] = {
     "spool_backlog": ("warning", "Instances are waiting in the spool for too long."),
     "spool_full": ("error", "The C-STORE spool is full — new instances are refused."),
     "config_error": ("error", "The configuration health checks found an error."),
+    "tls_certificate_expiring": ("warning", "A configured TLS certificate expires soon."),
 }
 
 # last delivery attempt per de-bounce key (in-memory: a restart clears it)

@@ -31,6 +31,15 @@ cd mwl-broker && python -m pytest tests -q
 # …mit Coverage (aktuell 96 %)
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 
+# DICOM-TLS (laufender Stack)
+curl -s http://127.0.0.1:18081/api/v1/tls/overview | python3 -m json.tool
+curl -s -X POST http://127.0.0.1:18081/api/v1/tls/self-signed -H 'Content-Type: application/json' \
+  -d '{"common_name":"mwl-broker.hospital.local","days":365,"san":["10.0.1.47"]}' | python3 -m json.tool
+curl -s -X POST http://127.0.0.1:18081/api/v1/tls/test -H 'Content-Type: application/json' \
+  -d '{"host":"127.0.0.1","port":2762,"echo_aet":"MWLBROKER"}' | python3 -m json.tool
+# C-FIND über den TLS-Listener (Test-Stack-Port 19083):
+python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 19083 MWLBROKER --tls --ca /tmp/ca.pem
+
 # Lokale Worklist + HL7 (laufender Stack)
 curl -s http://127.0.0.1:18081/api/v1/local-items | python3 -m json.tool
 curl -s -X POST http://127.0.0.1:18081/api/v1/hl7/orm?dry_run=true \
@@ -198,6 +207,12 @@ Token rotieren = nur die Store-Datei neu schreiben:
   nicht (`create_all` ändert vorhandene Tabellen nie) und die API antwortet mit
   500. Revisionen nach der Baseline müssen **defensiv** sein (Existenzprüfung),
   weil eine frische DB das Schema schon hat. `tests/test_db.py` erzwingt das.
+- **TLS bleibt opt-in und getrennt pro Richtung.** Eingehend = zweiter Listener
+  (Klartext läuft weiter), ausgehend = je Knoten `tls`/`tls_verify`. `tls_verify`
+  nur bewusst abschalten (Health-Warnung). `tls_args` braucht **immer** den
+  Server-Namen, sonst verweigert Python die Hostnamen-Prüfung.
+- **Private Schlüssel nie über die API ausgeben** (nur Zertifikate); erzeugte
+  Schlüssel mit 0600 schreiben.
 - **HL7-Feldindizes sind HL7-Feldnummern.** MSH ist die Ausnahme: MSH-1 *ist*
   das Trennzeichen, deshalb `_field(seg, n, msh=True)` (Index n−1). Alle anderen
   Segmente sind 1-basiert.

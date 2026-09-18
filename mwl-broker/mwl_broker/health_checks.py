@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from . import breaker, echo, metrics, settings_service, spool
+from . import breaker, echo, metrics, settings_service, spool, tls
 from .models import MwlSource, PacsTarget, QueryLog, RoutingRule, TransformRule
 
 log = logging.getLogger("mwl_broker.health")
@@ -118,6 +118,82 @@ def config_findings(session, settings) -> list[dict]:
                 entity={"kind": "source", "id": source_id, "name": state["name"]},
                 details={"retry_in_s": state["retry_in_s"], "failures": state["failures"],
                          "last_error": state["last_error"]},
+            ))
+
+    # ── DICOM TLS ──────────────────────────────────────────────────────────
+    tls.reload()          # a health check must reflect the configuration *now*
+    overview = tls.overview()
+    entries = overview["entries"]
+    for role, label in (("inbound_cert", "server certificate"),
+                        ("inbound_key", "server key"),
+                        ("inbound_ca", "client CA"),
+                        ("outbound_ca", "RIS/PACS CA"),
+                        ("outbound_client_cert", "client certificate"),
+                        ("outbound_client_key", "client key")):
+        entry = entries.get(role) or {}
+        if entry.get("path") and not entry.get("ok"):
+            findings.append(_finding(
+                "tls_file_unusable", "error",
+                f"The configured {label} cannot be used: {entry.get('error')}.",
+                details={"role": role, "path": entry.get("path", "")},
+            ))
+    if overview["inbound_enabled"]:
+        if not (entries.get("inbound_cert", {}).get("ok") and entries.get("inbound_key", {}).get("ok")):
+            findings.append(_finding(
+                "tls_configuration_incomplete", "error",
+                "The TLS listener is enabled but the server certificate/key are missing "
+                "or unreadable — modalities cannot connect.",
+            ))
+        if overview["inbound_client_auth"] in ("optional", "required") \
+                and not entries.get("inbound_ca", {}).get("ok"):
+            findings.append(_finding(
+                "tls_configuration_incomplete", "error",
+                f"Client authentication is '{overview['inbound_client_auth']}' but no "
+                "usable CA file is configured — every modality would be rejected.",
+                details={"client_auth": overview["inbound_client_auth"]},
+            ))
+    if entries.get("inbound_pair_matches", {}).get("ok") is False:
+        findings.append(_finding(
+            "tls_key_mismatch", "error",
+            "The server key does not belong to the server certificate.",
+        ))
+    if entries.get("outbound_pair_matches", {}).get("ok") is False:
+        findings.append(_finding(
+            "tls_key_mismatch", "error",
+            "The client key does not belong to the client certificate.",
+        ))
+    if not overview["outbound_verify"]:
+        findings.append(_finding(
+            "tls_verification_disabled", "warning",
+            "Outgoing connections are encrypted but the remote certificate is not "
+            "verified — the peer is not authenticated.",
+        ))
+    for role in ("inbound_key", "outbound_client_key"):
+        entry = entries.get(role) or {}
+        if entry.get("ok") and entry.get("world_readable"):
+            findings.append(_finding(
+                "tls_key_world_readable", "warning",
+                f"The private key {entry.get('path')} is readable by other users "
+                f"(mode {entry.get('mode')}) — set it to 0600.",
+                details={"path": entry.get("path", ""), "mode": entry.get("mode", "")},
+            ))
+    for entry in entries.values():
+        if not isinstance(entry, dict) or not entry.get("ok"):
+            continue
+        if entry.get("expired"):
+            findings.append(_finding(
+                "tls_certificate_expired", "error",
+                f"The certificate {entry.get('path')} expired on "
+                f"{entry.get('not_after', '')[:10]}.",
+                details={"path": entry.get("path", ""), "subject": entry.get("subject", "")},
+            ))
+        elif entry.get("expiring_soon"):
+            findings.append(_finding(
+                "tls_certificate_expiring", "warning",
+                f"The certificate {entry.get('path')} expires in "
+                f"{entry.get('days_left')} days ({entry.get('subject', '')}).",
+                details={"path": entry.get("path", ""), "days_left": entry.get("days_left"),
+                         "subject": entry.get("subject", "")},
             ))
 
     # ── C-STORE spool ──────────────────────────────────────────────────────

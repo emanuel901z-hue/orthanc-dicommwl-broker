@@ -35,6 +35,19 @@ class Settings(BaseSettings):
     cache_hide_completed: bool = True   # never resurrect COMPLETED/DISCONTINUED steps
     cache_max_items: int = 5000         # safety cap per source snapshot
 
+    # DICOM TLS — off by default, per direction; plain and TLS can coexist
+    tls_inbound_enabled: bool = False   # the listener the modalities connect to
+    tls_inbound_port: int = 2762        # the usual DICOM TLS port
+    tls_inbound_cert_file: str = ""
+    tls_inbound_key_file: str = ""
+    tls_inbound_ca_file: str = ""       # needed for mTLS (client authentication)
+    tls_inbound_client_auth: str = "none"   # none | optional | required (mTLS)
+    tls_outbound_ca_file: str = ""      # trust anchor for RIS/PACS (empty = system store)
+    tls_outbound_client_cert_file: str = ""  # the broker's identity for mTLS
+    tls_outbound_client_key_file: str = ""
+    tls_outbound_verify: bool = True    # verify remote certificates by default
+    tls_dir: str = "/var/lib/mwl-broker/tls"   # managed certificates
+
     # Locally maintained worklist items (emergencies, unscheduled exams)
     local_priority: int = -1            # merge priority: before every upstream source
     local_default_validity_days: int = 7   # 0 = items never expire

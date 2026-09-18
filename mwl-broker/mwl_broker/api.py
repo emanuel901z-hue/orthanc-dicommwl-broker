@@ -44,6 +44,11 @@ from .schemas import (
     StationSimulateIn,
     StationRuleIn,
     StationRuleOut,
+    TlsOverviewOut,
+    TlsSelfSignedIn,
+    TlsSelfSignedOut,
+    TlsTestIn,
+    TlsTestOut,
     SimulateRouteIn,
     SimulateRouteOut,
     SimulateTransformIn,
@@ -66,7 +71,7 @@ from .schemas import (
 )
 from . import (atna, audit, breaker, cache, config_io, health_checks, hl7,
                local_worklist, metrics, notify, settings_service, simulate, spool,
-               station_rules, transforms)
+               station_rules, tls, transforms)
 from .models import (BrokerSetting, ConfigAudit, Hl7Message, LocalWorklistItem,
                      SeenItem, SourceBreaker, StationRule, TransformRule)
 
@@ -486,6 +491,82 @@ def reset_setting(
     audit.record(s, _actor(request), "reset.setting", "setting", None, before,
                  None, _correlation(request))
     s.commit()
+
+
+# ── DICOM TLS ──────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/tls/overview", response_model=TlsOverviewOut, tags=["tls"],
+    summary="TLS configuration and certificate state",
+    description="Everything the operator needs to see about the configured "
+                "certificates: does the file exist, whose is it, when does it "
+                "expire, do key and certificate belong together. Private keys are "
+                "never returned.",
+    response_description="TLS state plus the per-file certificate and key details.",
+)
+def tls_overview(s: Session = _db_dep):
+    tls.reload()          # the operator expects what is configured *now*
+    return tls.overview()
+
+
+@router.post(
+    "/tls/self-signed", response_model=TlsSelfSignedOut, status_code=201, tags=["tls"],
+    summary="Generate a self-signed certificate",
+    description="Creates a certificate and key in the managed directory — the "
+                "pragmatic path for a hospital without a PKI. Hand the public "
+                "certificate to the modality/PACS vendor, then switch TLS on. "
+                "The private key is written with mode 0600 and never leaves the broker.",
+    response_description="Paths plus the public certificate (PEM) to hand over.",
+    responses={422: {"description": "The request is invalid or the directory is not writable."}},
+)
+def tls_self_signed(
+    request: Request,
+    body: Annotated[TlsSelfSignedIn, Body(description="Name, validity and SANs of the certificate.")],
+    s: Session = _db_dep,
+):
+    tls.reload()
+    try:
+        result = tls.generate_self_signed(body.common_name, body.days, body.san,
+                                          body.is_ca, body.filename)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except OSError as exc:
+        raise HTTPException(422, f"cannot write to {tls.directory()}: {exc}")
+    audit.record(s, _actor(request), "generate.tls_certificate", "setting", None, None,
+                 {"common_name": body.common_name, "days": body.days,
+                  "path": result["certificate_path"]}, _correlation(request))
+    s.commit()
+    tls.publish_metrics()
+    return result
+
+
+@router.post(
+    "/tls/test", response_model=TlsTestOut, tags=["tls"],
+    summary="Check a TLS endpoint",
+    description="Performs a real handshake and reports protocol, cipher and the "
+                "peer certificate; with `echo_aet` it also runs a C-ECHO over TLS. "
+                "This is the check before a modality or PACS is switched over.",
+    response_description="Handshake details, peer certificate and the optional C-ECHO result.",
+)
+def tls_test(request: Request, body: Annotated[TlsTestIn, Body(description="Endpoint to check.")]):
+    tls.reload()
+    result = tls.test_endpoint(body.host, body.port, body.verify, body.ca_file,
+                               body.server_name, body.timeout_s)
+    if body.echo_aet:
+        try:
+            from .upstream import c_echo
+
+            c_echo(body.echo_aet, body.host, body.port,
+                   body.calling_aet or settings_service.get_str("broker_aet") or "MWLBROKER",
+                   timeout_s=body.timeout_s, tls=True,
+                   tls_verify=body.verify if body.verify is not None else True)
+            result["echo_ok"] = True
+        except Exception as exc:
+            result["echo_ok"] = False
+            result["echo_error"] = str(exc)[:200]
+    metrics.TLS_HANDSHAKE.labels(result="ok" if result["ok"] else "failed").inc()
+    return result
 
 
 # ── Local worklist items + HL7 ORD interface ───────────────────────────
@@ -1045,7 +1126,8 @@ def simulate_station(
     cfgs = [
         SourceCfg(id=r.id, name=r.name, aet=r.aet, host=r.host, port=r.port,
                   calling_aet=r.calling_aet, charset=r.charset, timeout_s=r.timeout_s,
-                  priority=r.priority)
+                  priority=r.priority,
+                  tls=r.tls, tls_verify=r.tls_verify)
         for r in sources
     ]
     return station_rules.preview(body.station_aet, cfgs)

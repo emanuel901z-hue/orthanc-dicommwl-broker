@@ -286,6 +286,54 @@ def test_healthy_spool_reports_nothing():
     assert not {"spool_dead_letters", "spool_backlog", "spool_full"} & codes
 
 
+def test_tls_findings_are_absent_when_unused():
+    _source()
+    _target()
+    assert not {"tls_certificate_expiring", "tls_configuration_incomplete",
+                "tls_verification_disabled"} & _codes(_findings())
+
+
+def test_tls_expiring_certificate_is_a_warning(tmp_path):
+    from mwl_broker import settings_service, tls
+
+    _source()
+    _target()
+    settings_service.set_value("tls_dir", str(tmp_path))
+    tls.reset_for_tests()
+    generated = tls.generate_self_signed("broker.local", 10, filename="soon")
+    settings_service.set_value("tls_inbound_cert_file", generated["certificate_path"])
+
+    finding = next(f for f in _findings() if f["code"] == "tls_certificate_expiring")
+    assert finding["severity"] == "warning"
+    assert finding["details"]["days_left"] <= 10
+
+
+def test_tls_incomplete_configuration_is_an_error():
+    from mwl_broker import settings_service, tls
+
+    _source()
+    _target()
+    settings_service.set_value("tls_inbound_enabled", "true")
+    settings_service.set_value("tls_inbound_cert_file", "/nonexistent/broker.crt")
+    tls.reset_for_tests()
+
+    codes = _codes(_findings())
+    assert "tls_file_unusable" in codes
+    assert "tls_configuration_incomplete" in codes
+
+
+def test_tls_verification_off_is_reported():
+    from mwl_broker import settings_service, tls
+
+    _source()
+    _target()
+    settings_service.set_value("tls_outbound_verify", "false")
+    tls.reset_for_tests()
+
+    finding = next(f for f in _findings() if f["code"] == "tls_verification_disabled")
+    assert finding["severity"] == "warning"
+
+
 def test_findings_are_sorted_by_severity_and_summarised():
     _source(enabled=False)                        # warning: no_enabled_source
     _transform(target_id=_target(enabled=False))  # error: no_default_target

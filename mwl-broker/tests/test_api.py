@@ -1069,6 +1069,80 @@ def test_hl7_and_local_settings_are_validated(client):
     assert rows["local_priority"]["default"] == "-1"
 
 
+def test_tls_endpoints(client, tmp_path):
+    overview = client.get("/api/v1/tls/overview").json()
+    assert overview["inbound_enabled"] is False
+    assert overview["inbound_port"] == 2762
+    assert overview["inbound_client_auth"] == "none"
+    assert overview["outbound_verify"] is True
+    assert overview["certificates"] == []
+    # nothing configured → no key material anywhere in the response
+    assert "BEGIN" not in json.dumps(overview)
+
+    # generate a certificate (the pragmatic path without a PKI)
+    client.put("/api/v1/settings/tls_dir", json={"value": str(tmp_path)})
+    created = client.post("/api/v1/tls/self-signed", json={
+        "common_name": "mwl-broker.hospital.local", "days": 365,
+        "san": ["10.0.1.47", "mwl-broker.hospital.local"],
+    })
+    assert created.status_code == 201
+    body = created.json()
+    assert "BEGIN CERTIFICATE" in body["certificate_pem"]
+    assert "PRIVATE KEY" not in json.dumps(body)          # never the key
+    assert body["certificate"]["subject"].startswith("mwl-broker.hospital.local")
+    assert body["certificate"]["san"] == ["10.0.1.47", "mwl-broker.hospital.local"]
+    assert body["key"]["mode"] == "600"
+
+    # ... and it shows up in the overview
+    client.put("/api/v1/settings/tls_inbound_cert_file",
+               json={"value": body["certificate_path"]})
+    overview = client.get("/api/v1/tls/overview").json()
+    assert overview["entries"]["inbound_cert"]["ok"] is True
+    assert overview["entries"]["inbound_cert"]["days_left"] > 300
+
+    # validation
+    assert client.post("/api/v1/tls/self-signed", json={"common_name": ""}).status_code == 422
+    assert client.post("/api/v1/tls/self-signed",
+                       json={"common_name": "x", "days": 0}).status_code == 422
+
+    # endpoint check against a dead port reports the problem in plain words
+    result = client.post("/api/v1/tls/test",
+                         json={"host": "127.0.0.1", "port": 1, "verify": False}).json()
+    assert result["ok"] is False and result["error"]
+
+    actions = [row["action"] for row in client.get("/api/v1/audit/config").json()]
+    assert "generate.tls_certificate" in actions
+
+
+def test_tls_settings_are_validated(client):
+    assert client.put("/api/v1/settings/tls_inbound_client_auth",
+                      json={"value": "required"}).status_code == 200
+    assert client.put("/api/v1/settings/tls_inbound_client_auth",
+                      json={"value": "maybe"}).status_code == 422
+    assert client.put("/api/v1/settings/tls_inbound_port",
+                      json={"value": "0"}).status_code == 422
+    assert client.put("/api/v1/settings/tls_inbound_cert_file",
+                      json={"value": "relative.crt"}).status_code == 422
+    assert client.put("/api/v1/settings/tls_outbound_verify",
+                      json={"value": "false"}).status_code == 200
+    rows = {s["key"]: s for s in client.get("/api/v1/settings").json()}
+    assert rows["tls_inbound_client_auth"]["kind"] == "enum:none,optional,required"
+    assert rows["tls_inbound_enabled"]["default"] == "False"
+    assert rows["tls_outbound_verify"]["default"] == "True"
+
+
+def test_source_and_target_tls_flags_round_trip(client):
+    source = client.post("/api/v1/sources", json={**SOURCE, "tls": True,
+                                                  "tls_verify": False}).json()
+    assert source["tls"] is True and source["tls_verify"] is False
+    target = client.post("/api/v1/targets", json={**TARGET, "tls": True}).json()
+    assert target["tls"] is True and target["tls_verify"] is True   # verify defaults on
+
+    # the defaults keep the LAN/VPN setup unchanged
+    plain = client.post("/api/v1/sources", json={**SOURCE, "name": "plain"}).json()
+    assert plain["tls"] is False and plain["tls_verify"] is True
+
+
 def test_openapi_documents_all_endpoints(client):
     """Every path operation carries a summary/tag, query params and schema
     fields carry descriptions — keeps Swagger UI usable for integrators."""
@@ -1079,7 +1153,7 @@ def test_openapi_documents_all_endpoints(client):
     tag_names = {t["name"] for t in spec["tags"]}
     assert {"sources", "targets", "rules", "transforms", "settings",
             "logs", "monitoring", "audit", "config", "simulation", "cache",
-            "spool", "atna", "local"} <= tag_names
+            "spool", "atna", "local", "tls"} <= tag_names
 
     for path, ops in spec["paths"].items():
         for method, op in ops.items():
@@ -1136,6 +1210,8 @@ def test_openapi_documents_all_endpoints(client):
         "SpoolStatsOut", "SpoolItemOut", "SpoolRetryOut",
         "NotifyEventOut", "NotifyTestOut",
         "AtnaStatsOut", "AtnaTestOut", "AtnaSampleOut",
+        "TlsOverviewOut", "TlsCertificateOut", "TlsKeyOut",
+        "TlsSelfSignedIn", "TlsSelfSignedOut", "TlsTestIn", "TlsTestOut",
         "LocalItemIn", "LocalItemOut", "Hl7MessageOut", "Hl7ParseOut",
         "StationRuleIn", "StationRuleOut", "StationSimulateIn",
         "StationPreviewOut", "StationPreviewSourceOut",

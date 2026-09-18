@@ -22,6 +22,8 @@ class TargetCfg:
     calling_aet: str
     enabled: bool
     is_default: bool
+    tls: bool = False
+    tls_verify: bool = True
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,7 @@ def _target_cfg(row: PacsTarget | None) -> TargetCfg | None:
     return TargetCfg(
         id=row.id, name=row.name, aet=row.aet, host=row.host, port=row.port,
         calling_aet=row.calling_aet, enabled=row.enabled, is_default=row.is_default,
+        tls=row.tls, tls_verify=row.tls_verify,
     )
 
 

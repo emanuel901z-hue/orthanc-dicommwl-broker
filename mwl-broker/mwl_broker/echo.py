@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from . import local_worklist, metrics, notify
+from . import local_worklist, metrics, notify, tls
 from .db import session_factory
 from .models import MwlSource, PacsTarget
 from .upstream import c_echo
@@ -44,7 +44,8 @@ def _record(kind: str, row_id: int, name: str, ok: bool, rtt_ms: int | None, err
 def echo_one(kind: str, row) -> dict:
     started = time.monotonic()
     try:
-        c_echo(row.aet, row.host, row.port, row.calling_aet, timeout_s=10)
+        c_echo(row.aet, row.host, row.port, row.calling_aet, timeout_s=10,
+               tls=getattr(row, "tls", False), tls_verify=getattr(row, "tls_verify", True))
         rtt = int((time.monotonic() - started) * 1000)
         _record(kind, row.id, row.name, True, rtt, None)
     except Exception as exc:
@@ -83,6 +84,24 @@ def _notify_config_errors() -> None:
                       subject=finding["code"])
 
 
+def _notify_certificates() -> None:
+    """Warn when a configured certificate is close to its expiry date."""
+    try:
+        entries = tls.expiring_certificates()
+    except Exception:
+        return
+    for entry in entries:
+        days = entry.get("days_left")
+        notify.notify(
+            "tls_certificate_expiring",
+            f"Certificate {entry.get('subject') or entry.get('path')} "
+            + ("has expired" if entry.get("expired") else f"expires in {days} days"),
+            {"path": entry.get("path", ""), "days_left": days,
+             "subject": entry.get("subject", "")},
+            subject=entry.get("path", ""),
+        )
+
+
 def echo_loop(interval_s: int, stop: threading.Event) -> None:
     """Background loop: echo every enabled source/target.
 
@@ -108,6 +127,7 @@ def echo_loop(interval_s: int, stop: threading.Event) -> None:
             ticks += 1
             if ticks % 10 == 0:
                 _notify_config_errors()
+                _notify_certificates()
             if ticks % 60 == 0:
                 settings_service.purge_seen_items()
                 cache.purge()

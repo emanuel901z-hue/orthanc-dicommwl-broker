@@ -356,6 +356,7 @@ def sources_due_for_refresh() -> list:
     return [
         SourceCfg(id=r.id, name=r.name, aet=r.aet, host=r.host, port=r.port,
                   calling_aet=r.calling_aet, charset=r.charset, timeout_s=r.timeout_s,
-                  priority=r.priority)
+                  priority=r.priority,
+                  tls=r.tls, tls_verify=r.tls_verify)
         for r in out
     ]

@@ -28,6 +28,9 @@ class SourceCfg:
     timeout_s: int
     # merge order across sources (lower wins); station rules may override it
     priority: int = 100
+    # DICOM TLS towards this source
+    tls: bool = False
+    tls_verify: bool = True
 
 
 def dedupe_key(ds: Dataset) -> tuple[str, str, str]:
@@ -74,6 +77,15 @@ def outgoing_identifier(incoming: Dataset, charset: str) -> Dataset:
     return ident
 
 
+def _tls_args(tls: bool, verify: bool, host: str = "") -> tuple | None:
+    """pynetdicom `tls_args` for a node (imported lazily — TLS is optional)."""
+    if not tls:
+        return None
+    from . import tls as tls_module
+
+    return tls_module.client_tls_args(verify=verify, server_name=host)
+
+
 def query_source(src: SourceCfg, incoming_identifier: Dataset) -> list[Dataset]:
     """Send C-FIND to one upstream source, return collected answer datasets."""
     ae = AE(ae_title=src.calling_aet)
@@ -83,7 +95,9 @@ def query_source(src: SourceCfg, incoming_identifier: Dataset) -> list[Dataset]:
     ae.dimse_timeout = src.timeout_s
     ae.network_timeout = src.timeout_s
     ident = outgoing_identifier(incoming_identifier, src.charset)
-    assoc = ae.associate(src.host, src.port, ae_title=src.aet)
+    assoc = ae.associate(src.host, src.port, ae_title=src.aet,
+                         tls_args=_tls_args(getattr(src, "tls", False),
+                                            getattr(src, "tls_verify", True), src.host))
     answers: list[Dataset] = []
     if not assoc.is_established:
         # Raise so the caller records "error" — an unreachable source must
@@ -100,7 +114,8 @@ def query_source(src: SourceCfg, incoming_identifier: Dataset) -> list[Dataset]:
     return answers
 
 
-def c_echo(aet: str, host: str, port: int, calling_aet: str, timeout_s: int = 10) -> None:
+def c_echo(aet: str, host: str, port: int, calling_aet: str, timeout_s: int = 10,
+           tls: bool = False, tls_verify: bool = True) -> None:
     """Raise on failure, return None on success."""
     ae = AE(ae_title=calling_aet)
     from pynetdicom.sop_class import Verification
@@ -109,7 +124,8 @@ def c_echo(aet: str, host: str, port: int, calling_aet: str, timeout_s: int = 10
     ae.acse_timeout = timeout_s
     ae.dimse_timeout = timeout_s
     ae.network_timeout = timeout_s
-    assoc = ae.associate(host, port, ae_title=aet)
+    assoc = ae.associate(host, port, ae_title=aet,
+                         tls_args=_tls_args(tls, tls_verify, host))
     if not assoc.is_established:
         raise ConnectionError("association rejected")
     try:

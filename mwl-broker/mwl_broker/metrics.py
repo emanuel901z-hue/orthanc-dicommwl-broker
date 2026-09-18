@@ -19,6 +19,13 @@ ECHO_UP = Gauge(
     "mwl_echo_up", "Last C-ECHO result (1=ok, 0=fail)", ["kind", "name"]
 )
 SEEN_ITEMS = Gauge("mwl_seen_items", "Rows in seen_items table")
+TLS_CERT_DAYS = Gauge(
+    "mwl_tls_certificate_days_left",
+    "Days until the configured certificate expires (0 = none configured)",
+)
+TLS_HANDSHAKE = Counter(
+    "mwl_tls_handshake_total", "TLS endpoint checks", ["result"]
+)
 LOCAL_ITEMS = Gauge("mwl_local_worklist_items", "Active local worklist items")
 HL7_MESSAGES = Counter(
     "mwl_hl7_messages_total", "Inbound HL7 messages", ["transport", "result"]

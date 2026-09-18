@@ -33,6 +33,8 @@ def _source(row: MwlSource) -> dict:
         "enabled": row.enabled, "timeout_s": row.timeout_s, "priority": row.priority,
         "cache_stale_on_error": row.cache_stale_on_error,
         "cache_refresh_s": row.cache_refresh_s,
+        "tls": row.tls,
+        "tls_verify": row.tls_verify,
     }
 
 
@@ -41,6 +43,7 @@ def _target(row: PacsTarget) -> dict:
         "name": row.name, "aet": row.aet, "host": row.host, "port": row.port,
         "calling_aet": row.calling_aet, "enabled": row.enabled,
         "is_default": row.is_default,
+        "tls": row.tls, "tls_verify": row.tls_verify,
     }
 
 

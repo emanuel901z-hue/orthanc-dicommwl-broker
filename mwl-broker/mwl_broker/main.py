@@ -98,6 +98,7 @@ def create_app() -> FastAPI:
             {"name": "transforms", "description": "DICOM attribute modifications applied before forwarding (tag set/remove/prefix/suffix/replace/copy)."},
             {"name": "settings", "description": "Runtime settings — UI override over the deployment ENV default."},
             {"name": "local", "description": "Local worklist items (emergencies) and the HL7 ORM interface."},
+            {"name": "tls", "description": "DICOM TLS: certificate management, mTLS options and endpoint checks."},
             {"name": "atna", "description": "IHE ATNA audit trail: PS3.15 audit messages over syslog/TLS."},
             {"name": "spool", "description": "C-STORE spool: store-and-forward queue with retries and dead letters."},
             {"name": "cache", "description": "Worklist cache: snapshots that bridge an unreachable RIS, with a bounded stale window."},
