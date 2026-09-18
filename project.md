@@ -206,6 +206,15 @@ Klartext-Bereich (die API liefert die Grenzen), Enums sind Auswahlfelder;
 Stationsregeln warnen, wenn sie alle Quellen verbirgen (plus Health-Finding
 `station_rule_hides_all`); Dialoge sind auf 375 px vollständig bedienbar.
 
+### Eingabeführung (Sprint 10 der DAU-Analyse)
+
+`lib/setting-rules.ts` spiegelt die Server-Validierung (bool/int-Bereich/enum/
+url/path/aets) und wird von der Settings-Seite und den Karten genutzt — ungültige
+Werte werden **vor** dem Senden gemeldet und der Speichern-Knopf gesperrt. Die
+lokale Worklist hat Datum-/Zeit-Picker, Auswahlen und Musterprüfungen statt
+Freitext; Karten speichern **einmal pro Änderung** (Entwurf + Speichern beim
+Verlassen) statt bei jedem Tastendruck.
+
 ### Zugriffssteuerung (RBAC) und Retention
 
 **RBAC:** Der Proxy authentifiziert und übergibt die Rollen im Header
@@ -442,7 +451,7 @@ orthanc-dicommwl-broker/
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
 | `pytest` | 395 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 449 Tests, 0 Errors |
+| `npm run test` / `tsc` / `lint` | 463 Tests, 0 Errors |
 | Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 50/50 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
@@ -546,6 +555,7 @@ Gefundene und behobene Defekte:
 | 14 | Sprint 7 der Roadmap: DICOM-TLS/mTLS + Zertifikatsverwaltung | ✅ |
 | 15 | Sprint 8: RBAC-Trennung, Retention/Löschkonzepte, flexibles Alerting | ✅ |
 | 16 | Sprint 9: UI-Härtung P1 (Rückmeldung, typisierte Eingaben, Dialoge) | ✅ |
+| 17 | Sprint 10: Eingabeführung (Picker, Vorprüfung, ein Write pro Änderung) | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert

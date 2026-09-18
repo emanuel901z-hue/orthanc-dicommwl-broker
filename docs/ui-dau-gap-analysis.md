@@ -4,8 +4,8 @@
 **Frage:** Wo kann ein durchschnittlicher Anwender (DAU, kein DICOM-/Netzwerk-Spezialist)
 etwas falsch eingeben, etwas Wichtiges übersehen — und erfährt er es?
 **Stand:** Sprint 9 (UI-Härtung P1) umgesetzt — siehe Abschnitt 7
-**Status der Befunde:** A1, A2, B2, B3, C1, D1, D2, E5 ✅ behoben (Sprint 9);
-A3, B1, B4, B5, C2, C3, E1–E4, F1 in Sprint 10/11
+**Status der Befunde:** A1, A2, B1–B4, C1–C3, D1, D2, E5 ✅ behoben
+(Sprint 9 + 10); A3, B5, E1–E4, F1 in Sprint 11
 
 ---
 
@@ -62,10 +62,10 @@ Feld.
 
 | ID | Befund | Beleg | Auswirkung | Empfehlung |
 |---|---|---|---|---|
-| B1 | **Lokale Worklist: 13 Freitextfelder**, darunter Datum, Uhrzeit, Geburtsdatum, Modalität, Station-AET, SPS-Status, Study-UID. Kein Datums-/Zeit-Picker, kein Format-Hinweis, keine Prüfung. | `pages/LocalWorklistPage.tsx:325–338` (alle Felder als `<Input>` ohne `type`) | Ein Tippfehler (z. B. `17.09.2026` statt `2026-09-17`) führt dazu, dass der Eintrag **still nie** in einer C-FIND-Antwort auftaucht — der Notfall wäre nicht sichtbar | `type="date"`/`type="time"`, Auswahl für Modalität/SPS-Status/Sex, AET- und UID-Musterprüfung |
+| B1 ✅ | **Lokale Worklist: 13 Freitextfelder**, darunter Datum, Uhrzeit, Geburtsdatum, Modalität, Station-AET, SPS-Status, Study-UID. Kein Datums-/Zeit-Picker, kein Format-Hinweis, keine Prüfung. | `pages/LocalWorklistPage.tsx:325–338` (alle Felder als `<Input>` ohne `type`) | Ein Tippfehler (z. B. `17.09.2026` statt `2026-09-17`) führt dazu, dass der Eintrag **still nie** in einer C-FIND-Antwort auftaucht — der Notfall wäre nicht sichtbar | `type="date"`/`type="time"`, Auswahl für Modalität/SPS-Status/Sex, AET- und UID-Musterprüfung |
 | B2 ✅ | **Zahlenfelder ohne Grenzen.** 10 `type="number"`-Felder, nur 4 mit `min`; u. a. TLS-Port, Zertifikats-Gültigkeit, Alerting-Intervall, Prioritäten. | `components/TlsCard.tsx:312,385`; `pages/StationsPage.tsx:320`; `pages/RulesPage.tsx:317` | Werte außerhalb des erlaubten Bereichs werden erst vom Server abgewiesen — und bei Settings unsichtbar (siehe A1) | `min`/`max` aus der Server-Range spiegeln, plus Hinweistext |
 | B3 ✅ | **Einstellungen ohne Typ.** Auch Integer-Settings rendern als Textfeld. | `pages/BrokerSettingsPage.tsx:58` | „30 Tage" als „3o" ist nicht unterscheidbar von einer gültigen Eingabe | `type="number"` + `min`/`max` aus der API-Beschreibung |
-| B4 | **Pfade, URLs, AETs ohne Musterprüfung** (TLS-Zertifikatspfade, ATNA-Host/Port, Webhook-URL, Stations-AET). Serverseitig validiert (`path`/`url`/`enum`), clientseitig frei. | `components/TlsCard.tsx`, `components/AtnaCard.tsx`, `components/NotificationsCard.tsx` | Fehleingaben werden erst spät erkannt (kombiniert mit A1 sogar gar nicht sichtbar) | Client-Regeln aus denselben Konstanten wie der Server |
+| B4 ✅ | **Pfade, URLs, AETs ohne Musterprüfung** (TLS-Zertifikatspfade, ATNA-Host/Port, Webhook-URL, Stations-AET). Serverseitig validiert (`path`/`url`/`enum`), clientseitig frei. | `components/TlsCard.tsx`, `components/AtnaCard.tsx`, `components/NotificationsCard.tsx` | Fehleingaben werden erst spät erkannt (kombiniert mit A1 sogar gar nicht sichtbar) | Client-Regeln aus denselben Konstanten wie der Server |
 | B5 | **Doppelte Knoten/AET-Kollisionen** werden nicht im Formular geprüft. | `components/NodeFormDialog.tsx:72–82` prüft Format, nicht Eindeutigkeit; Health-Panel meldet Kollisionen erst danach | Zwei Quellen mit derselben AET → schwer zu findende Fehlkonfiguration | Hinweis beim Tippen („diese AET ist bereits vergeben") |
 
 ### C. Gefährliche Konfigurationen ohne Warnung
@@ -73,8 +73,8 @@ Feld.
 | ID | Befund | Beleg | Auswirkung | Empfehlung |
 |---|---|---|---|---|
 | C1 ✅ | **Stationsregel `allow` mit leerer Quellenliste** verbirgt alle Quellen. Kein Hinweis im Dialog. | `pages/StationsPage.tsx:305–315` (Modus-Auswahl, keine Bedingung); Server-Semantik dokumentiert in `station_rules.py` | Eine Konsole sieht plötzlich **nichts** mehr — der Betrieb sucht am Gerät statt in der Regel | Warnhinweis im Dialog („verbirgt alle Quellen") + Health-Finding |
-| C2 | **Löschen des Standard-Ziels** wird wie jedes Ziel bestätigt („abhängige Regeln werden entfernt"), ohne den eigentlichen Effekt zu nennen. | `pages/TargetsPage.tsx:228` (generische Warnung) | Neue Bilder ohne Regel landen **nirgendwo** (unrouted) — das ist ein Betriebsausfall | Konsequenz explizit nennen („danach haben unzugeordnete Bilder kein Ziel") |
-| C3 | **Prioritäts-Änderung ohne Wirkungserklärung.** Bei Regeln/Quellen/Zielen ist nicht sichtbar, was „Priorität 10 vs. 20" praktisch bedeutet. | `pages/RulesPage.tsx`, `SourcesPage.tsx`, `StationsPage.tsx` | Der DAU setzt Werte, ohne die Wirkung (Reihenfolge der Deduplizierung) zu kennen | Ein Satz Hilfe + Verweis auf die Fall-Prüfung |
+| C2 ✅ | **Löschen des Standard-Ziels** wird wie jedes Ziel bestätigt („abhängige Regeln werden entfernt"), ohne den eigentlichen Effekt zu nennen. | `pages/TargetsPage.tsx:228` (generische Warnung) | Neue Bilder ohne Regel landen **nirgendwo** (unrouted) — das ist ein Betriebsausfall | Konsequenz explizit nennen („danach haben unzugeordnete Bilder kein Ziel") |
+| C3 ✅ | **Prioritäts-Änderung ohne Wirkungserklärung.** Bei Regeln/Quellen/Zielen ist nicht sichtbar, was „Priorität 10 vs. 20" praktisch bedeutet. | `pages/RulesPage.tsx`, `SourcesPage.tsx`, `StationsPage.tsx` | Der DAU setzt Werte, ohne die Wirkung (Reihenfolge der Deduplizierung) zu kennen | Ein Satz Hilfe + Verweis auf die Fall-Prüfung |
 
 ### D. Mobile/Layout
 
@@ -190,3 +190,38 @@ Feld.
 | Playwright | 50 Tests (+2), inkl. „Stationsregel warnt bei allow ohne Quelle" |
 | verify-ui.cjs | **114 Checks** (neu: Dialog passt bei 375 px, Zahleneinstellung typisiert/begrenzt, Bereich im Klartext, abgelehnter Wert sichtbar **und nicht gespeichert**) |
 | Live-Messung | Worklist-Dialog bei 375×812: `top=73`, Höhe 694, `scrollbar=true` (vorher: top=−235, Höhe 1 282, nicht scrollbar) |
+
+### Sprint 10 — Eingabeführung (umgesetzt)
+
+**Behoben.**
+
+- **B1 — typisierte Felder in der lokalen Worklist.** Datum und Uhrzeit sind
+  echte Picker (`type="date"`/`type="time"`), Geschlecht und „nicht gesetzt"
+  sind Auswahlen, Modalität hat Vorschläge (Datalist, Freitext bleibt möglich),
+  Station-AET wird automatisch großgeschrieben und geprüft (1–16 Zeichen,
+  A–Z 0–9 _ -), die Study-UID auf Ziffern/Punkte. Jedes Feld hat einen
+  Klartext-Hinweis, ungültige Werte werden **vor** dem Speichern gemeldet und
+  blockieren den Speichern-Knopf.
+- **B4 — Vorprüfung wie der Server.** `lib/setting-rules.ts` spiegelt
+  `settings_service.validate_value` (bool/int-Bereich/enum/url/path/aets) und
+  wird von der Settings-Seite **und** den Karten genutzt: der Fehler steht am
+  Feld, der Speichern-Knopf ist gesperrt, gesendet wird nichts Ungültiges.
+- **B2/B3 (Nachtrag) — ein Schreibvorgang pro Änderung.** Die Karten
+  speicherten bisher **bei jedem Tastendruck** (ein Pfad = sechs Requests, fünf
+  davon ungültig, plus Audit-Rauschen). Jetzt gibt es einen Entwurf pro Feld
+  (`use-setting-draft.ts`), gespeichert wird beim Verlassen — nur wenn gültig
+  und geändert.
+- **C2 — Standard-Ziel.** Der Löschdialog nennt die Folge ausdrücklich
+  („ohne Routing-Regel haben eingehende Bilder danach kein Ziel mehr").
+- **C3 — Priorität.** Stationsregeln haben jetzt denselben Erklärsatz wie die
+  Routing-Regeln („kleinerer Wert = zuerst berücksichtigt …").
+
+**Verifikation.**
+
+| Ebene | Ergebnis |
+|---|---|
+| pytest | 395 Tests (unverändert — Sprint 10 ist reine UI-Führung) |
+| vitest | 463 Tests (+14: Regelmodul 9, Entwurfs-Hook 4, Vorprüfung im Settings-Test) |
+| Playwright | 50 Tests |
+| verify-ui.cjs | **118 Checks** (neu: Datum/Zeit sind Picker, Format-Hinweis an der Station-AET, ungültige AET wird vorab gemeldet, ungültiger Wert wird vor dem Senden abgefangen, nichts wird gespeichert) |
+| Live-Messung | Feldtypen im Worklist-Dialog: `text, date, time`; Station-AET „ct-01!" → Hinweis + Speichern gesperrt |

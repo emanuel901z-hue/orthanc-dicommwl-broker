@@ -90,7 +90,7 @@ python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
 
 ```bash
 cd mwl-broker && python -m pytest tests -q        # 395 Tests (API + DIMSE e2e + TLS/RBAC/Retention/HL7/ATNA)
-cd orthanc-explorer-3-usable && npm run test      # 449 Tests
+cd orthanc-explorer-3-usable && npm run test      # 463 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -169,6 +169,11 @@ Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
       Inline-Fehler), typisierte/begrenzte Eingaben aus der API, Warnung bei
       gefährlichen Stationsregeln, Dialoge auf kleinen Bildschirmen bedienbar —
       Details in der [DAU-Gap-Analyse](docs/ui-dau-gap-analysis.md#sprint-9--ui-härtung-p1-umgesetzt)
-- [ ] Offen: Sprint 10/11 der [DAU-Gap-Analyse](docs/ui-dau-gap-analysis.md)
-      (Eingabeführung, Bedienfluss, Konsistenz, i18n)
+- [x] Sprint 10 (Eingabeführung): Datum/Zeit-Picker, Auswahlen und Muster in
+      der lokalen Worklist, Vorprüfung mit denselben Regeln wie der Server,
+      ein Schreibvorgang pro Änderung statt bei jedem Tastendruck, Konsequenz
+      beim Löschen des Standard-Ziels — Details in der
+      [DAU-Gap-Analyse](docs/ui-dau-gap-analysis.md#sprint-10--eingabeführung-umgesetzt)
+- [ ] Offen: Sprint 11 der [DAU-Gap-Analyse](docs/ui-dau-gap-analysis.md)
+      (Bedienfluss, Konsistenz, Barrierefreiheit, i18n)
 - [ ] HL7-ORM/ADT-Adapter (Worklist-Einträge ohne Upstream-C-FIND)
