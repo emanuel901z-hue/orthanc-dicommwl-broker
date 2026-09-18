@@ -34,6 +34,7 @@ stage() {
 stage "backend: pytest"   bash -c 'cd mwl-broker && .venv/bin/pytest tests -q'
 stage "frontend: tsc"     bash -c 'cd orthanc-explorer-3-usable && npx tsc --noEmit -p tsconfig.app.json'
 stage "frontend: lint"    bash -c 'cd orthanc-explorer-3-usable && npm run lint'
+stage "frontend: i18n"    bash -c 'cd orthanc-explorer-3-usable && npm run i18n:check'
 stage "frontend: vitest"  bash -c 'cd orthanc-explorer-3-usable && npm run test'
 
 if [ "$QUICK" -eq 0 ]; then

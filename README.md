@@ -89,8 +89,8 @@ python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 396 Tests (API + DIMSE e2e + TLS/RBAC/Retention/HL7/ATNA)
-cd orthanc-explorer-3-usable && npm run test      # 474 Tests
+cd mwl-broker && python -m pytest tests -q        # 398 Tests (API + DIMSE e2e + TLS/RBAC/Retention/HL7/ATNA)
+cd orthanc-explorer-3-usable && npm run test      # 488 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -185,4 +185,7 @@ Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
       Befunde in [docs/mfa-usability-test.md](docs/mfa-usability-test.md);
       Entwürfe (auch für Regel-/Transform-Formulare, Ablauf nach 1 h) und eine
       „Was ist das?"-Hilfe auf jeder Seite
+- [x] i18n aufgeräumt: nur react-i18next (kein eigenes `t()`), Broker-Rahmen in
+      allen 9 OE3-Sprachen, Debug über `?lng=`/`?i18nDebug=1`, Abdeckungsprüfer
+      `npm run i18n:check` in CI
 - [ ] HL7-ORM/ADT-Adapter (Worklist-Einträge ohne Upstream-C-FIND)

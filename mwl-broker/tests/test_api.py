@@ -1174,6 +1174,51 @@ def test_nonsense_node_values_are_rejected(client):
                        json={**target, "host": "10.0.1.30"}).status_code == 201
 
 
+def test_nonsense_node_values_are_rejected_on_update_too(client):
+    """The same rules apply when an existing node is changed, not only on create."""
+    created = client.post("/api/v1/sources", json={
+        "name": "mfa-edit", "aet": "MFA_EDIT", "host": "10.0.1.21", "port": 104,
+        "calling_aet": "MWLBROKER", "charset": "ISO_IR 100",
+    }).json()
+
+    bad_host = client.put(f"/api/v1/sources/{created['id']}", json={
+        **{k: created[k] for k in ("name", "aet", "port", "calling_aet", "charset",
+                                   "enabled", "timeout_s", "priority",
+                                   "cache_stale_on_error", "cache_refresh_s",
+                                   "tls", "tls_verify")},
+        "host": "ris server 1",
+    })
+    assert bad_host.status_code == 422
+    assert "spaces" in bad_host.json()["detail"]
+
+    bad_aet = client.put(f"/api/v1/sources/{created['id']}", json={
+        **{k: created[k] for k in ("name", "port", "host", "calling_aet", "charset",
+                                   "enabled", "timeout_s", "priority",
+                                   "cache_stale_on_error", "cache_refresh_s",
+                                   "tls", "tls_verify")},
+        "aet": "klein",
+    })
+    assert bad_aet.status_code == 422
+
+    # the row is unchanged after the rejected attempts
+    assert client.get("/api/v1/sources").json()[-1]["host"] == "10.0.1.21"
+
+
+def test_every_setting_is_documented_for_the_ui(client):
+    """The settings page renders key, description, kind and bounds — all present."""
+    rows = client.get("/api/v1/settings").json()
+    assert len(rows) >= 40
+    for row in rows:
+        assert row["description"].strip(), f"{row['key']} has no description"
+        assert row["kind"], f"{row['key']} has no kind"
+        if row["kind"] == "int":
+            assert row["min"] is not None and row["max"] is not None, (
+                f"{row['key']} has no bounds")
+            assert row["min"] <= row["max"]
+        if row["kind"].startswith("enum:"):
+            assert row["choices"], f"{row['key']} has no choices"
+
+
 def test_settings_expose_constraints_for_the_ui(client):
     """The UI constrains its inputs from the API — bounds and enum choices."""
     rows = {s["key"]: s for s in client.get("/api/v1/settings").json()}

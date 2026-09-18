@@ -213,6 +213,17 @@ Feldmeldungen sind live und als `role="alert"` ausgezeichnet, und der Server
 lehnt unsinnige Adressen/AETs ab. Details:
 [docs/mfa-usability-test.md](docs/mfa-usability-test.md).
 
+### i18n (react-i18next, 9 Sprachen)
+
+Der Broker nutzt **ausschließlich** react-i18next (`useTranslation()` in
+Komponenten und Hooks) — kein eigenes `t()`; ein Guard-Test
+(`src/features/broker/i18n-usage.test.ts`) erzwingt das und prüft zusätzlich,
+dass jeder referenzierte Schlüssel in der Referenzdatei existiert. Der sichtbare
+Rahmen (Titel, Tabellenköpfe, Knöpfe, Dialoge, Hilfe-Überschriften) ist in alle
+neun OE3-Sprachen übersetzt; ausführliche Texte liegen auf Deutsch und Englisch
+vor und fallen schlüsselweise auf Englisch zurück. Debuggen über `?lng=fr`,
+`?i18nDebug=1`, `window.__i18n`; `npm run i18n:check` prüft die Abdeckung in CI.
+
 ### UI-Härtung (DAU-Sicherheit)
 
 Die [DAU-Gap-Analyse](docs/ui-dau-gap-analysis.md) prüft die Oberfläche auf
@@ -467,9 +478,10 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 396 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 474 Tests, 0 Errors |
-| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 53/53 grün, 0 Console-/Page-/Netzwerk-Fehler |
+| `pytest` | 398 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 488 Tests, 0 Errors |
+| `npm run i18n:check` | Rahmen in allen 9 Sprachen, Referenzsprachen synchron |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 55/55 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
 
@@ -576,9 +588,11 @@ Gefundene und behobene Defekte:
 | 18 | Sprint 11: Bedienfluss (Dirty-Guard, Duplikate, A11y) — DAU-Analyse abgeschlossen | ✅ |
 | 19 | MFA-Testumgebung (unbedarfter Anwender) + behobene Befunde | ✅ |
 | 20 | Seiten-Hilfe, Entwürfe für alle Formulare, Entwurfs-Ablauf (1 h) | ✅ |
+| 21 | i18n aufgeräumt (react-i18next, 9 Sprachen, Debug, Abdeckungsprüfer) | ✅ |
 | 18 | Sprint 11: Bedienfluss (Dirty-Guard, Duplikate, A11y) — DAU-Analyse abgeschlossen | ✅ |
 | 19 | MFA-Testumgebung (unbedarfter Anwender) + behobene Befunde | ✅ |
 | 20 | Seiten-Hilfe, Entwürfe für alle Formulare, Entwurfs-Ablauf (1 h) | ✅ |
+| 21 | i18n aufgeräumt (react-i18next, 9 Sprachen, Debug, Abdeckungsprüfer) | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert
