@@ -196,6 +196,16 @@ Quellen, offene Breaker, leere AET-Allowlist, AET-Kollision mit dem Broker
 selbst) und liefert Findings mit stabilem `code` — die UI übersetzt sie und
 verlinkt direkt ins betroffene Formular.
 
+### UI-Härtung (DAU-Sicherheit)
+
+Die [DAU-Gap-Analyse](docs/ui-dau-gap-analysis.md) prüft die Oberfläche auf
+Fehleingaben und stilles Scheitern. Sprint 9 hat die P1-Befunde behoben:
+**jede** Einstellung meldet Erfolg (Toast) und Ablehnung (Toast + Inline-Fehler
+mit Server-Text); Integer-Felder sind `type="number"` mit `min`/`max` und
+Klartext-Bereich (die API liefert die Grenzen), Enums sind Auswahlfelder;
+Stationsregeln warnen, wenn sie alle Quellen verbirgen (plus Health-Finding
+`station_rule_hides_all`); Dialoge sind auf 375 px vollständig bedienbar.
+
 ### Zugriffssteuerung (RBAC) und Retention
 
 **RBAC:** Der Proxy authentifiziert und übergibt die Rollen im Header
@@ -431,9 +441,9 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 392 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 441 Tests, 0 Errors |
-| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 48/48 grün, 0 Console-/Page-/Netzwerk-Fehler |
+| `pytest` | 395 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 449 Tests, 0 Errors |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 50/50 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
 
@@ -535,6 +545,7 @@ Gefundene und behobene Defekte:
 | 13 | Sprint 6 der Roadmap: lokale Worklist + HL7-ORM, Stationsregeln, ATNA | ✅ |
 | 14 | Sprint 7 der Roadmap: DICOM-TLS/mTLS + Zertifikatsverwaltung | ✅ |
 | 15 | Sprint 8: RBAC-Trennung, Retention/Löschkonzepte, flexibles Alerting | ✅ |
+| 16 | Sprint 9: UI-Härtung P1 (Rückmeldung, typisierte Eingaben, Dialoge) | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert

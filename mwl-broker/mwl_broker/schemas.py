@@ -352,8 +352,15 @@ class SettingOut(BaseModel):
     value: str = Field(description="Currently effective value.")
     default: str = Field(description="Value from the deployment ENV (fallback).")
     source: str = Field(description="'db' = UI override active, 'env' = deployment default.")
-    kind: str = Field(description="Value type: bool | int | aets.")
+    kind: str = Field(
+        description="Value type: bool | int | aets | url | path | events | enum:<choices>.",
+    )
     description: str = Field(description="What the setting does.")
+    min: int | None = Field(default=None, description="Lower bound for integer settings.")
+    max: int | None = Field(default=None, description="Upper bound for integer settings.")
+    choices: list[str] = Field(
+        default_factory=list, description="Allowed values for enum settings.",
+    )
 
 
 class SettingUpdateIn(BaseModel):

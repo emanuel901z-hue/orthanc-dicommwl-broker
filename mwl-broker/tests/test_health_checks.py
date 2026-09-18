@@ -334,6 +334,38 @@ def test_tls_verification_off_is_reported():
     assert finding["severity"] == "warning"
 
 
+def test_station_rule_that_hides_every_source_is_an_error():
+    """mode=allow without a source list hides every source — the console sees nothing."""
+    from mwl_broker.models import StationRule
+
+    _source()
+    _target()
+    assert "station_rule_hides_all" not in _codes(_findings())
+
+    with session_factory()() as s:
+        s.add(StationRule(name="broken", station_aet="CT_01", mode="allow", source_ids=[]))
+        s.commit()
+
+    finding = next(f for f in _findings() if f["code"] == "station_rule_hides_all")
+    assert finding["severity"] == "error"
+    assert "broken" in finding["message"]
+
+
+def test_disabled_or_non_empty_station_rules_do_not_warn():
+    from mwl_broker.models import StationRule
+
+    source_id = _source()
+    _target()
+    with session_factory()() as s:
+        s.add(StationRule(name="disabled", station_aet="CT_01", mode="allow",
+                          source_ids=[], enabled=False))
+        s.add(StationRule(name="fine", station_aet="MR_01", mode="allow",
+                          source_ids=[source_id]))
+        s.commit()
+
+    assert "station_rule_hides_all" not in _codes(_findings())
+
+
 def test_findings_are_sorted_by_severity_and_summarised():
     _source(enabled=False)                        # warning: no_enabled_source
     _transform(target_id=_target(enabled=False))  # error: no_default_target

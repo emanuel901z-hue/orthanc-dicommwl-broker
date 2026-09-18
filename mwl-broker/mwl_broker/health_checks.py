@@ -14,7 +14,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 
 from . import breaker, echo, metrics, settings_service, spool, tls
-from .models import MwlSource, PacsTarget, QueryLog, RoutingRule, TransformRule
+from .models import (MwlSource, PacsTarget, QueryLog, RoutingRule, StationRule,
+                     TransformRule)
 
 log = logging.getLogger("mwl_broker.health")
 
@@ -119,6 +120,19 @@ def config_findings(session, settings) -> list[dict]:
                 details={"retry_in_s": state["retry_in_s"], "failures": state["failures"],
                          "last_error": state["last_error"]},
             ))
+
+    # ── per-station rules ──────────────────────────────────────────────────
+    hiding = [rule for rule in session.scalars(
+        select(StationRule).where(StationRule.enabled.is_(True))
+    ).all() if rule.mode == "allow" and not (rule.source_ids or [])]
+    if hiding:
+        names = ", ".join(rule.name for rule in hiding)
+        findings.append(_finding(
+            "station_rule_hides_all", "error",
+            f"Station rule(s) {names} use mode 'allow' without any source — those "
+            "consoles receive an empty worklist.",
+            details={"rules": names},
+        ))
 
     # ── DICOM TLS ──────────────────────────────────────────────────────────
     tls.reload()          # a health check must reflect the configuration *now*

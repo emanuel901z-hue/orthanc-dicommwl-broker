@@ -3,7 +3,9 @@
 **Gegenstand:** das gesamte Broker-UI in OE3 (`/broker`, `/broker/*`, Settings-Karten)
 **Frage:** Wo kann ein durchschnittlicher Anwender (DAU, kein DICOM-/Netzwerk-Spezialist)
 etwas falsch eingeben, etwas Wichtiges übersehen — und erfährt er es?
-**Stand:** Sprint 8 (RBAC/Retention) — alle Broker-Funktionen umgesetzt
+**Stand:** Sprint 9 (UI-Härtung P1) umgesetzt — siehe Abschnitt 7
+**Status der Befunde:** A1, A2, B2, B3, C1, D1, D2, E5 ✅ behoben (Sprint 9);
+A3, B1, B4, B5, C2, C3, E1–E4, F1 in Sprint 10/11
 
 ---
 
@@ -52,8 +54,8 @@ Feld.
 
 | ID | Befund | Beleg | Auswirkung | Empfehlung |
 |---|---|---|---|---|
-| A1 | **Kein Fehlerfeedback bei Einstellungs-Writes.** `SettingRow` ruft `setValue.mutate` und rendert nur `pending`, nie `error`. Gleiches Muster in `TlsCard`, `AtnaCard`, `NotificationsCard`. | `pages/BrokerSettingsPage.tsx:58–70` (Input ohne `type`, kein Fehlerblock); gemessen: `echo_interval_s="abc"` → keine sichtbare Meldung, Feld behält den Wert | Der Anwender glaubt, gespeichert zu haben. Besonders kritisch bei Zahlen/Pfaden/URLs — die Wirkung tritt nie ein, ohne Hinweis | Fehlerblock (`role="alert"`) je Setting + Karte, wie in den Dialogseiten bereits üblich |
-| A2 | **Kein Erfolgsfeedback.** Kein Toast/„Gespeichert"-Hinweis im gesamten Broker-UI (0 Treffer für `toast`). | Code-Review; sichtbar auch live: nach dem Speichern ändert sich nur der Button-Zustand | Der DAU fragt sich, ob der Klick gewirkt hat — typischer Auslöser für Doppelklicks | Toast oder Inline-„Gespeichert" mit Zeitstempel |
+| A1 ✅ | **Kein Fehlerfeedback bei Einstellungs-Writes.** `SettingRow` ruft `setValue.mutate` und rendert nur `pending`, nie `error`. Gleiches Muster in `TlsCard`, `AtnaCard`, `NotificationsCard`. | `pages/BrokerSettingsPage.tsx:58–70` (Input ohne `type`, kein Fehlerblock); gemessen: `echo_interval_s="abc"` → keine sichtbare Meldung, Feld behält den Wert | Der Anwender glaubt, gespeichert zu haben. Besonders kritisch bei Zahlen/Pfaden/URLs — die Wirkung tritt nie ein, ohne Hinweis | Fehlerblock (`role="alert"`) je Setting + Karte, wie in den Dialogseiten bereits üblich |
+| A2 ✅ | **Kein Erfolgsfeedback.** Kein Toast/„Gespeichert"-Hinweis im gesamten Broker-UI (0 Treffer für `toast`). | Code-Review; sichtbar auch live: nach dem Speichern ändert sich nur der Button-Zustand | Der DAU fragt sich, ob der Klick gewirkt hat — typischer Auslöser für Doppelklicks | Toast oder Inline-„Gespeichert" mit Zeitstempel |
 | A3 | **Validierungsfehler erst nach dem Absenden** (Transforms-Tag, Case-Check, Stations-AET): keine Live-Prüfung. | `components/OperationsEditor.tsx` (nur `placeholder`), `pages/TransformsPage.tsx:413` (Serverfehler erst nach Submit); gemessen: ungültiger Tag `0010-0010` → keine Inline-Meldung | Umweg: erst ausfüllen, absenden, Fehler lesen, korrigieren | Feld-Prüfung beim Verlassen (`onBlur`) mit derselben Regel wie der Server |
 
 ### B. Eingabevalidierung — was man falsch eingeben kann
@@ -61,8 +63,8 @@ Feld.
 | ID | Befund | Beleg | Auswirkung | Empfehlung |
 |---|---|---|---|---|
 | B1 | **Lokale Worklist: 13 Freitextfelder**, darunter Datum, Uhrzeit, Geburtsdatum, Modalität, Station-AET, SPS-Status, Study-UID. Kein Datums-/Zeit-Picker, kein Format-Hinweis, keine Prüfung. | `pages/LocalWorklistPage.tsx:325–338` (alle Felder als `<Input>` ohne `type`) | Ein Tippfehler (z. B. `17.09.2026` statt `2026-09-17`) führt dazu, dass der Eintrag **still nie** in einer C-FIND-Antwort auftaucht — der Notfall wäre nicht sichtbar | `type="date"`/`type="time"`, Auswahl für Modalität/SPS-Status/Sex, AET- und UID-Musterprüfung |
-| B2 | **Zahlenfelder ohne Grenzen.** 10 `type="number"`-Felder, nur 4 mit `min`; u. a. TLS-Port, Zertifikats-Gültigkeit, Alerting-Intervall, Prioritäten. | `components/TlsCard.tsx:312,385`; `pages/StationsPage.tsx:320`; `pages/RulesPage.tsx:317` | Werte außerhalb des erlaubten Bereichs werden erst vom Server abgewiesen — und bei Settings unsichtbar (siehe A1) | `min`/`max` aus der Server-Range spiegeln, plus Hinweistext |
-| B3 | **Einstellungen ohne Typ.** Auch Integer-Settings rendern als Textfeld. | `pages/BrokerSettingsPage.tsx:58` | „30 Tage" als „3o" ist nicht unterscheidbar von einer gültigen Eingabe | `type="number"` + `min`/`max` aus der API-Beschreibung |
+| B2 ✅ | **Zahlenfelder ohne Grenzen.** 10 `type="number"`-Felder, nur 4 mit `min`; u. a. TLS-Port, Zertifikats-Gültigkeit, Alerting-Intervall, Prioritäten. | `components/TlsCard.tsx:312,385`; `pages/StationsPage.tsx:320`; `pages/RulesPage.tsx:317` | Werte außerhalb des erlaubten Bereichs werden erst vom Server abgewiesen — und bei Settings unsichtbar (siehe A1) | `min`/`max` aus der Server-Range spiegeln, plus Hinweistext |
+| B3 ✅ | **Einstellungen ohne Typ.** Auch Integer-Settings rendern als Textfeld. | `pages/BrokerSettingsPage.tsx:58` | „30 Tage" als „3o" ist nicht unterscheidbar von einer gültigen Eingabe | `type="number"` + `min`/`max` aus der API-Beschreibung |
 | B4 | **Pfade, URLs, AETs ohne Musterprüfung** (TLS-Zertifikatspfade, ATNA-Host/Port, Webhook-URL, Stations-AET). Serverseitig validiert (`path`/`url`/`enum`), clientseitig frei. | `components/TlsCard.tsx`, `components/AtnaCard.tsx`, `components/NotificationsCard.tsx` | Fehleingaben werden erst spät erkannt (kombiniert mit A1 sogar gar nicht sichtbar) | Client-Regeln aus denselben Konstanten wie der Server |
 | B5 | **Doppelte Knoten/AET-Kollisionen** werden nicht im Formular geprüft. | `components/NodeFormDialog.tsx:72–82` prüft Format, nicht Eindeutigkeit; Health-Panel meldet Kollisionen erst danach | Zwei Quellen mit derselben AET → schwer zu findende Fehlkonfiguration | Hinweis beim Tippen („diese AET ist bereits vergeben") |
 
@@ -70,7 +72,7 @@ Feld.
 
 | ID | Befund | Beleg | Auswirkung | Empfehlung |
 |---|---|---|---|---|
-| C1 | **Stationsregel `allow` mit leerer Quellenliste** verbirgt alle Quellen. Kein Hinweis im Dialog. | `pages/StationsPage.tsx:305–315` (Modus-Auswahl, keine Bedingung); Server-Semantik dokumentiert in `station_rules.py` | Eine Konsole sieht plötzlich **nichts** mehr — der Betrieb sucht am Gerät statt in der Regel | Warnhinweis im Dialog („verbirgt alle Quellen") + Health-Finding |
+| C1 ✅ | **Stationsregel `allow` mit leerer Quellenliste** verbirgt alle Quellen. Kein Hinweis im Dialog. | `pages/StationsPage.tsx:305–315` (Modus-Auswahl, keine Bedingung); Server-Semantik dokumentiert in `station_rules.py` | Eine Konsole sieht plötzlich **nichts** mehr — der Betrieb sucht am Gerät statt in der Regel | Warnhinweis im Dialog („verbirgt alle Quellen") + Health-Finding |
 | C2 | **Löschen des Standard-Ziels** wird wie jedes Ziel bestätigt („abhängige Regeln werden entfernt"), ohne den eigentlichen Effekt zu nennen. | `pages/TargetsPage.tsx:228` (generische Warnung) | Neue Bilder ohne Regel landen **nirgendwo** (unrouted) — das ist ein Betriebsausfall | Konsequenz explizit nennen („danach haben unzugeordnete Bilder kein Ziel") |
 | C3 | **Prioritäts-Änderung ohne Wirkungserklärung.** Bei Regeln/Quellen/Zielen ist nicht sichtbar, was „Priorität 10 vs. 20" praktisch bedeutet. | `pages/RulesPage.tsx`, `SourcesPage.tsx`, `StationsPage.tsx` | Der DAU setzt Werte, ohne die Wirkung (Reihenfolge der Deduplizierung) zu kennen | Ein Satz Hilfe + Verweis auf die Fall-Prüfung |
 
@@ -78,8 +80,8 @@ Feld.
 
 | ID | Befund | Beleg | Auswirkung | Empfehlung |
 |---|---|---|---|---|
-| D1 | **Worklist-Dialog nicht scrollbar** (siehe Zusammenfassung). | gemessen 375×812: Höhe 1 282 px, `overflowY: visible`, erstes Feld y = −62, Speichern y = 942 | Aufgabe auf dem Handy **nicht erfüllbar** | `max-h-[90vh] overflow-y-auto` wie in allen anderen Dialogen |
-| D2 | Dialoge ohne Höhenbegrenzung: nur `LocalWorklistPage` (D1) und `StationsPage` (`max-w-xl`, gemessen 746 px — grenzwertig, bei mehr Feldern kippt es) | `pages/LocalWorklistPage.tsx:317`, `pages/StationsPage.tsx:276` | Bei kleinen Geräten/Hochformat abgeschnitten | Einheitliche Dialog-Hülle mit Höhenbegrenzung |
+| D1 ✅ | **Worklist-Dialog nicht scrollbar** (siehe Zusammenfassung). | gemessen 375×812: Höhe 1 282 px, `overflowY: visible`, erstes Feld y = −62, Speichern y = 942 | Aufgabe auf dem Handy **nicht erfüllbar** | `max-h-[90vh] overflow-y-auto` wie in allen anderen Dialogen |
+| D2 ✅ | Dialoge ohne Höhenbegrenzung: nur `LocalWorklistPage` (D1) und `StationsPage` (`max-w-xl`, gemessen 746 px — grenzwertig, bei mehr Feldern kippt es) | `pages/LocalWorklistPage.tsx:317`, `pages/StationsPage.tsx:276` | Bei kleinen Geräten/Hochformat abgeschnitten | Einheitliche Dialog-Hülle mit Höhenbegrenzung |
 
 ### E. Konsistenz und Bedienfluss
 
@@ -89,7 +91,7 @@ Feld.
 | E2 | **Gemischte Button-Beschriftungen** für dieselbe Aktion (`common.save` „Save" vs. `broker.save` „Speichern"). | `pages/TransformsPage.tsx:345`, `RulesPage.tsx:127`, `NodeFormDialog.tsx:99` … | In Sprachen, in denen nur einer der Schlüssel gepflegt ist, stehen zwei verschiedene Wörter für „Speichern" | Ein Schlüssel für „Speichern" |
 | E3 | **Kein „Zurücksetzen" im Formular** (nur beim Bearbeiten eines Knotens existiert „Reset to default" für Settings). | `NodeFormDialog`, `LocalWorklistPage` | Falsche Eingaben muss man manuell rückgängig machen | „Zurücksetzen"-Knopf mit Bestätigung |
 | E4 | **Kein Hinweis bei Duplikaten**: eine zweite Regel mit gleicher Quelle+Ziel ist erlaubt und sieht wie die erste aus. | `pages/RulesPage.tsx` | Doppelte Regeln → unklare Wirkung | Duplikat-Warnung beim Anlegen |
-| E5 | **Fehlermeldungen sind nicht mit dem Feld verknüpft** (kein `aria-invalid`/`aria-describedby`). | 0 Treffer in `src/features/broker/**` | Screenreader liest den Fehler nicht am Feld | `aria-invalid` + `aria-describedby` setzen |
+| E5 ✅ | **Fehlermeldungen sind nicht mit dem Feld verknüpft** (kein `aria-invalid`/`aria-describedby`). | 0 Treffer in `src/features/broker/**` | Screenreader liest den Fehler nicht am Feld | `aria-invalid` + `aria-describedby` setzen |
 
 ### F. Sprache
 
@@ -152,3 +154,39 @@ Feld.
 | Setting `echo_interval_s = "abc"` + Speichern | keine sichtbare Meldung, Feld behält „abc" |
 | Transform-Tag `0010-0010` | keine Inline-Meldung (Prüfung erst beim Absenden) |
 | Locale-Schlüssel | de/en je 469 Broker-Schlüssel, übrige 7 Sprachen 0 (Fallback Englisch greift) |
+
+---
+
+## 7. Umsetzungs-Log
+
+### Sprint 9 — UI-Härtung P1 (umgesetzt)
+
+**Behoben.**
+
+- **A1/A2 — Rückmeldung.** `useAuditedMutation` zeigt jetzt **immer** Feedback:
+  Erfolg als Toast („Gespeichert."), Fehler als Toast mit der Server-Meldung
+  (`Nicht gespeichert: must be between 5 and 3600`). Zusätzlich rendern die
+  Settings-Seite und die Karten TLS/ATNA/Alerting den abgelehnten Wert **inline**
+  (`role="alert"`, `aria-invalid` am Feld).
+- **B2/B3 — typisierte Eingaben.** `GET /settings` liefert jetzt `min`/`max`
+  (Integer) und `choices` (Enums). Die Settings-Seite rendert danach:
+  `bool` → Switch, `int` → `type="number"` mit `min`/`max` **plus Klartext-Hinweis
+  („Erlaubt: 5 bis 3600")**, `enum` → Auswahlfeld, sonst Text (URL als `type="url"`).
+  Buchstaben in Zahlenfeldern sind damit gar nicht mehr eingebbar.
+- **C1 — gefährliche Stationsregel.** Der Dialog warnt bei `allow` ohne Quelle
+  („…verbirgt alle Quellen — diese Konsole würde eine leere Arbeitsliste
+  erhalten"), und der Health-Check meldet `station_rule_hides_all` (error).
+- **D1/D2 — Dialoge auf kleinen Bildschirmen.** `LocalWorklistPage` und
+  `StationsPage` haben jetzt `max-h-[90vh] overflow-y-auto` wie alle anderen
+  Dialoge.
+- **E5 — Barrierefreiheit.** `aria-invalid` am abgelehnten Feld.
+
+**Verifikation.**
+
+| Ebene | Ergebnis |
+|---|---|
+| pytest | 395 Tests (+3: Settings-Constraints im API, `station_rule_hides_all` positiv/negativ) |
+| vitest | 449 Tests (+8: Zahlengrenzen, Enum als Auswahl, abgelehnter Wert sichtbar, Erfolgs-Toast, Dialog scrollbar, allow+leer-Warnung, Gegenprobe) |
+| Playwright | 50 Tests (+2), inkl. „Stationsregel warnt bei allow ohne Quelle" |
+| verify-ui.cjs | **114 Checks** (neu: Dialog passt bei 375 px, Zahleneinstellung typisiert/begrenzt, Bereich im Klartext, abgelehnter Wert sichtbar **und nicht gespeichert**) |
+| Live-Messung | Worklist-Dialog bei 375×812: `top=73`, Höhe 694, `scrollbar=true` (vorher: top=−235, Höhe 1 282, nicht scrollbar) |

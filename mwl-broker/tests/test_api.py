@@ -1143,6 +1143,26 @@ def test_source_and_target_tls_flags_round_trip(client):
     assert plain["tls"] is False and plain["tls_verify"] is True
 
 
+def test_settings_expose_constraints_for_the_ui(client):
+    """The UI constrains its inputs from the API — bounds and enum choices."""
+    rows = {s["key"]: s for s in client.get("/api/v1/settings").json()}
+
+    # integers carry their allowed range
+    interval = rows["echo_interval_s"]
+    assert interval["kind"] == "int"
+    assert interval["min"] == 5 and interval["max"] == 3600
+
+    # enums carry their choices
+    protocol = rows["atna_syslog_protocol"]
+    assert protocol["kind"] == "enum:tcp,tls"
+    assert protocol["choices"] == ["tcp", "tls"]
+    assert rows["rbac_mode"]["choices"] == ["off", "enforce"]
+
+    # non-numeric kinds have no bounds
+    assert rows["allowed_calling_aets"]["min"] is None
+    assert rows["allowed_calling_aets"]["choices"] == []
+
+
 def test_openapi_documents_all_endpoints(client):
     """Every path operation carries a summary/tag, query params and schema
     fields carry descriptions — keeps Swagger UI usable for integrators."""

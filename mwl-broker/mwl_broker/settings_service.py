@@ -379,20 +379,32 @@ def get_aets(key: str = "allowed_calling_aets") -> list[str]:
     return [a.strip() for a in get_str(key).split(",") if a.strip()]
 
 
+def _constraints(kind: str) -> dict:
+    """Numeric bounds and enum choices so the UI can constrain its inputs."""
+    if kind.startswith("enum:"):
+        return {"choices": [c.strip() for c in kind.split(":", 1)[1].split(",") if c.strip()]}
+    return {}
+
+
 def list_all() -> list[dict]:
     with get_session() as s:
         rows = {r.key: r.value for r in s.scalars(select(BrokerSetting)).all()}
     out = []
     for key, (kind, description) in KNOWN.items():
         value = rows.get(key, _env_default(key))
-        out.append({
+        entry = {
             "key": key,
             "value": value,
             "default": _env_default(key),
             "source": "db" if key in rows else "env",
             "kind": kind,
             "description": description,
-        })
+        }
+        entry.update(_constraints(kind))
+        if kind == "int":
+            lo, hi = _INT_RANGES.get(key, (0, 10**9))
+            entry["min"], entry["max"] = lo, hi
+        out.append(entry)
     return out
 
 

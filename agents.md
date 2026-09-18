@@ -216,6 +216,10 @@ Token rotieren = nur die Store-Datei neu schreiben:
   nicht (`create_all` ändert vorhandene Tabellen nie) und die API antwortet mit
   500. Revisionen nach der Baseline müssen **defensiv** sein (Existenzprüfung),
   weil eine frische DB das Schema schon hat. `tests/test_db.py` erzwingt das.
+- **Jede Schreibaktion meldet sich zurück.** `useAuditedMutation` zeigt Erfolg
+  als Toast und Fehler als Toast + (wo vorhanden) Inline-`role="alert"`; die
+  Settings-API liefert `min`/`max`/`choices`, damit die UI ihre Eingaben
+  begrenzen kann statt auf 422er zu warten.
 - **RBAC ist eine Middleware, kein Endpunkt-Code.** `rbac_mode=enforce` blockt
   jeden Nicht-GET auf `/api/v1/*` ohne die Write-Rolle; der Status-Endpunkt
   (`/rbac/status`) liefert der UI `can_write` für den Banner.

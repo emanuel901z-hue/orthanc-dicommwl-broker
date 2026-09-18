@@ -89,8 +89,8 @@ python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 392 Tests (API + DIMSE e2e + TLS/RBAC/Retention/HL7/ATNA)
-cd orthanc-explorer-3-usable && npm run test      # 441 Tests
+cd mwl-broker && python -m pytest tests -q        # 395 Tests (API + DIMSE e2e + TLS/RBAC/Retention/HL7/ATNA)
+cd orthanc-explorer-3-usable && npm run test      # 449 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -165,8 +165,10 @@ Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
 - [ ] Alle Roadmap-Themen sind umgesetzt; die Betreiberentscheidungen sind in
       der [Roadmap](docs/roadmap-worklist-broker.md#offene-entscheidungen-an-den-betreiber)
       konfigurierbar dokumentiert.
-- [ ] Offen: **UI-Härtung** — die [DAU-Gap-Analyse](docs/ui-dau-gap-analysis.md)
-      listet 19 Befunde (3× P1: stilles Scheitern von Einstellungs-Writes,
-      nicht bedienbarer Worklist-Dialog auf 375 px, Stationsregel `allow` mit
-      leerer Quellenliste) samt priorisiertem Maßnahmenplan.
+- [x] Sprint 9 (UI-Härtung P1): Rückmeldung für jede Einstellung (Toast +
+      Inline-Fehler), typisierte/begrenzte Eingaben aus der API, Warnung bei
+      gefährlichen Stationsregeln, Dialoge auf kleinen Bildschirmen bedienbar —
+      Details in der [DAU-Gap-Analyse](docs/ui-dau-gap-analysis.md#sprint-9--ui-härtung-p1-umgesetzt)
+- [ ] Offen: Sprint 10/11 der [DAU-Gap-Analyse](docs/ui-dau-gap-analysis.md)
+      (Eingabeführung, Bedienfluss, Konsistenz, i18n)
 - [ ] HL7-ORM/ADT-Adapter (Worklist-Einträge ohne Upstream-C-FIND)
