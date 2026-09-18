@@ -165,4 +165,8 @@ Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
 - [ ] Alle Roadmap-Themen sind umgesetzt; die Betreiberentscheidungen sind in
       der [Roadmap](docs/roadmap-worklist-broker.md#offene-entscheidungen-an-den-betreiber)
       konfigurierbar dokumentiert.
+- [ ] Offen: **UI-Härtung** — die [DAU-Gap-Analyse](docs/ui-dau-gap-analysis.md)
+      listet 19 Befunde (3× P1: stilles Scheitern von Einstellungs-Writes,
+      nicht bedienbarer Worklist-Dialog auf 375 px, Stationsregel `allow` mit
+      leerer Quellenliste) samt priorisiertem Maßnahmenplan.
 - [ ] HL7-ORM/ADT-Adapter (Worklist-Einträge ohne Upstream-C-FIND)
