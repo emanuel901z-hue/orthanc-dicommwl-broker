@@ -196,6 +196,20 @@ Quellen, offene Breaker, leere AET-Allowlist, AET-Kollision mit dem Broker
 selbst) und liefert Findings mit stabilem `code` — die UI übersetzt sie und
 verlinkt direkt ins betroffene Formular.
 
+### MFA-Testumgebung (unbedarfter Anwender)
+
+`./mfa-test.sh` fährt den isolierten Test-Stack hoch und spielt die Journey
+einer MFA durch: Unsinn eintippen, zu früh speichern, korrigieren, Zurück/F5,
+gefährliche Regeln anlegen. Der Bericht
+(`orthanc-explorer-3-usable/e2e/stack/screenshots/mfa-journey-*.md`) listet jede
+Prüfung mit „OK"/„LÜCKE". Gefundene und behobene Lücken:
+Formulare überleben jetzt Zurück/F5 (Entwurf in `sessionStorage` + Warnung beim
+Verlassen), `GET /sources` lieferte 500 (Eingabe-Prüfung lief auf
+Antwort-Modellen), Erfolgsmeldungen gibt es für **alle** Schreibaktionen,
+Feldmeldungen sind live und als `role="alert"` ausgezeichnet, und der Server
+lehnt unsinnige Adressen/AETs ab. Details:
+[docs/mfa-usability-test.md](docs/mfa-usability-test.md).
+
 ### UI-Härtung (DAU-Sicherheit)
 
 Die [DAU-Gap-Analyse](docs/ui-dau-gap-analysis.md) prüft die Oberfläche auf
@@ -450,9 +464,9 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 395 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 462 Tests, 0 Errors |
-| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 50/50 grün, 0 Console-/Page-/Netzwerk-Fehler |
+| `pytest` | 396 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 467 Tests, 0 Errors |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 53/53 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
 
@@ -557,7 +571,9 @@ Gefundene und behobene Defekte:
 | 16 | Sprint 9: UI-Härtung P1 (Rückmeldung, typisierte Eingaben, Dialoge) | ✅ |
 | 17 | Sprint 10: Eingabeführung (Picker, Vorprüfung, ein Write pro Änderung) | ✅ |
 | 18 | Sprint 11: Bedienfluss (Dirty-Guard, Duplikate, A11y) — DAU-Analyse abgeschlossen | ✅ |
+| 19 | MFA-Testumgebung (unbedarfter Anwender) + behobene Befunde | ✅ |
 | 18 | Sprint 11: Bedienfluss (Dirty-Guard, Duplikate, A11y) — DAU-Analyse abgeschlossen | ✅ |
+| 19 | MFA-Testumgebung (unbedarfter Anwender) + behobene Befunde | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert

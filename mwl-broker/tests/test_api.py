@@ -1143,6 +1143,37 @@ def test_source_and_target_tls_flags_round_trip(client):
     assert plain["tls"] is False and plain["tls_verify"] is True
 
 
+def test_nonsense_node_values_are_rejected(client):
+    """A host with a space or an AE title in lower case can never work."""
+    base = {
+        "name": "mfa", "aet": "RIS_A", "host": "10.0.1.20", "port": 104,
+        "calling_aet": "MWLBROKER", "charset": "ISO_IR 100",
+    }
+
+    # nonsense the untrained user types: a sentence instead of an address
+    assert client.post("/api/v1/sources", json={**base, "host": "ris server 1"}).status_code == 422
+    assert client.post("/api/v1/sources", json={**base, "host": "http://ris"}).status_code == 422
+    assert client.post("/api/v1/sources", json={**base, "host": "10.0.1.20/pacs"}).status_code == 422
+
+    # DICOM AE titles are upper case
+    assert client.post("/api/v1/sources", json={**base, "aet": "ris_a"}).status_code == 422
+    assert client.post("/api/v1/sources", json={**base, "aet": "ct 01"}).status_code == 422
+    assert client.post("/api/v1/sources", json={**base, "calling_aet": "mwl"}).status_code == 422
+    # the port range is enforced as well
+    assert client.post("/api/v1/sources", json={**base, "port": 99999}).status_code == 422
+
+    # valid values still work (IP, hostname, docker service name)
+    for host in ("10.0.1.20", "ris-a.hospital.local", "mock-ris-a"):
+        created = client.post("/api/v1/sources", json={**base, "name": host, "host": host})
+        assert created.status_code == 201, created.text
+
+    # the same rules apply to targets
+    target = {"name": "pacs", "aet": "PACS", "host": "ris server", "port": 104}
+    assert client.post("/api/v1/targets", json=target).status_code == 422
+    assert client.post("/api/v1/targets",
+                       json={**target, "host": "10.0.1.30"}).status_code == 201
+
+
 def test_settings_expose_constraints_for_the_ui(client):
     """The UI constrains its inputs from the API — bounds and enum choices."""
     rows = {s["key"]: s for s in client.get("/api/v1/settings").json()}

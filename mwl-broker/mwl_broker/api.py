@@ -131,6 +131,22 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
     def _list(s: Session = _db_dep):
         return s.scalars(select(model).order_by(model.id)).all()
 
+    def _check_node(body) -> None:
+        """Nonsense in a DICOM node never works — reject it with a clear message.
+
+        Only on input: an old row that predates the rule must still be listable.
+        """
+        if kind not in ("source", "target"):
+            return
+        from .schemas import validate_node_fields
+
+        errors = validate_node_fields(
+            getattr(body, "host", ""), getattr(body, "aet", ""),
+            getattr(body, "calling_aet", None),
+        )
+        if errors:
+            raise HTTPException(422, "; ".join(errors))
+
     @router.post(
         path, response_model=out_schema, status_code=201, name=f"create_{path[1:]}",
         tags=[f"{path[1:]}"], summary=f"Create a {kind}",
@@ -142,6 +158,7 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
         body: Annotated[in_schema, Body(description=f"{kind.capitalize()} definition.")],
         s: Session = _db_dep,
     ):
+        _check_node(body)
         if s.scalar(select(model).where(model.name == body.name)):
             raise HTTPException(409, f"{body.name} already exists")
         row = model(**body.model_dump())
@@ -168,6 +185,7 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
         row = s.get(model, row_id)
         if row is None:
             raise HTTPException(404, "not found")
+        _check_node(body)
         before = audit.snapshot(kind, row)
         for k, v in body.model_dump().items():
             setattr(row, k, v)

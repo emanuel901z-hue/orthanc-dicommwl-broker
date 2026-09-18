@@ -3,10 +3,44 @@
 Field descriptions feed the generated OpenAPI documentation — keep them
 up to date (Swagger UI at /docs, spec at /openapi.json).
 """
+import re
+
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+# Hostname, IP address or docker service name — no scheme, no spaces, no path.
+_HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$")
+# DICOM AE titles are upper case, 1-16 characters of A-Z 0-9 _ -
+_AET_RE = re.compile(r"^[A-Z0-9_-]{1,16}$")
+
+
+def validate_node_fields(host: str, aet: str, calling_aet: str | None = None) -> list[str]:
+    """Checks for a DICOM node — applied to *input* only.
+
+    The same rules must not run on responses: an old row that predates the rule
+    would break the list endpoint. The API layer calls this for create/update.
+    """
+    errors: list[str] = []
+    host = (host or "").strip()
+    if "://" in host:
+        errors.append("enter the host only, without http:// or https://")
+    elif "/" in host or " " in host:
+        errors.append("the host must not contain spaces or slashes")
+    elif not _HOST_RE.match(host):
+        errors.append("not a valid host name or IP address")
+    if not _AET_RE.match((aet or "").strip()):
+        errors.append("an AE title has 1-16 characters: A-Z, 0-9, _ or - (upper case)")
+    if calling_aet and not _AET_RE.match(calling_aet.strip()):
+        errors.append("the calling AE title has 1-16 characters: A-Z, 0-9, _ or -")
+    return errors
+
+
+# Hostname, IP address or docker service name — no scheme, no spaces, no path.
+# DICOM AE titles are upper case, 1-16 characters of A-Z 0-9 _ -
+_AET_RE = re.compile(r"^[A-Z0-9_-]{1,16}$")
 
 
 class SourceIn(BaseModel):
