@@ -34,6 +34,50 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "Interval of the C-ECHO monitoring loop in seconds.",
     ),
+    "upstream_timeout_s": (
+        "int",
+        "Timeout for one upstream C-FIND query in seconds.",
+    ),
+    "audit_actor_header": (
+        "str",
+        "Header that carries the operator identity (empty = 'api').",
+    ),
+    "rbac_mode": (
+        "enum:off,enforce",
+        "enforce: configuration writes need the write role in the roles header.",
+    ),
+    "rbac_roles_header": (
+        "str",
+        "Header the proxy uses to pass the user's roles (comma separated).",
+    ),
+    "rbac_write_role": (
+        "str",
+        "Role that allows changing the configuration (brokerWrite).",
+    ),
+    "retention_query_log_days": (
+        "int",
+        "Keep worklist query logs for this many days (0 = forever).",
+    ),
+    "retention_store_log_days": (
+        "int",
+        "Retention of the forwarded-instance log in days (0 = keep forever).",
+    ),
+    "retention_local_items_days": (
+        "int",
+        "Also delete local worklist items older than this (0 = only their own validity applies).",
+    ),
+    "retention_hl7_days": (
+        "int",
+        "Keep inbound HL7 messages for this many days (0 = forever).",
+    ),
+    "retention_spool_days": (
+        "int",
+        "Keep spool entries (delivered and dead letters) for this many days (0 = forever).",
+    ),
+    "retention_config_audit_days": (
+        "int",
+        "Keep the configuration change log for this many days (0 = forever, recommended).",
+    ),
     "tls_inbound_enabled": (
         "bool",
         "Offer a TLS listener for the modalities (next to the plain port).",
@@ -136,7 +180,8 @@ KNOWN: dict[str, tuple[str, str]] = {
     ),
     "notify_webhook_url": (
         "url",
-        "Webhook that receives broker alerts (Slack/Teams-compatible JSON, empty = off).",
+        "Webhook that receives broker alerts (Slack/Teams-compatible JSON, "
+        "comma separated for several targets, empty = off).",
     ),
     "notify_events": (
         "events",
@@ -204,57 +249,19 @@ KNOWN: dict[str, tuple[str, str]] = {
     ),
     "breaker_open_seconds": (
         "int",
-        "How long an open circuit breaker skips a source before probing it again.",
+        "How long an open breaker stays open before the next attempt.",
     ),
 }
 
-_INT_RANGES = {
+_INT_RANGES: dict[str, tuple[int, int]] = {
     "seen_item_ttl_days": (1, 3650),
     "echo_interval_s": (5, 3600),
-    "tls_inbound_enabled": (
-        "bool",
-        "Offer a TLS listener for the modalities (next to the plain port).",
-    ),
-    "tls_inbound_port": (
-        "int",
-        "Port of the TLS listener (2762 is the usual DICOM TLS port).",
-    ),
-    "tls_inbound_cert_file": (
-        "path",
-        "Server certificate the modalities verify (PEM).",
-    ),
-    "tls_inbound_key_file": (
-        "path",
-        "Private key of the server certificate (PEM, unencrypted).",
-    ),
-    "tls_inbound_ca_file": (
-        "path",
-        "CA bundle used to verify modality certificates (for mTLS).",
-    ),
-    "tls_inbound_client_auth": (
-        "enum:none,optional,required",
-        "Whether modalities must present a certificate (mTLS).",
-    ),
-    "tls_outbound_ca_file": (
-        "path",
-        "CA bundle used to verify RIS/PACS certificates (empty = system store).",
-    ),
-    "tls_outbound_client_cert_file": (
-        "path",
-        "Certificate the broker presents to RIS/PACS (for mTLS).",
-    ),
-    "tls_outbound_client_key_file": (
-        "path",
-        "Private key of that certificate (PEM, unencrypted).",
-    ),
-    "tls_outbound_verify": (
-        "bool",
-        "Verify the remote certificate on outgoing connections.",
-    ),
-    "tls_dir": (
-        "path",
-        "Directory for certificates the broker generates itself.",
-    ),
+    "retention_query_log_days": (0, 36500),
+    "retention_store_log_days": (0, 3650),
+    "retention_local_items_days": (0, 3650),
+    "retention_hl7_days": (0, 3650),
+    "retention_spool_days": (0, 3650),
+    "retention_config_audit_days": (0, 36500),
     "tls_inbound_port": (1, 65535),
     "local_priority": (-1000, 1000),
     "local_default_validity_days": (0, 3650),

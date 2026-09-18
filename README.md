@@ -89,8 +89,8 @@ python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 377 Tests (API + DIMSE e2e + TLS/HL7/ATNA/Spool/Cache)
-cd orthanc-explorer-3-usable && npm run test      # 435 Tests
+cd mwl-broker && python -m pytest tests -q        # 392 Tests (API + DIMSE e2e + TLS/RBAC/Retention/HL7/ATNA)
+cd orthanc-explorer-3-usable && npm run test      # 441 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -158,7 +158,11 @@ Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
       TLS-Listener neben dem Klartext-Port, TLS je Quelle/Ziel, Erzeugung
       selbstsignierter Zertifikate, Ablaufüberwachung und Endpunkt-Prüfung —
       Details im [Umsetzungs-Log](docs/roadmap-worklist-broker.md#sprint-7--dicom-tlsmtls--zertifikatsverwaltung-umgesetzt)
-- [ ] Alle Roadmap-Themen (P0/P1/P2) sind umgesetzt. Offen sind nur noch die
-      Betreiberentscheidungen (u. a. RBAC-Trennung, Retention) —
-      siehe [Roadmap](docs/roadmap-worklist-broker.md#offene-entscheidungen-an-den-betreiber)
+- [x] Sprint 8 (Roadmap): Betreiberentscheidungen umsetzbar — RBAC
+      (brokerRead/brokerWrite hinter dem Proxy), Retention/Löschkonzepte
+      (konfigurierbar + sichtbar), flexibles Alerting (mehrere Webhooks) —
+      Details im [Umsetzungs-Log](docs/roadmap-worklist-broker.md#sprint-8--betreiberentscheidungen-umsetzbar-gemacht-umgesetzt)
+- [ ] Alle Roadmap-Themen sind umgesetzt; die Betreiberentscheidungen sind in
+      der [Roadmap](docs/roadmap-worklist-broker.md#offene-entscheidungen-an-den-betreiber)
+      konfigurierbar dokumentiert.
 - [ ] HL7-ORM/ADT-Adapter (Worklist-Einträge ohne Upstream-C-FIND)

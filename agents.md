@@ -31,6 +31,15 @@ cd mwl-broker && python -m pytest tests -q
 # …mit Coverage (aktuell 96 %)
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 
+# RBAC + Retention (laufender Stack)
+curl -s http://127.0.0.1:18081/api/v1/rbac/status | python3 -m json.tool
+curl -s http://127.0.0.1:18081/api/v1/retention | python3 -m json.tool
+curl -X POST http://127.0.0.1:18081/api/v1/retention/purge   # auditiert
+# Schreibzugriff erzwingen (Proxy übergibt die Rollen):
+curl -X PUT http://127.0.0.1:18081/api/v1/settings/rbac_mode \
+  -H 'Content-Type: application/json' -H 'X-OE3-Roles: brokerWrite' \
+  -d '{"value":"enforce"}'
+
 # DICOM-TLS (laufender Stack)
 curl -s http://127.0.0.1:18081/api/v1/tls/overview | python3 -m json.tool
 curl -s -X POST http://127.0.0.1:18081/api/v1/tls/self-signed -H 'Content-Type: application/json' \
@@ -207,6 +216,12 @@ Token rotieren = nur die Store-Datei neu schreiben:
   nicht (`create_all` ändert vorhandene Tabellen nie) und die API antwortet mit
   500. Revisionen nach der Baseline müssen **defensiv** sein (Existenzprüfung),
   weil eine frische DB das Schema schon hat. `tests/test_db.py` erzwingt das.
+- **RBAC ist eine Middleware, kein Endpunkt-Code.** `rbac_mode=enforce` blockt
+  jeden Nicht-GET auf `/api/v1/*` ohne die Write-Rolle; der Status-Endpunkt
+  (`/rbac/status`) liefert der UI `can_write` für den Banner.
+- **Retention: nichts implizit löschen.** `0` Tage = für immer (Änderungs-
+  protokoll ist Default 0); Purge nur über die API (auditiert) oder den
+  periodischen Tick.
 - **TLS bleibt opt-in und getrennt pro Richtung.** Eingehend = zweiter Listener
   (Klartext läuft weiter), ausgehend = je Knoten `tls`/`tls_verify`. `tls_verify`
   nur bewusst abschalten (Health-Warnung). `tls_args` braucht **immer** den

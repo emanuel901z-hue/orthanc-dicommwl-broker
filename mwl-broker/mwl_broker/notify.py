@@ -51,8 +51,12 @@ def events() -> list[dict]:
     ]
 
 
-def _url() -> str:
-    return settings_service.get_str("notify_webhook_url").strip()
+def _urls() -> list[str]:
+    """One or more webhook targets (comma separated) — e.g. Teams *and* a
+    syslog converter in parallel."""
+    return [part.strip() for part in
+            (settings_service.get_str("notify_webhook_url") or "").split(",")
+            if part.strip()]
 
 
 def subscribed(code: str) -> bool:
@@ -143,8 +147,8 @@ def notify(code: str, message: str, details: dict | None = None,
     if code not in EVENTS:
         log.error("notify: unknown event %r", code)
         return False
-    url = _url()
-    if not url or not subscribed(code):
+    urls = _urls()
+    if not urls or not subscribed(code):
         return False
     key = f"{code}:{subject or ''}"
     if _debounced(key):
@@ -153,24 +157,45 @@ def notify(code: str, message: str, details: dict | None = None,
         return False
 
     payload = _payload(code, message, details)
-    threading.Thread(target=_deliver, args=(url, payload, code), daemon=True).start()
+    threading.Thread(target=_deliver_all, args=(urls, payload, code), daemon=True).start()
     return True
 
 
+def _deliver_all(urls: list[str], payload: dict, code: str) -> None:
+    """Deliver to every configured target; ok when at least one accepted it."""
+    errors = []
+    delivered = 0
+    for url in urls:
+        ok, error = _post(url, payload)
+        if ok:
+            delivered = True
+            metrics.NOTIFY_SENT.labels(event=code).inc()
+        else:
+            metrics.NOTIFY_FAILED.labels(event=code).inc()
+            errors.append(f"{_redacted(url)}: {error}")
+    if delivered:
+        log.info("notify: delivered %s to %d webhook(s)", code, len(urls))
+    else:
+        log.warning("notify: delivery of %s failed: %s", code, "; ".join(errors))
+
+
 def send_test() -> dict:
-    """Send a test message synchronously (the UI shows the result)."""
-    url = _url()
-    if not url:
+    """Send a test message synchronously to every configured target."""
+    urls = _urls()
+    if not urls:
         return {"ok": False, "error": "no webhook URL configured"}
     payload = _payload("config_error", "Test message from the MWL broker configuration UI.",
                        {"test": True})
-    ok, error = _post(url, payload)
+    results = [_post(url, payload) for url in urls]
+    ok = any(ok for ok, _error in results)
     if ok:
         metrics.NOTIFY_SENT.labels(event="test").inc()
     else:
         metrics.NOTIFY_FAILED.labels(event="test").inc()
-    log.info("notify: test message to %s -> %s", _redacted(url), "ok" if ok else error)
-    return {"ok": ok, "error": error}
+    errors = [f"{_redacted(url)}: {error}" for (ok, error), url in zip(results, urls) if not ok]
+    log.info("notify: test message to %d webhook(s) -> %s", len(urls),
+             "ok" if ok else "failed")
+    return {"ok": ok, "error": "" if ok else ("; ".join(errors) or "delivery failed")}
 
 
 def reset_for_tests() -> None:

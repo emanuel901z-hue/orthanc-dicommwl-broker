@@ -373,6 +373,33 @@ case "$tls_check" in
   *) echo "FAIL: the TLS endpoint check did not succeed" >&2; exit 1 ;;
 esac
 
+echo "── RBAC: read-only vs. write role ──"
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/rbac_mode" \
+  -H 'Content-Type: application/json' -H 'X-OE3-Roles: brokerWrite' \
+  -d '{"value":"enforce"}' > /dev/null
+
+denied=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BROKER_API_URL/api/v1/sources" \
+  -H 'Content-Type: application/json' -d '{"name":"denied","aet":"DENIED","host":"h","port":1}')
+echo "   write without the role: $denied"
+[ "$denied" = "403" ] || { echo "FAIL: a read-only caller could write" >&2; exit 1; }
+
+allowed=$(curl -s -X POST "$BROKER_API_URL/api/v1/sources" \
+  -H 'Content-Type: application/json' -H 'X-OE3-Roles: brokerWrite' \
+  -d '{"name":"denied-check","aet":"DENIED","host":"127.0.0.1","port":1,"calling_aet":"MWLBROKER","charset":"ISO_IR 100"}')
+allowed_name=$(echo "$allowed" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('name', d.get('detail', '?')))" 2>/dev/null || echo "error")
+echo "   write with the role: $allowed_name"
+[ "$allowed_name" = "denied-check" ] || { echo "FAIL: the write with the role did not work" >&2; exit 1; }
+rbac_status=$(curl -sf "$BROKER_API_URL/api/v1/rbac/status" -H 'X-OE3-Roles: brokerRead' \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['enforced'], d['can_write'])")
+echo "   rbac status (read-only caller): $rbac_status"
+case "$rbac_status" in
+  "True False") ;;
+  *) echo "FAIL: the read-only caller is not reported as such" >&2; exit 1 ;;
+esac
+curl -sf -X PUT "$BROKER_API_URL/api/v1/settings/rbac_mode" \
+  -H 'Content-Type: application/json' -H 'X-OE3-Roles: brokerWrite' \
+  -d '{"value":"off"}' > /dev/null
+
 echo "── Local worklist items + HL7 ORM ──"
 # A locally scheduled emergency must appear in the worklist the modality gets.
 curl -s -X POST "$BROKER_API_URL/api/v1/local-items" -H 'Content-Type: application/json' -d '{

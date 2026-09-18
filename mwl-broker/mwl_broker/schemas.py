@@ -363,6 +363,41 @@ class SettingUpdateIn(BaseModel):
     )
 
 
+class RbacStatusOut(BaseModel):
+    """Access mode for the caller (read vs. write)."""
+
+    mode: str = Field(description="off | enforce.")
+    enforced: bool = Field(description="Whether writes are restricted.")
+    roles_header: str = Field(description="Header the proxy passes the roles in.")
+    write_role: str = Field(description="Role that allows configuration changes.")
+    roles: list[str] = Field(description="Roles the caller presented.")
+    can_write: bool = Field(description="Whether this caller may change the configuration.")
+
+
+class RetentionTableOut(BaseModel):
+    """Retention state of one table."""
+
+    table: str = Field(description="Table name.")
+    description: str = Field(description="What the rows are.")
+    rows: int = Field(description="Current row count.")
+    oldest: datetime | None = Field(default=None, description="Oldest row (UTC).")
+    retention_days: int = Field(description="Configured retention (0 = keep forever).")
+    will_delete: int = Field(description="Rows a cleanup would remove right now.")
+
+
+class RetentionOut(BaseModel):
+    """Retention overview for the UI."""
+
+    tables: list[RetentionTableOut] = Field(description="One entry per table.")
+
+
+class RetentionPurgeOut(BaseModel):
+    """Result of a manual cleanup."""
+
+    removed: dict = Field(description="Removed rows per table.")
+    total: int = Field(description="Total removed rows.")
+
+
 class TlsCertificateOut(BaseModel):
     """State of one configured certificate file (never key material)."""
 

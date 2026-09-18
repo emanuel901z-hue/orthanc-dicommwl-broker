@@ -68,7 +68,21 @@ class Settings(BaseSettings):
     atna_tls_ca_file: str = ""          # optional CA bundle for TLS
     atna_queue_max: int = 10000         # bounded buffer against a dead ARR
 
-    # Alerting (webhook)
+    # RBAC: the proxy authenticates and injects the roles; the broker decides
+    # read vs. write. Off by default — a single-admin setup works unchanged.
+    rbac_mode: str = "off"              # off | enforce
+    rbac_roles_header: str = "X-OE3-Roles"
+    rbac_write_role: str = "brokerWrite"
+
+    # Retention (days; 0 = keep forever) — see GET /retention
+    retention_query_log_days: int = 90
+    retention_store_log_days: int = 180
+    retention_hl7_days: int = 30
+    retention_local_items_days: int = 0     # the items carry their own validity
+    retention_spool_days: int = 7           # delivered + dead entries
+    retention_config_audit_days: int = 0    # the accounting trail: keep forever
+
+    # Locally maintained worklist items (emergencies, unscheduled exams)
     notify_webhook_url: str = ""        # empty = alerting disabled
     notify_events: str = ""             # comma-separated event codes (see GET /notify/events)
     notify_min_interval_s: int = 300    # de-bounce per event+subject

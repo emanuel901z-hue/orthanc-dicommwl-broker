@@ -945,25 +945,75 @@ jeweils Backend, API, DAU-sichere OE3-Oberfläche, Tests und Verifikation:
 | test-stack.sh | Zertifikat erzeugen → Listener aktiv → **C-FIND über TLS mit CA-Verifikation** → Endpunkt-Check `TLSv1.3` + C-ECHO |
 | verify-ui.cjs | 104 Checks (Desktop 1400×900 + Mobile 375×812) |
 
+### Sprint 8 — Betreiberentscheidungen umsetzbar gemacht (umgesetzt)
+
+Die vier offenen Betreiberentscheidungen sind jetzt **konfigurierbar und
+sichtbar** statt offen:
+
+**RBAC (brokerRead/brokerWrite).** `rbac_mode` (`off|enforce`, Default off),
+`rbac_roles_header` (Default `X-OE3-Roles`) und `rbac_write_role` (Default
+`brokerWrite`). Im Modus `enforce` braucht jeder Nicht-GET-Request die Rolle im
+Rollen-Header; Lesen bleibt offen (der Proxy authentifiziert bereits). Die UI
+fragt `GET /rbac/status` ab und zeigt ein Banner, wenn der Anwender nur lesen
+darf — statt ihn in 403er laufen zu lassen. Im Test-Stack: Schreiben ohne Rolle →
+403, mit Rolle → 201, Status-Endpunkt meldet `enforced=True can_write=False`.
+
+**Retention/Löschkonzepte.** Pro Tabelle konfigurierbar (Tage, `0` = für immer):
+Query-Log (90), Store-Log (90), HL7-Nachrichten (30), Spool-Einträge (7), lokale
+Einträge (0 = nur die eigene Gültigkeit), Änderungsprotokoll (0 = für immer —
+das Rechnungslegungsarchiv). `retention.py` als einzige Schnittstelle: Übersicht
+(Zeilen, ältester Eintrag, was ein Aufräumen jetzt löschen würde), Purge (per
+API auditiert), periodischer Lauf im Echo-Loop, Metrik
+`mwl_retention_oldest_seconds{table}`. UI: **Retention-Karte** mit den
+Tabellen, „für immer" ausdrücklich als Text, „Jetzt aufräumen" mit
+Bestätigung und Ergebnis. Die Worklist-Cache ist bewusst **nicht** Teil davon —
+sie hat ihren eigenen, viel kürzeren Lebenszyklus (Stale-Fenster + „Cache
+leeren").
+
+**Alerting-Ziel flexibel:** `notify_webhook_url` akzeptiert jetzt **mehrere
+Ziele** (Komma-getrennt) — z. B. Teams **und** ein Syslog-Konverter parallel.
+Die Zustellung läuft fire-and-forget an alle Ziele; der Testversand meldet das
+Ergebnis je Ziel. E-Mail/Syslog bleibt über einen Konverter-Dienst lösbar
+(dokumentiert).
+
+**TLS-Rollout-Reihenfolge** ist ein Ablauf, kein Code — als Runbook im
+Roadmap-Abschnitt P2-3 dokumentiert (zweiter Listener → Zertifikat erzeugen →
+Endpunkt-Prüfung → eine Modalität nach der anderen umstellen → Klartext-Port
+abschalten).
+
+**Beim Umsetzen gefunden und behoben.**
+
+| Fund | Fix |
+|---|---|
+| Die Settings-Datei hatte durch die Patches verunglückte Blöcke (`local_priority` mit TLS-Beschreibung, Beschreibungs-Tupel in `_INT_RANGES`) | `KNOWN` und `_INT_RANGES` **kanonisch neu aufgebaut** (alle 60 Schlüssel, korrekte Arten, Bereiche) |
+| `retention_spool_days_days` (Tippfehler) | auf `retention_spool_days` korrigiert |
+| Der RBAC-Reset im Test-Stack nutzte `DELETE` — das ist selbst ein Write und wurde abgewiesen | Reset über `PUT` mit der Write-Rolle |
+| `retention.purge()` lief nicht über die API → kein Audit-Eintrag | der Test führt die Aktion über den Endpunkt (der auditiert) |
+
+**Tests & Verifikation.**
+
+| Ebene | Umfang |
+|---|---|
+| pytest | 392 Tests, 96 % Coverage (+15: RBAC-Policy und -Enforcement, Retention-Übersicht/Purge/Metriken, Multi-Webhook) |
+| vitest | 441 Tests, 98 % Broker-UI-Coverage (+6: Retention-Karte, RBAC-Banner) |
+| Playwright | 48 Tests (Desktop + Mobile), inkl. Retention-Karte und RBAC-Banner |
+| test-stack.sh | RBAC: Schreiben ohne Rolle → **403**, mit Rolle → **201**, Status-Endpunkt meldet `can_write=False` für den Read-only-Aufrufer |
+| verify-ui.cjs | 109 Checks (Desktop 1400×900 + Mobile 375×812) |
+
 ## Offene Entscheidungen (an den Betreiber)
 
-1. **Cache und PHI — entschieden, aber bestätigen lassen:** Der Cache speichert
-   Worklist-Daten (inkl. Patientennamen) für höchstens `cache_stale_max_s`
-   (Default 120 s) in der internen DB. Kein Log, keine API-Exposition von
-   Patientendaten, automatischer Purge, „Cache leeren" im UI, Stale nur im
-   Fehlerfall. Wer das nicht möchte, setzt `cache_enabled = false` (dann
-   antwortet der Broker im Fehlerfall leer) oder `cache_stale_max_s = 0`.
-2. **Spool — entschieden, aber bestätigen lassen:** Payloads liegen auf einem
-   eigenen Volume (`spool_dir`), Budget 20000 Einträge / 10 GiB, zugestellte
-   Einträge bleiben 24 h als Duplikatsschutz. Wer mehr/weniger braucht, ändert
-   `spool_max_items`, `spool_max_bytes`, `spool_retention_s` — oder schaltet den
-   Spool mit `spool_enabled = false` ganz ab (dann gilt wieder striktes
-   Fehlermelden an die Modalität).
-3. **Audit-Actor:** kommt der Benutzerkontext aus einem vorgelagerten Proxy
-   (Header) oder bleibt das Audit rein technisch?
-4. **Alerting-Ziel — entschieden:** Webhook (Slack/Teams-kompatibles JSON). Die
-   Ereignisauswahl liegt in der UI, der Testversand zeigt sofort, ob der
-   Endpunkt annimmt. Wer E-Mail/Syslog braucht, kann einen kleinen
-   Konverter-Dienst davorhängen — der Broker bleibt bei einem JSON-POST.
-5. **TLS:** welche Strecken sind zu verschlüsseln (Modalität→Broker,
-   Broker→PACS, beides)?
+1. **RBAC — umsetzbar gemacht (Sprint 8):** `rbac_mode=enforce` schaltet die
+   Trennung scharf; der Proxy übergibt die Rollen im Header
+   (`rbac_roles_header`), und die Rolle `rbac_write_role` (Default
+   `brokerWrite`) darf die Konfiguration ändern. Lesen bleibt offen — der Proxy
+   authentifiziert bereits. Die UI zeigt Lesern einen Banner und deaktiviert die
+   Schreibaktionen, statt sie in 403er laufen zu lassen. Default: aus.
+2. **Retention — umsetzbar gemacht:** Pro Tabelle konfigurierbar (Query-Log 90,
+   Store-Log 90, HL7 30, Spool 7, lokale Einträge nur über ihre eigene
+   Gültigkeit, Änderungsprotokoll 0 = für immer). Übersicht + manuelles
+   Aufräumen in der UI; nichts wird implizit gelöscht.
+3. **Alerting-Ziel — flexibel:** mehrere Webhook-Ziele (Komma-getrennt) werden
+   parallel beliefert; E-Mail/Syslog über einen kleinen Konverter-Dienst davor.
+4. **TLS-Rollout — Runbook statt Code:** der zweite Listener + die Knoten-
+   Schalter erlauben die stufenweise Umstellung; das Vorgehen ist in P2-3
+   dokumentiert.

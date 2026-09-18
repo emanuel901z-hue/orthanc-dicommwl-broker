@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from . import local_worklist, metrics, notify, tls
+from . import local_worklist, metrics, notify, retention, tls
 from .db import session_factory
 from .models import MwlSource, PacsTarget
 from .upstream import c_echo
@@ -132,6 +132,7 @@ def echo_loop(interval_s: int, stop: threading.Event) -> None:
                 settings_service.purge_seen_items()
                 cache.purge()
                 local_worklist.purge_expired()
+                retention.purge()
         except Exception:
             pass  # DB not ready yet — next tick retries
         try:

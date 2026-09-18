@@ -44,6 +44,11 @@ from .schemas import (
     StationSimulateIn,
     StationRuleIn,
     StationRuleOut,
+    RbacStatusOut,
+    RetentionPurgeOut,
+    RetentionOut,
+    RetentionTableOut,
+    RbacStatusOut,
     TlsOverviewOut,
     TlsSelfSignedIn,
     TlsSelfSignedOut,
@@ -70,8 +75,8 @@ from .schemas import (
     TransformOut,
 )
 from . import (atna, audit, breaker, cache, config_io, health_checks, hl7,
-               local_worklist, metrics, notify, settings_service, simulate, spool,
-               station_rules, tls, transforms)
+               local_worklist, metrics, notify, rbac, retention, settings_service,
+               simulate, spool, station_rules, tls, transforms)
 from .models import (BrokerSetting, ConfigAudit, Hl7Message, LocalWorklistItem,
                      SeenItem, SourceBreaker, StationRule, TransformRule)
 
@@ -491,6 +496,57 @@ def reset_setting(
     audit.record(s, _actor(request), "reset.setting", "setting", None, before,
                  None, _correlation(request))
     s.commit()
+
+
+# ── Access control (read vs. write) ────────────────────────────────────
+
+
+@router.get(
+    "/rbac/status", response_model=RbacStatusOut, tags=["monitoring"],
+    summary="Access mode for this request",
+    description="Whether configuration writes are allowed for the caller. The UI "
+                "uses it to disable write actions instead of letting the operator "
+                "run into 403 responses.",
+    response_description="Enforcement state, the expected role and whether this caller may write.",
+)
+def rbac_status(request: Request, s: Session = _db_dep):
+    return rbac.describe(request.headers)
+
+
+# ── Retention ──────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/retention", response_model=RetentionOut, tags=["retention"],
+    summary="Retention overview",
+    description="Row counts, oldest row and the configured retention per table. "
+                "The change log is included but defaults to 'keep forever'.",
+    response_description="Per-table retention state.",
+)
+def retention_overview(s: Session = _db_dep):
+    return retention.overview()
+
+
+@router.post(
+    "/retention/purge", response_model=RetentionPurgeOut, tags=["retention"],
+    summary="Run the retention cleanup now",
+    description="Deletes everything older than the configured retention windows. "
+                "A table with retention 0 is skipped — nothing is deleted implicitly. "
+                "The action is audited.",
+    response_description="Removed row counts per table.",
+)
+def retention_purge(
+    request: Request,
+    table: str | None = Query(default=None, description="Only this table (default: all)."),
+    s: Session = _db_dep,
+):
+    if table is not None and table not in retention.TABLES:
+        raise HTTPException(404, f"unknown table {table}")
+    result = retention.purge(table)
+    audit.record(s, _actor(request), "purge.retention", "setting", table, None,
+                 result["removed"], _correlation(request))
+    s.commit()
+    return result
 
 
 # ── DICOM TLS ──────────────────────────────────────────────────────────

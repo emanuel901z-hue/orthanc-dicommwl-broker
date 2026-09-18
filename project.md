@@ -102,6 +102,8 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
 - `POST /simulate/station` — Vorschau: welche Quellen sieht eine Konsole?
 - `GET /atna/stats`, `POST /atna/test`, `GET /atna/sample` — ATNA-Audit-Trail
 - `GET /tls/overview`, `POST /tls/self-signed`, `POST /tls/test` — DICOM-TLS und Zertifikatsverwaltung
+- `GET /rbac/status` — Zugriffsmodus für den Aufrufer (Lesen vs. Schreiben)
+- `GET /retention`, `POST /retention/purge?table=` — Aufbewahrung und manuelles Aufräumen
 - `GET /logs/queries`, `GET /logs/stores` (paged, Filter: aet, source, status, since)
 - `GET /status` — SCP-Listener, Echo-Matrix (Quellen+Ziele inkl. `breaker_state`), Zähler
 - `GET /healthz`, `GET /metrics` (Prometheus)
@@ -193,6 +195,21 @@ Produktionsfehler (kein Default-Ziel, Regeln auf deaktivierten Knoten, tote
 Quellen, offene Breaker, leere AET-Allowlist, AET-Kollision mit dem Broker
 selbst) und liefert Findings mit stabilem `code` — die UI übersetzt sie und
 verlinkt direkt ins betroffene Formular.
+
+### Zugriffssteuerung (RBAC) und Retention
+
+**RBAC:** Der Proxy authentifiziert und übergibt die Rollen im Header
+(`rbac_roles_header`, Default `X-OE3-Roles`). `rbac_mode=enforce` schaltet die
+Trennung scharf: jeder Nicht-GET-Request braucht die Rolle `rbac_write_role`
+(Default `brokerWrite`), sonst 403 mit verständlicher Meldung. Lesen bleibt
+offen. `GET /rbac/status` liefert der UI `can_write` — sie zeigt Lesern einen
+Banner und deaktiviert die Schreibaktionen. Default: aus.
+
+**Retention:** pro Tabelle konfigurierbar (`retention_*_days`, 0 = für immer):
+Query-Log 90, Store-Log 90, HL7 30, Spool 7, lokale Einträge nur über ihre
+eigene Gültigkeit, Änderungsprotokoll 0 (Rechnungslegung). `GET /retention`
+zeigt Zeilen/ältesten Eintrag/Fenster, `POST /retention/purge` räumt auf
+(auditiert) — nichts wird implizit gelöscht.
 
 ### DICOM-TLS (mTLS) und Zertifikatsverwaltung
 
@@ -414,9 +431,9 @@ orthanc-dicommwl-broker/
 | C-STORE unbekannte Accession | Default-Target orthanc |
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
-| `pytest` | 377 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 435 Tests, 0 Errors |
-| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 46/46 grün, 0 Console-/Page-/Netzwerk-Fehler |
+| `pytest` | 392 Tests grün (inkl. DIMSE-Integration in-process) |
+| `npm run test` / `tsc` / `lint` | 441 Tests, 0 Errors |
+| Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 48/48 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
 
@@ -435,8 +452,8 @@ regulären Stack auf dem geteilten Host und lässt keinen Zustand zurück.
 
 `ci-local.sh` orchestriert die komplette lokale Pipeline gegen dieselbe
 Code-Basis wie Produktion (gleiche Dockerfiles, gleiche `orthanc.json`):
-backend pytest (377) → frontend tsc → lint → vitest (435) → docker-e2e
-(46 Browser-Tests + DIMSE-Smokes + Breaker-/Cache-/Spool-/Webhook-/HL7-/ATNA-/TLS-Szenario). Verifiziert: alle Stages grün.
+backend pytest (392) → frontend tsc → lint → vitest (441) → docker-e2e
+(48 Browser-Tests + DIMSE-Smokes + Breaker-/Cache-/Spool-/Webhook-/HL7-/ATNA-/TLS-/RBAC-Szenario). Verifiziert: alle Stages grün.
 `--quick` überspringt die Docker-Stage.
 
 #### Coverage-Audit (2026-09)
@@ -517,6 +534,7 @@ Gefundene und behobene Defekte:
 | 12 | Sprint 5 der Roadmap: Alerting/Webhooks | ✅ |
 | 13 | Sprint 6 der Roadmap: lokale Worklist + HL7-ORM, Stationsregeln, ATNA | ✅ |
 | 14 | Sprint 7 der Roadmap: DICOM-TLS/mTLS + Zertifikatsverwaltung | ✅ |
+| 15 | Sprint 8: RBAC-Trennung, Retention/Löschkonzepte, flexibles Alerting | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert

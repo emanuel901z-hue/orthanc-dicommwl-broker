@@ -19,6 +19,11 @@ ECHO_UP = Gauge(
     "mwl_echo_up", "Last C-ECHO result (1=ok, 0=fail)", ["kind", "name"]
 )
 SEEN_ITEMS = Gauge("mwl_seen_items", "Rows in seen_items table")
+RETENTION_OLDEST = Gauge(
+    "mwl_retention_oldest_seconds",
+    "Age of the oldest row per table (a growing backlog is visible)",
+    ["table"],
+)
 TLS_CERT_DAYS = Gauge(
     "mwl_tls_certificate_days_left",
     "Days until the configured certificate expires (0 = none configured)",

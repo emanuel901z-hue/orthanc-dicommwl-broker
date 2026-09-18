@@ -17,6 +17,8 @@ from .config import get_settings
 from .dimse import BrokerSCP
 from . import atna
 from . import mllp
+from . import rbac
+from . import rbac
 from .echo import echo_loop
 from .spool import worker as spool_worker
 
@@ -98,6 +100,8 @@ def create_app() -> FastAPI:
             {"name": "transforms", "description": "DICOM attribute modifications applied before forwarding (tag set/remove/prefix/suffix/replace/copy)."},
             {"name": "settings", "description": "Runtime settings — UI override over the deployment ENV default."},
             {"name": "local", "description": "Local worklist items (emergencies) and the HL7 ORM interface."},
+            {"name": "rbac", "description": "Access mode: who may change the configuration (decided by the proxy)."},
+            {"name": "retention", "description": "Retention and deletion: per-table overview and a manual cleanup."},
             {"name": "tls", "description": "DICOM TLS: certificate management, mTLS options and endpoint checks."},
             {"name": "atna", "description": "IHE ATNA audit trail: PS3.15 audit messages over syslog/TLS."},
             {"name": "spool", "description": "C-STORE spool: store-and-forward queue with retries and dead letters."},
@@ -110,6 +114,25 @@ def create_app() -> FastAPI:
         ],
         lifespan=lifespan,
     )
+    # Read/write split, decided by the proxy's roles header. Off by default:
+    # a single-admin installation works unchanged.
+    @app.middleware("http")
+    async def rbac_guard(request, call_next):
+        if request.method not in ("GET", "HEAD", "OPTIONS") \
+                and request.url.path.startswith("/api/v1") \
+                and not rbac.can_write(request.headers):
+            log.warning("RBAC: write denied for %s %s (roles: %s)", request.method,
+                        request.url.path, rbac.roles_from_headers(request.headers))
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse(
+                {"detail": "Your account is not allowed to change the broker "
+                           "configuration (missing role "
+                           f"'{rbac.describe(request.headers)['write_role']}')."},
+                status_code=403,
+            )
+        return await call_next(request)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],  # dev convenience; tighten behind the reverse proxy
