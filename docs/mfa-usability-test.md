@@ -68,14 +68,14 @@ Die Fehler, die die Journey absichtlich macht:
 
 ---
 
-## 4. Verbleibende Empfehlungen (nicht kritisch)
+## 4. Umgesetzte Empfehlungen
 
-| Empfehlung | Begründung |
+| Empfehlung | Umsetzung |
 |---|---|
-| Entwürfe auch für Routing-/Transform-Formulare | Die beiden kurzen Formulare haben den Dirty-Guard und die Verlassen-Warnung, aber noch keinen `sessionStorage`-Entwurf (3–5 Felder) |
-| Entwurf nach einer Stunde verwerfen | Ein alter Entwurf kann verwirren; ein Zeitstempel im Entwurf würde das lösen |
-| „Was ist das?"-Hilfe je Seite | Ein Neuling findet die Fachbegriffe (Priorität, Deduplizierung) nur über die Hinweistexte |
-| Mobile: Regel-/Transform-Dialoge | Teil 1 läuft mobil grün; die Select-lastigen Dialoge der Regel-Seiten werden weiterhin über `verify-ui.cjs` (375 px) geprüft |
+| Entwürfe auch für die kurzen Regel-/Transform-Formulare | **Umgesetzt.** Routing- und Transform-Regeln nutzen jetzt denselben Entwurfsmechanismus (`rule-*`, `transform-*`), inklusive Laden beim Öffnen und Verwerfen nach dem Speichern. |
+| Entwurf nach einer Stunde verwerfen | **Umgesetzt.** Der Entwurf liegt als `{value, savedAt}` in `sessionStorage`; `loadDraft` ignoriert und entfernt alles, was älter als `DRAFT_TTL_MS` (1 h) ist — und auch Altbestände aus früheren Versionen. |
+| „Was ist das?"-Hilfe je Seite | **Umgesetzt.** Jede der zehn Broker-Seiten (inklusive Übersicht) hat einen „Was ist das?"-Knopf mit drei Abschnitten: *Worum geht es?*, *Was trage ich ein?*, *Was geht am häufigsten schief?* — deutsch und englisch, mit den konkreten Fallstricken (Adresse als Satz, `allow` ohne Quelle, Standard-Ziel löschen …). |
+| Mobile: Regel-/Transform-Dialoge | Teil 1 der Journey läuft mobil grün; die Select-lastigen Dialoge werden zusätzlich über `verify-ui.cjs` bei 375 px geprüft (inklusive der neuen Hilfe). |
 
 ---
 

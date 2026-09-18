@@ -90,7 +90,7 @@ python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
 
 ```bash
 cd mwl-broker && python -m pytest tests -q        # 396 Tests (API + DIMSE e2e + TLS/RBAC/Retention/HL7/ATNA)
-cd orthanc-explorer-3-usable && npm run test      # 467 Tests
+cd orthanc-explorer-3-usable && npm run test      # 474 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -182,5 +182,7 @@ Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
       (`./mfa-test.sh`) prüft Fehleingaben, verständliche Meldungen, Korrigieren,
       Zurück/F5 und gefährliche Konfigurationen — Bericht unter
       `orthanc-explorer-3-usable/e2e/stack/screenshots/mfa-journey-*.md`,
-      Befunde in [docs/mfa-usability-test.md](docs/mfa-usability-test.md)
+      Befunde in [docs/mfa-usability-test.md](docs/mfa-usability-test.md);
+      Entwürfe (auch für Regel-/Transform-Formulare, Ablauf nach 1 h) und eine
+      „Was ist das?"-Hilfe auf jeder Seite
 - [ ] HL7-ORM/ADT-Adapter (Worklist-Einträge ohne Upstream-C-FIND)

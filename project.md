@@ -202,7 +202,10 @@ verlinkt direkt ins betroffene Formular.
 einer MFA durch: Unsinn eintippen, zu früh speichern, korrigieren, Zurück/F5,
 gefährliche Regeln anlegen. Der Bericht
 (`orthanc-explorer-3-usable/e2e/stack/screenshots/mfa-journey-*.md`) listet jede
-Prüfung mit „OK"/„LÜCKE". Gefundene und behobene Lücken:
+Prüfung mit „OK"/„LÜCKE". Dazu gehören die „Was ist das?"-Hilfe je Seite
+(drei Abschnitte: worum geht es, was trage ich ein, was geht schief) und
+Formular-Entwürfe in `sessionStorage` mit einer Stunde Gültigkeit.
+Gefundene und behobene Lücken:
 Formulare überleben jetzt Zurück/F5 (Entwurf in `sessionStorage` + Warnung beim
 Verlassen), `GET /sources` lieferte 500 (Eingabe-Prüfung lief auf
 Antwort-Modellen), Erfolgsmeldungen gibt es für **alle** Schreibaktionen,
@@ -465,7 +468,7 @@ orthanc-dicommwl-broker/
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
 | `pytest` | 396 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 467 Tests, 0 Errors |
+| `npm run test` / `tsc` / `lint` | 474 Tests, 0 Errors |
 | Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 53/53 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
@@ -572,8 +575,10 @@ Gefundene und behobene Defekte:
 | 17 | Sprint 10: Eingabeführung (Picker, Vorprüfung, ein Write pro Änderung) | ✅ |
 | 18 | Sprint 11: Bedienfluss (Dirty-Guard, Duplikate, A11y) — DAU-Analyse abgeschlossen | ✅ |
 | 19 | MFA-Testumgebung (unbedarfter Anwender) + behobene Befunde | ✅ |
+| 20 | Seiten-Hilfe, Entwürfe für alle Formulare, Entwurfs-Ablauf (1 h) | ✅ |
 | 18 | Sprint 11: Bedienfluss (Dirty-Guard, Duplikate, A11y) — DAU-Analyse abgeschlossen | ✅ |
 | 19 | MFA-Testumgebung (unbedarfter Anwender) + behobene Befunde | ✅ |
+| 20 | Seiten-Hilfe, Entwürfe für alle Formulare, Entwurfs-Ablauf (1 h) | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert
