@@ -86,11 +86,24 @@ python3 mwl-broker/scripts/cfind_smoke.py 127.0.0.1 11113 MWLBROKER
 # zeigt Echo-Matrix, Zähler und das Live-Query-Log.
 ```
 
+## Repository-Beschreibung
+
+Die Texte für den GitHub-„About"-Bereich (Beschreibung, Themen, Release-Notizen
+und eine PR-Vorlage) liegen fertig in
+[docs/github-repo-about.md](docs/github-repo-about.md).
+
+## Stand
+
+Alle Roadmap-Themen (P0/P1/P2) sind umgesetzt, dazu die UI-Härtung aus der
+DAU-Gap-Analyse, die MFA-Testumgebung und die i18n-Aufräumung. Aktuelle Zahlen:
+398 Backend-Tests (96 %), 490 Frontend-Tests, 55 Browser-E2E-Tests, 127 Checks
+im Deep-Audit — alles in `./ci-local.sh` verdrahtet.
+
 ## Tests
 
 ```bash
 cd mwl-broker && python -m pytest tests -q        # 398 Tests (API + DIMSE e2e + TLS/RBAC/Retention/HL7/ATNA)
-cd orthanc-explorer-3-usable && npm run test      # 488 Tests
+cd orthanc-explorer-3-usable && npm run test      # 490 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):

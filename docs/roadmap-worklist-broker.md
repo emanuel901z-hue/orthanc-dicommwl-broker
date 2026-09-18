@@ -10,10 +10,29 @@ und verifiziert werden.
 Dedupe · C-STORE-Routing über `seen_items` + Regeln mit Default-Fallback ·
 Modify-Regeln (Tag-Transformation) · Laufzeit-Settings (ENV-Default + Override)
 · C-ECHO-Monitoring, Prometheus-Metriken, PHI-freie Logs, Retention-Purge ·
-vollständige Konfigurations-UI in OE3 · 88 Backend-/325 Frontend-Tests,
-22 Browser-E2E-Tests, OpenAPI vollständig dokumentiert.
+vollständige Konfigurations-UI in OE3. **Stand der Umsetzung: alle P0-, P1- und
+P2-Themen sind erledigt** (Sprints 1–8, siehe Umsetzungs-Log) plus die
+UI-Härtung aus der [DAU-Gap-Analyse](ui-dau-gap-analysis.md) (Sprints 9–11),
+die [MFA-Testumgebung](mfa-usability-test.md) und die i18n-Aufräumung.
+Aktuelle Zahlen: 398 Backend-Tests (96 % Coverage), 490 Frontend-Tests,
+55 Browser-E2E-Tests, 127 Checks im Deep-Audit.
 
 ---
+
+## Status (Stand heute)
+
+| Prio | Thema | Stand |
+|---|---|---|
+| P0 | Circuit Breaker, Health-Checks, Readiness | ✅ Sprint 1 |
+| P0 | Worklist-Cache mit Stale-Fallback | ✅ Sprint 3 |
+| P0 | C-STORE-Spool mit Retry/Dead-Letter | ✅ Sprint 4 |
+| P1 | Simulation/Dry-Run, Config-Audit, Export/Import/Rollback | ✅ Sprint 2 |
+| P1 | Alerting/Webhooks | ✅ Sprint 5 |
+| P2 | Lokale Worklist + HL7-ORM, Stationsregeln, ATNA-Export | ✅ Sprint 6 |
+| P2 | DICOM-TLS/mTLS + Zertifikatsverwaltung | ✅ Sprint 7 |
+| – | RBAC, Aufbewahrung, flexibles Alerting | ✅ Sprint 8 |
+| – | UI-Härtung (DAU), Eingabeführung, Bedienfluss | ✅ Sprints 9–11 |
+| – | MFA-Testumgebung, Seiten-Hilfe, Entwürfe, i18n (9 Sprachen) | ✅ |
 
 ## Bewertungsmaßstab
 
