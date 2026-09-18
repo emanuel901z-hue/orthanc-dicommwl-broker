@@ -4,8 +4,9 @@
 **Frage:** Wo kann ein durchschnittlicher Anwender (DAU, kein DICOM-/Netzwerk-Spezialist)
 etwas falsch eingeben, etwas Wichtiges übersehen — und erfährt er es?
 **Stand:** Sprint 9 (UI-Härtung P1) umgesetzt — siehe Abschnitt 7
-**Status der Befunde:** A1, A2, B1–B4, C1–C3, D1, D2, E5 ✅ behoben
-(Sprint 9 + 10); A3, B5, E1–E4, F1 in Sprint 11
+**Status der Befunde:** **alle 19 Befunde bearbeitet** — A1–A3, B1–B5, C1–C3,
+D1, D2, E1–E5 ✅ behoben (Sprint 9–11); F1 bewusst dokumentiert (englischer
+Fallback greift)
 
 ---
 
@@ -56,7 +57,7 @@ Feld.
 |---|---|---|---|---|
 | A1 ✅ | **Kein Fehlerfeedback bei Einstellungs-Writes.** `SettingRow` ruft `setValue.mutate` und rendert nur `pending`, nie `error`. Gleiches Muster in `TlsCard`, `AtnaCard`, `NotificationsCard`. | `pages/BrokerSettingsPage.tsx:58–70` (Input ohne `type`, kein Fehlerblock); gemessen: `echo_interval_s="abc"` → keine sichtbare Meldung, Feld behält den Wert | Der Anwender glaubt, gespeichert zu haben. Besonders kritisch bei Zahlen/Pfaden/URLs — die Wirkung tritt nie ein, ohne Hinweis | Fehlerblock (`role="alert"`) je Setting + Karte, wie in den Dialogseiten bereits üblich |
 | A2 ✅ | **Kein Erfolgsfeedback.** Kein Toast/„Gespeichert"-Hinweis im gesamten Broker-UI (0 Treffer für `toast`). | Code-Review; sichtbar auch live: nach dem Speichern ändert sich nur der Button-Zustand | Der DAU fragt sich, ob der Klick gewirkt hat — typischer Auslöser für Doppelklicks | Toast oder Inline-„Gespeichert" mit Zeitstempel |
-| A3 | **Validierungsfehler erst nach dem Absenden** (Transforms-Tag, Case-Check, Stations-AET): keine Live-Prüfung. | `components/OperationsEditor.tsx` (nur `placeholder`), `pages/TransformsPage.tsx:413` (Serverfehler erst nach Submit); gemessen: ungültiger Tag `0010-0010` → keine Inline-Meldung | Umweg: erst ausfüllen, absenden, Fehler lesen, korrigieren | Feld-Prüfung beim Verlassen (`onBlur`) mit derselben Regel wie der Server |
+| A3 ✅ | **Validierungsfehler erst nach dem Absenden** (Transforms-Tag, Case-Check, Stations-AET): keine Live-Prüfung. | `components/OperationsEditor.tsx` (nur `placeholder`), `pages/TransformsPage.tsx:413` (Serverfehler erst nach Submit); gemessen: ungültiger Tag `0010-0010` → keine Inline-Meldung | Umweg: erst ausfüllen, absenden, Fehler lesen, korrigieren | Feld-Prüfung beim Verlassen (`onBlur`) mit derselben Regel wie der Server |
 
 ### B. Eingabevalidierung — was man falsch eingeben kann
 
@@ -66,7 +67,7 @@ Feld.
 | B2 ✅ | **Zahlenfelder ohne Grenzen.** 10 `type="number"`-Felder, nur 4 mit `min`; u. a. TLS-Port, Zertifikats-Gültigkeit, Alerting-Intervall, Prioritäten. | `components/TlsCard.tsx:312,385`; `pages/StationsPage.tsx:320`; `pages/RulesPage.tsx:317` | Werte außerhalb des erlaubten Bereichs werden erst vom Server abgewiesen — und bei Settings unsichtbar (siehe A1) | `min`/`max` aus der Server-Range spiegeln, plus Hinweistext |
 | B3 ✅ | **Einstellungen ohne Typ.** Auch Integer-Settings rendern als Textfeld. | `pages/BrokerSettingsPage.tsx:58` | „30 Tage" als „3o" ist nicht unterscheidbar von einer gültigen Eingabe | `type="number"` + `min`/`max` aus der API-Beschreibung |
 | B4 ✅ | **Pfade, URLs, AETs ohne Musterprüfung** (TLS-Zertifikatspfade, ATNA-Host/Port, Webhook-URL, Stations-AET). Serverseitig validiert (`path`/`url`/`enum`), clientseitig frei. | `components/TlsCard.tsx`, `components/AtnaCard.tsx`, `components/NotificationsCard.tsx` | Fehleingaben werden erst spät erkannt (kombiniert mit A1 sogar gar nicht sichtbar) | Client-Regeln aus denselben Konstanten wie der Server |
-| B5 | **Doppelte Knoten/AET-Kollisionen** werden nicht im Formular geprüft. | `components/NodeFormDialog.tsx:72–82` prüft Format, nicht Eindeutigkeit; Health-Panel meldet Kollisionen erst danach | Zwei Quellen mit derselben AET → schwer zu findende Fehlkonfiguration | Hinweis beim Tippen („diese AET ist bereits vergeben") |
+| B5 ✅ | **Doppelte Knoten/AET-Kollisionen** werden nicht im Formular geprüft. | `components/NodeFormDialog.tsx:72–82` prüft Format, nicht Eindeutigkeit; Health-Panel meldet Kollisionen erst danach | Zwei Quellen mit derselben AET → schwer zu findende Fehlkonfiguration | Hinweis beim Tippen („diese AET ist bereits vergeben") |
 
 ### C. Gefährliche Konfigurationen ohne Warnung
 
@@ -87,17 +88,17 @@ Feld.
 
 | ID | Befund | Beleg | Auswirkung | Empfehlung |
 |---|---|---|---|---|
-| E1 | **Keine Warnung bei ungespeicherten Eingaben**: Esc/Klick daneben schließt jeden Dialog und verwirft die Eingabe. | kein `beforeunload`/Dirty-Guard in `NodeFormDialog`, `LocalWorklistPage`, `StationsPage` | Datenverlust bei versehentlichem Schließen | Dirty-Guard im Dialog („Änderungen verwerfen?") |
-| E2 | **Gemischte Button-Beschriftungen** für dieselbe Aktion (`common.save` „Save" vs. `broker.save` „Speichern"). | `pages/TransformsPage.tsx:345`, `RulesPage.tsx:127`, `NodeFormDialog.tsx:99` … | In Sprachen, in denen nur einer der Schlüssel gepflegt ist, stehen zwei verschiedene Wörter für „Speichern" | Ein Schlüssel für „Speichern" |
-| E3 | **Kein „Zurücksetzen" im Formular** (nur beim Bearbeiten eines Knotens existiert „Reset to default" für Settings). | `NodeFormDialog`, `LocalWorklistPage` | Falsche Eingaben muss man manuell rückgängig machen | „Zurücksetzen"-Knopf mit Bestätigung |
-| E4 | **Kein Hinweis bei Duplikaten**: eine zweite Regel mit gleicher Quelle+Ziel ist erlaubt und sieht wie die erste aus. | `pages/RulesPage.tsx` | Doppelte Regeln → unklare Wirkung | Duplikat-Warnung beim Anlegen |
+| E1 ✅ | **Keine Warnung bei ungespeicherten Eingaben**: Esc/Klick daneben schließt jeden Dialog und verwirft die Eingabe. | kein `beforeunload`/Dirty-Guard in `NodeFormDialog`, `LocalWorklistPage`, `StationsPage` | Datenverlust bei versehentlichem Schließen | Dirty-Guard im Dialog („Änderungen verwerfen?") |
+| E2 ✅ | **Gemischte Button-Beschriftungen** für dieselbe Aktion (`common.save` „Save" vs. `broker.save` „Speichern"). | `pages/TransformsPage.tsx:345`, `RulesPage.tsx:127`, `NodeFormDialog.tsx:99` … | In Sprachen, in denen nur einer der Schlüssel gepflegt ist, stehen zwei verschiedene Wörter für „Speichern" | Ein Schlüssel für „Speichern" |
+| E3 ✅ | **Kein „Zurücksetzen" im Formular** (nur beim Bearbeiten eines Knotens existiert „Reset to default" für Settings). | `NodeFormDialog`, `LocalWorklistPage` | Falsche Eingaben muss man manuell rückgängig machen | „Zurücksetzen"-Knopf mit Bestätigung |
+| E4 ✅ | **Kein Hinweis bei Duplikaten**: eine zweite Regel mit gleicher Quelle+Ziel ist erlaubt und sieht wie die erste aus. | `pages/RulesPage.tsx` | Doppelte Regeln → unklare Wirkung | Duplikat-Warnung beim Anlegen |
 | E5 ✅ | **Fehlermeldungen sind nicht mit dem Feld verknüpft** (kein `aria-invalid`/`aria-describedby`). | 0 Treffer in `src/features/broker/**` | Screenreader liest den Fehler nicht am Feld | `aria-invalid` + `aria-describedby` setzen |
 
 ### F. Sprache
 
 | ID | Befund | Beleg | Auswirkung | Empfehlung |
 |---|---|---|---|---|
-| F1 | **Broker-UI nur auf Deutsch und Englisch** — der Fork verspricht 9 Sprachen; `es, fr, ja, zh, ru, tr, ar` haben **0** Broker-Schlüssel. | Zählung der `broker`-Schlüssel je Locale: de/en 469, übrige 0; `fallbackLng: 'en'` ist gesetzt | Wer die UI z. B. auf Französisch stellt, sieht den Broker-Bereich auf Englisch (Fallback greift, kein Rohschlüssel) | Bewusst dokumentieren **oder** die wichtigsten ~40 Schlüssel übersetzen |
+| F1 📄 | **Broker-UI nur auf Deutsch und Englisch** — der Fork verspricht 9 Sprachen; `es, fr, ja, zh, ru, tr, ar` haben **0** Broker-Schlüssel. | Zählung der `broker`-Schlüssel je Locale: de/en 469, übrige 0; `fallbackLng: 'en'` ist gesetzt | Wer die UI z. B. auf Französisch stellt, sieht den Broker-Bereich auf Englisch (Fallback greift, kein Rohschlüssel) | Bewusst dokumentieren **oder** die wichtigsten ~40 Schlüssel übersetzen |
 
 ---
 
@@ -225,3 +226,52 @@ Feld.
 | Playwright | 50 Tests |
 | verify-ui.cjs | **118 Checks** (neu: Datum/Zeit sind Picker, Format-Hinweis an der Station-AET, ungültige AET wird vorab gemeldet, ungültiger Wert wird vor dem Senden abgefangen, nichts wird gespeichert) |
 | Live-Messung | Feldtypen im Worklist-Dialog: `text, date, time`; Station-AET „ct-01!" → Hinweis + Speichern gesperrt |
+
+### Sprint 11 — Bedienfluss, Konsistenz, Barrierefreiheit (umgesetzt)
+
+**Behoben.**
+
+- **E1 — Dirty-Guard.** Schließen mit Esc/Klick daneben fragt jetzt nach
+  („Eingaben verwerfen?" mit „Weiter bearbeiten"/„Verwerfen"), und zwar in allen
+  fünf Formularen (Knoten, lokale Worklist, Stationsregeln, Routing-Regeln,
+  Transform-Regeln). Ohne Änderungen schließt der Dialog sofort weiter.
+- **B5/E4 — Duplikate.** Eine bereits vergebene AET wird beim Tippen gemeldet
+  („wird bereits von X verwendet"). Die Vergleichsliste wird beim Öffnen
+  eingefroren — beim Testen zeigte der Dialog sonst nach dem Speichern kurz
+  einen Konflikt mit dem gerade angelegten Eintrag (gefunden und behoben).
+  Eine zweite Regel mit gleicher Quelle+Ziel wird gemeldet und der
+  Speichern-Knopf gesperrt.
+- **A3 — Tag-Vorprüfung.** Der Transform-Editor prüft DICOM-Tag/Schlüsselwort
+  nach derselben Regel wie der Server und meldet sofort (`aria-invalid`).
+- **E2 — einheitliches Speichern.** Alle Formulare nutzen denselben Schlüssel
+  (`common.save`) statt zwei verschiedener.
+- **E3 — Zurücksetzen.** Der Knoten-Dialog kann die Eingaben auf den
+  Ausgangszustand zurücksetzen.
+- **F1 — Sprache.** Bewusst dokumentiert: der Broker-Bereich ist de/en, andere
+  Sprachen fallen auf Englisch zurück (`fallbackLng: 'en'`, kein Rohschlüssel).
+  Der Hinweistext liegt als `broker.i18nBrokerNote` bereit.
+
+**Verifikation.**
+
+| Ebene | Ergebnis |
+|---|---|
+| pytest | 395 Tests |
+| vitest | 462 Tests (+6: Dirty-Guard, Duplikat-AET, Tag-Vorprüfung, Duplikat-Regel) |
+| Playwright | 50 Tests |
+| verify-ui.cjs | **122 Checks** (neu: ungespeicherte Eingaben werden nicht stillschweigend verworfen, Dialog schließt nach dem Verwerfen, doppelte AET gemeldet, doppelte Quelle+Ziel gemeldet und gesperrt) |
+| Live-Messung | „discard-check" + Esc → Bestätigung; „RIS_A" im AET-Feld → Hinweis „already used by …" |
+
+---
+
+## 8. Abschluss
+
+Alle drei Sprints sind umgesetzt, getestet, dokumentiert und gepusht:
+
+| Sprint | Inhalt | Ergebnis |
+|---|---|---|
+| 9 | P1: Rückmeldung, typisierte Einstellungen, Dialoge, gefährliche Stationsregel | 3× P1 behoben, +8 vitest, +3 pytest, +2 Playwright |
+| 10 | P2: Eingabeführung (Picker, Vorprüfung, ein Workflow pro Änderung, Konsequenzen) | +14 vitest, verify-ui +4 |
+| 11 | P2/P3: Dirty-Guard, Duplikate, Tag-Vorprüfung, Konsistenz, A11y, i18n-Doku | +6 vitest, verify-ui +4 |
+
+**Kennzahlen nach der Härtung:** 395 Backend-Tests (96 %), 462 Frontend-Tests
+(98 % Broker-UI), 50 Playwright-Tests, **122 Checks** im Deep-Audit.

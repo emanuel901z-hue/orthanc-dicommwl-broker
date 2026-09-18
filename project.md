@@ -451,7 +451,7 @@ orthanc-dicommwl-broker/
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
 | `pytest` | 395 Tests grün (inkl. DIMSE-Integration in-process) |
-| `npm run test` / `tsc` / `lint` | 463 Tests, 0 Errors |
+| `npm run test` / `tsc` / `lint` | 462 Tests, 0 Errors |
 | Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 50/50 grün, 0 Console-/Page-/Netzwerk-Fehler |
 
 ### Browser-Verifikation (Playwright, Chromium headless)
@@ -556,6 +556,8 @@ Gefundene und behobene Defekte:
 | 15 | Sprint 8: RBAC-Trennung, Retention/Löschkonzepte, flexibles Alerting | ✅ |
 | 16 | Sprint 9: UI-Härtung P1 (Rückmeldung, typisierte Eingaben, Dialoge) | ✅ |
 | 17 | Sprint 10: Eingabeführung (Picker, Vorprüfung, ein Write pro Änderung) | ✅ |
+| 18 | Sprint 11: Bedienfluss (Dirty-Guard, Duplikate, A11y) — DAU-Analyse abgeschlossen | ✅ |
+| 18 | Sprint 11: Bedienfluss (Dirty-Guard, Duplikate, A11y) — DAU-Analyse abgeschlossen | ✅ |
 
 Die nächsten Ausbaustufen sind in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert
