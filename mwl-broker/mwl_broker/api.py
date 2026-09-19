@@ -106,6 +106,36 @@ def _db() -> Session:
 _db_dep = Depends(_db)
 
 
+# ── shared response documentation ──────────────────────────────────────
+# Written once and reused: FastAPI would otherwise show its generic
+# "Validation Error" text, and integrators need to know what a failure looks
+# like — `detail` is a plain sentence for the broker's own checks (422) and a
+# list of fields for schema errors.
+VALIDATION_422 = {
+    422: {
+        "description": "Invalid value. `detail` is a list of the offending fields "
+                       "for schema errors, a plain sentence for the broker's own "
+                       "checks (e.g. a host name with spaces).",
+    },
+}
+READ_ONLY_403 = {
+    403: {
+        "description": "The caller is read-only: the write role is missing in the "
+                       "roles header (see `GET /rbac/status`).",
+    },
+}
+NOT_FOUND_404 = {404: {"description": "No row with this ID."}}
+CONFLICT_409 = {409: {"description": "A row with this name already exists."}}
+
+
+def _docs(*parts: dict) -> dict:
+    """Merge response documentation blocks (later ones win)."""
+    merged: dict = {}
+    for part in parts:
+        merged.update(part)
+    return merged
+
+
 def _actor(request: Request) -> str:
     return audit.actor_from(request.headers)
 
@@ -126,7 +156,10 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
     @router.get(
         path, response_model=list[out_schema], name=f"list_{path[1:]}",
         tags=[f"{path[1:]}"], summary=f"List {kind}s",
+        description=f"Every {kind} in configuration order (by ID). Reading never "
+                    f"needs the write role — only changes do.",
         response_description=f"All {kind}s ordered by ID.",
+        responses=_docs(VALIDATION_422),
     )
     def _list(s: Session = _db_dep):
         return s.scalars(select(model).order_by(model.id)).all()
@@ -150,8 +183,10 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
     @router.post(
         path, response_model=out_schema, status_code=201, name=f"create_{path[1:]}",
         tags=[f"{path[1:]}"], summary=f"Create a {kind}",
+        description=f"Adds a {kind}. The change is written to the audit log with "
+                    f"the actor from the audit header.",
         response_description=f"The created {kind}.",
-        responses={409: {"description": f"A {kind} with this name already exists."}},
+        responses=_docs(VALIDATION_422, READ_ONLY_403, CONFLICT_409),
     )
     def _create(
         request: Request,
@@ -173,8 +208,10 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
     @router.put(
         path + "/{row_id}", response_model=out_schema, name=f"update_{path[1:]}",
         tags=[f"{path[1:]}"], summary=f"Update a {kind}",
+        description=f"Replaces the whole {kind} (send every field). The previous "
+                    f"state is kept in the change log and can be rolled back.",
         response_description=f"The updated {kind}.",
-        responses={404: {"description": f"No {kind} with this ID."}},
+        responses=_docs(VALIDATION_422, READ_ONLY_403, NOT_FOUND_404),
     )
     def _update(
         request: Request,
@@ -199,8 +236,11 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
     @router.delete(
         path + "/{row_id}", status_code=204, name=f"delete_{path[1:]}",
         tags=[f"{path[1:]}"], summary=f"Delete a {kind}",
+        description=f"Removes the {kind} together with everything that depends on "
+                    f"it (routing rules, modify rules, history). The response is "
+                    f"empty; the change log keeps the previous state.",
         response_description=f"The {kind} was deleted.",
-        responses={404: {"description": f"No {kind} with this ID."}},
+        responses=_docs(VALIDATION_422, READ_ONLY_403, NOT_FOUND_404),
     )
     def _delete(
         request: Request,
@@ -256,6 +296,9 @@ _crud(router, "/station-rules", StationRule, StationRuleIn, StationRuleOut, "sta
 @router.get(
     "/rules", response_model=list[RuleOut], tags=["rules"],
     summary="List routing rules",
+    description="Every routing rule. A rule decides which PACS receives images "
+                "from which source; without a matching rule the default target is "
+                "used. Read-only callers may list.",
     response_description="All rules ordered by priority, then ID.",
 )
 def list_rules(s: Session = _db_dep):
@@ -265,6 +308,8 @@ def list_rules(s: Session = _db_dep):
 @router.post(
     "/rules", response_model=RuleOut, status_code=201, tags=["rules"],
     summary="Create a routing rule",
+    description="Adds a rule. The same source and target pair cannot be routed "
+                "twice — a duplicate is rejected so the result stays predictable.",
     response_description="The created rule.",
     responses={404: {"description": "Referenced source or target does not exist."}},
 )
@@ -290,6 +335,8 @@ def create_rule(
 @router.put(
     "/rules/{rule_id}", response_model=RuleOut, tags=["rules"],
     summary="Update a routing rule",
+    description="Replaces the rule (source, target, priority, enabled). The "
+                "previous state is kept in the change log.",
     response_description="The updated rule.",
     responses={404: {"description": "No rule with this ID."}},
 )
@@ -316,6 +363,8 @@ def update_rule(
 @router.delete(
     "/rules/{rule_id}", status_code=204, tags=["rules"],
     summary="Delete a routing rule",
+    description="Removes the rule; images then fall back to the default target. "
+                "The change is audited.",
     response_description="The rule was deleted.",
     responses={404: {"description": "No rule with this ID."}},
 )
@@ -357,6 +406,8 @@ def _check_scope(s: Session, body: TransformIn) -> None:
 @router.get(
     "/transforms", response_model=list[TransformOut], tags=["transforms"],
     summary="List transform rules",
+    description="Every DICOM attribute modification applied before forwarding. "
+                "Read-only callers may list.",
     response_description="All rules ordered by priority, then ID.",
 )
 def list_transforms(s: Session = _db_dep):
@@ -368,6 +419,9 @@ def list_transforms(s: Session = _db_dep):
 @router.post(
     "/transforms", response_model=TransformOut, status_code=201, tags=["transforms"],
     summary="Create a transform rule",
+    description="Adds a rule with one or more operations (set, remove, prefix, "
+                "suffix, replace, copy). Keywords are validated against the DICOM "
+                "data dictionary and UIDs cannot be modified.",
     response_description="The created rule.",
     responses={
         404: {"description": "Referenced source or target does not exist."},
@@ -400,6 +454,8 @@ def create_transform(
 @router.put(
     "/transforms/{rule_id}", response_model=TransformOut, tags=["transforms"],
     summary="Update a transform rule",
+    description="Replaces the rule including its operation list. The previous "
+                "state is kept in the change log.",
     response_description="The updated rule.",
     responses={
         404: {"description": "No rule with this ID (or scope row missing)."},
@@ -434,6 +490,8 @@ def update_transform(
 @router.delete(
     "/transforms/{rule_id}", status_code=204, tags=["transforms"],
     summary="Delete a transform rule",
+    description="Removes the rule; forwarded images are then sent unchanged. The "
+                "change is audited.",
     response_description="The transform rule was deleted.",
     responses={404: {"description": "No rule with this ID."}},
 )
@@ -499,6 +557,8 @@ def update_setting(
 @router.delete(
     "/settings/{key}", status_code=204, tags=["settings"],
     summary="Reset a setting to the ENV default",
+    description="Removes the UI override of one setting; the value from the "
+                "deployment ENV applies again. The change is audited.",
     response_description="The override was removed; the ENV default applies again.",
     responses={404: {"description": "Unknown setting key."}},
 )
@@ -713,6 +773,8 @@ def create_local_item(
 @router.put(
     "/local-items/{item_id}", response_model=LocalItemOut, tags=["local"],
     summary="Update a local worklist item",
+    description="Replaces a locally kept entry (emergency or unscheduled exam) "
+                "that the broker mixes into every matching C-FIND answer.",
     response_description="The updated item.",
     responses={404: {"description": "No local item with this ID."}},
 )
@@ -1227,6 +1289,9 @@ def simulate_transformation(body: SimulateTransformIn, s: Session = _db_dep):
 @router.get(
     "/logs/queries", response_model=list[QueryLogOut], tags=["logs"],
     summary="C-FIND query log",
+    description="One row per C-FIND the broker answered — calling AE, answering "
+                "sources, duration, status and whether the cache was used. Free of "
+                "patient data.",
     response_description="Query log entries, newest first.",
 )
 def query_logs(
@@ -1247,6 +1312,8 @@ def query_logs(
 @router.get(
     "/logs/stores", response_model=list[StoreLogOut], tags=["logs"],
     summary="C-STORE forward log",
+    description="One row per forwarded instance — accession, SOP/study UID, "
+                "chosen target and status. Free of patient data.",
     response_description="Store log entries, newest first.",
 )
 def store_logs(
@@ -1267,6 +1334,9 @@ def store_logs(
 @router.post(
     "/sources/{source_id}/echo", response_model=EchoResult, tags=["monitoring"],
     summary="C-ECHO a source now",
+    description="Associates with this source and runs a C-ECHO, using the TLS "
+                "settings of the source. The result also updates the echo matrix "
+                "in `GET /status`.",
     response_description="Echo result with RTT (or the error detail).",
     responses={404: {"description": "No source with this ID."}},
 )
@@ -1283,6 +1353,9 @@ def echo_source(
 @router.post(
     "/targets/{target_id}/echo", response_model=EchoResult, tags=["monitoring"],
     summary="C-ECHO a target now",
+    description="Associates with this PACS and runs a C-ECHO, using the TLS "
+                "settings of the target. The result also updates the echo matrix "
+                "in `GET /status`.",
     response_description="Echo result with RTT (or the error detail).",
     responses={404: {"description": "No target with this ID."}},
 )

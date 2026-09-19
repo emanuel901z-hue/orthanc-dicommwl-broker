@@ -479,6 +479,7 @@ orthanc-dicommwl-broker/
 | C-ECHO-Matrix via `/api/v1/status` | alle Quellen/Ziele ok, RTT gemessen |
 | OE3 via nginx | `/oe3/` UI, `/orthanc-proxy`, `/broker-api` |
 | `pytest` | 398 Tests grün (inkl. DIMSE-Integration in-process) |
+| OpenAPI | 66 Operationen vollständig dokumentiert (Summary, Beschreibung, Parameter, Antworten, Fehler) — Vertrag per Test erzwungen |
 | `npm run test` / `tsc` / `lint` | 490 Tests, 0 Errors |
 | `npm run i18n:check` | Rahmen in allen 9 Sprachen, Referenzsprachen synchron |
 | Playwright Stack-E2E (Desktop 1280x800 + Mobile 375x812) | 55/55 grün, 0 Console-/Page-/Netzwerk-Fehler |

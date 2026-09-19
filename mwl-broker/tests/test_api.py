@@ -1240,12 +1240,18 @@ def test_settings_expose_constraints_for_the_ui(client):
 
 
 def test_openapi_documents_all_endpoints(client):
-    """Every path operation carries a summary/tag, query params and schema
-    fields carry descriptions — keeps Swagger UI usable for integrators."""
+    """Every path operation is documented: summary, description, documented
+    failures and described parameters — keeps Swagger UI usable for integrators."""
     spec = client.get("/openapi.json").json()
 
     assert spec["info"]["title"] == "MWL Broker"
     assert len(spec["info"]["description"]) > 100
+    # the info block tells integrators what a failure looks like and that the
+    # API is versioned and licensed
+    assert spec["info"]["version"]
+    assert spec["info"]["license"]["name"] == "MIT"
+    assert "detail" in spec["info"]["description"]
+    assert "/rbac/status" in spec["info"]["description"]
     tag_names = {t["name"] for t in spec["tags"]}
     assert {"sources", "targets", "rules", "transforms", "settings",
             "logs", "monitoring", "audit", "config", "simulation", "cache",
@@ -1271,6 +1277,27 @@ def test_openapi_documents_all_endpoints(client):
                 assert param.get("description"), (
                     f"{where}: parameter {param['name']} missing description"
                 )
+
+            # a description explains what the operation does and when to use it
+            assert op.get("description"), f"{where} missing description"
+            assert len(op["description"]) > 40, f"{where} description too short"
+
+            # no auto-generated response text anywhere (2xx or error)
+            for code, response in op["responses"].items():
+                description = response.get("description", "")
+                assert description not in ("Successful Response", "Validation Error"), (
+                    f"{where} {code}: still FastAPI's default description"
+                )
+                assert description, f"{where} {code} has no description"
+
+            # every operation documents at least one failure
+            assert any(code in op["responses"] for code in ("403", "404", "409", "422")), (
+                f"{where}: no error response documented"
+            )
+
+    # every tag is explained (Swagger groups by them)
+    for tag in spec["tags"]:
+        assert tag.get("description"), f"tag {tag['name']} has no description"
 
     # request bodies documented
     for path, method in [

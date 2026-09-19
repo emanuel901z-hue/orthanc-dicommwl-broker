@@ -74,11 +74,26 @@ async def lifespan(app: FastAPI):
             scp.shutdown()
 
 
+def _broker_version() -> str:
+    """The version the package was built with (single source: pyproject.toml)."""
+    try:
+        from importlib.metadata import version
+
+        return version("mwl-broker")
+    except Exception:                      # not installed (running from source)
+        return "0.1.0"
+
+
+BROKER_VERSION = _broker_version()
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="MWL Broker",
-        version="0.1.0",
+        version=BROKER_VERSION,
         summary="DICOM Modality Worklist broker — C-FIND proxy/aggregator + C-STORE router",
+        license_info={"name": "MIT"},
+        contact={"name": "MWL Broker", "url": "https://github.com/emanuel901z-hue/orthanc-dicommwl-broker"},
         description=(
             "Sits between modalities and multiple upstream RIS/KIS systems:\n\n"
             "* **MWL SCP** — modalities send C-FIND; the broker fans out to all "
@@ -91,8 +106,31 @@ def create_app() -> FastAPI:
             "default target.\n\n"
             "This REST API manages sources, targets and routing rules and "
             "exposes monitoring data (status, PHI-free logs, C-ECHO). "
-            "Prometheus metrics are served at `/metrics`."
+            "Prometheus metrics are served at `/metrics`.\n\n"
+            "**Errors**\n\n"
+            "Failures answer with `{\"detail\": …}`: a plain sentence for the "
+            "broker's own checks (for example an unreachable host name) and a "
+            "list of `{loc, msg, type}` entries for schema errors. Read-only "
+            "callers get **403** on every write when the proxy enforces the "
+            "write role (`GET /rbac/status` says whether this caller may write).\n\n"
+            "**Conventions**\n\n"
+            "* Every configuration change is written to the change log "
+            "(`/audit/config`) with a before/after snapshot and can be rolled "
+            "back.\n"
+            "* Identifiers in the API are configuration data; worklist payloads "
+            "(PHI) never appear in responses, logs or exports.\n"
+            "* The operator UI for all of this lives in Orthanc Explorer 3 "
+            "under `/broker` (Swagger UI here: `/docs`, ReDoc: `/redoc`)."
         ),
+        # Shown on every path operation unless the route documents its own:
+        # FastAPI would otherwise print its generic "Validation Error".
+        responses={
+            422: {"description": "Invalid value — `detail` explains which field "
+                                 "and why (list for schema errors, sentence for "
+                                 "the broker's own checks)."},
+            500: {"description": "Unexpected server error. The message is free of "
+                                 "patient data; details are in the container log."},
+        },
         openapi_tags=[
             {"name": "sources", "description": "Upstream MWL sources (RIS/KIS) queried via C-FIND."},
             {"name": "targets", "description": "PACS targets that receive forwarded C-STORE traffic."},

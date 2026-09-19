@@ -92,10 +92,18 @@ Die Texte für den GitHub-„About"-Bereich (Beschreibung, Themen, Release-Notiz
 und eine PR-Vorlage) liegen fertig in
 [docs/github-repo-about.md](docs/github-repo-about.md).
 
+## API-Dokumentation
+
+Swagger UI: `http://<broker>:8081/docs` · ReDoc: `/redoc` ·
+Spezifikation: `/openapi.json` — jede Operation mit Beschreibung, dokumentierten
+Parametern und Fehlerantworten (der Vertrag wird per Test erzwungen).
+
 ## Stand
 
-Alle Roadmap-Themen (P0/P1/P2) sind umgesetzt, dazu die UI-Härtung aus der
-DAU-Gap-Analyse, die MFA-Testumgebung und die i18n-Aufräumung. Aktuelle Zahlen:
+**Broker v1.0.0** — alle Roadmap-Themen (P0/P1/P2) sind umgesetzt, dazu die
+UI-Härtung aus der DAU-Gap-Analyse, die MFA-Testumgebung und die i18n-Aufräumung.
+Die OpenAPI-Dokumentation ist vollständig (66 Operationen, jede mit Beschreibung,
+Parametern und Fehlerantworten). Aktuelle Zahlen:
 398 Backend-Tests (96 %), 490 Frontend-Tests, 55 Browser-E2E-Tests, 127 Checks
 im Deep-Audit — alles in `./ci-local.sh` verdrahtet.
 
