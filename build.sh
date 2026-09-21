@@ -203,6 +203,15 @@ ok "Umgebung aus $ENV_FILE geladen"
 
 # ── 3. compose files + profiles ──────────────────────────────────────────────
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.yml)
+
+# If this project already runs the demo services, keep them in the file set.
+# Otherwise a partial run (`./build.sh mwl-broker`) would treat them as orphans
+# and remove them — which is how a demo stack silently loses its mock RIS.
+if [ "$DEMO" = 0 ] && [ -f docker-compose.demo.yml ] \
+   && docker ps -a --format '{{.Names}}' | grep -q "^${COMPOSE_PROJECT_NAME:-mwl-broker}-mock-ris-a-1$"; then
+  DEMO=1
+  info "Demo-Services laufen in diesem Projekt — docker-compose.demo.yml wird mitgeladen."
+fi
 [ "$DEMO" = 1 ] && COMPOSE+=(-f docker-compose.demo.yml)
 PROFILE_ARGS=()
 # the OHIF image compiles OHIF from source — keep it behind a profile
@@ -294,7 +303,11 @@ info "Images bauen…"
 run "${COMPOSE[@]}" "${PROFILE_ARGS[@]}" "${BUILD_ARGS[@]}" ${SERVICES[@]+"${SERVICES[@]}"}
 
 info "Stack starten…"
-run "${COMPOSE[@]}" "${PROFILE_ARGS[@]}" up -d --remove-orphans ${SERVICES[@]+"${SERVICES[@]}"}
+# `--remove-orphans` only when nothing is selected: a partial run must not
+# remove services that belong to another overlay/profile.
+UP_ARGS=(up -d)
+[ ${#SERVICES[@]} -eq 0 ] && UP_ARGS+=(--remove-orphans)
+run "${COMPOSE[@]}" "${PROFILE_ARGS[@]}" "${UP_ARGS[@]}" ${SERVICES[@]+"${SERVICES[@]}"}
 
 # ── 6. optional: tag + push for a registry ───────────────────────────────────
 if [ -n "$TAG" ]; then

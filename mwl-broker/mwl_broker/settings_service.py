@@ -227,6 +227,11 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "Interval of the spool retry worker in seconds.",
     ),
+    "simulate_show_phi": (
+        "bool",
+        "Include patient name and ID in the worklist preview (off = PHI-free, "
+        "like the query log). The health panel reports it while it is on.",
+    ),
     "cache_enabled": (
         "bool",
         "Serve cached worklist answers when an upstream source is unreachable.",

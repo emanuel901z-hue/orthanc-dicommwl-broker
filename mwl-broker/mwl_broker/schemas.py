@@ -328,6 +328,27 @@ class RollbackOut(BaseModel):
     message: str = Field(description="Human-readable result.")
 
 
+class WorklistPreviewIn(BaseModel):
+    """The C-FIND query to run: station plus any of the usual filter fields."""
+
+    station_aet: str = Field(default="", description="Station that would query (drives the station rules).",
+                             examples=["CT_01"])
+    accession: str = Field(default="", description="Only this accession (empty = all scheduled steps).")
+    study_uid: str = Field(default="", description="Only this study.")
+    modality: str = Field(default="", description="Only this modality, e.g. CT.")
+    scheduled_date: str = Field(default="", description="Only steps on this date (YYYYMMDD or a range 20260901-20260930).")
+    patient_id: str = Field(default="", description="Only this patient ID (matching key, not shown in the result).")
+
+
+class SourceQueryIn(BaseModel):
+    """What to ask a single source (all fields optional — empty means everything)."""
+
+    accession: str = Field(default="", description="Only this accession.")
+    modality: str = Field(default="", description="Only this modality.")
+    scheduled_date: str = Field(default="", description="Only steps on this date (YYYYMMDD).")
+    patient_id: str = Field(default="", description="Only this patient ID.")
+
+
 class SimulateRouteIn(BaseModel):
     """A case to check against the routing rules."""
 
@@ -919,3 +940,62 @@ class StatusOut(BaseModel):
     counts: dict = Field(
         description="Row counts: queries (C-FIND), stores (C-STORE), seen_items.",
     )
+
+
+class WorklistPreviewItem(BaseModel):
+    """One merged worklist item as the preview shows it (PHI-free by default)."""
+
+    accession: str = Field(default="", description="Accession number (the routing key).")
+    study_uid: str = Field(default="", description="StudyInstanceUID, when the source sends one.")
+    requested_procedure_id: str = Field(default="", description="Requested procedure ID.")
+    sps_id: str = Field(default="", description="Scheduled procedure step ID.")
+    station_aet: str = Field(default="", description="Station the step is scheduled for.")
+    modality: str = Field(default="", description="Modality of the scheduled step.")
+    start_date: str = Field(default="", description="Scheduled start date (DICOM DA).")
+    start_time: str = Field(default="", description="Scheduled start time (DICOM TM).")
+    source: str = Field(description="Source that won the merge for this item.")
+    also_in: list[str] = Field(default_factory=list,
+                               description="Other sources that answered the same case (deduplicated).")
+    patient_name: str | None = Field(default=None, description="Only with `simulate_show_phi` on (PHI).")
+    patient_id: str | None = Field(default=None, description="Only with `simulate_show_phi` on (PHI).")
+
+
+class WorklistPreviewSource(BaseModel):
+    """What one upstream contributed to the preview."""
+
+    name: str = Field(description="Source name.")
+    source_id: int | None = Field(default=None, description="Source ID (null for the local items).")
+    answers: int | str = Field(description="Number of answers, or 'error' / 'skipped' (breaker open).")
+    stale: bool = Field(default=False, description="True when a cached snapshot was served instead.")
+    breaker_state: str | None = Field(default=None, description="Circuit-breaker state when skipped.")
+
+
+class WorklistPreviewOut(BaseModel):
+    """Result of running the real C-FIND aggregation without a modality."""
+
+    station: str = Field(description="Station AET taken from the query (empty = any).")
+    rule: str | None = Field(default=None, description="Station rule that applied, if any.")
+    status: str = Field(description="success | partial | failed — same wording as the query log.")
+    duration_ms: int = Field(description="Wall-clock time of the whole fan-out.")
+    answers: int = Field(description="Number of merged items a modality would receive.")
+    hidden: int = Field(description="Items hidden by the station rule's visibility filter.")
+    phi: bool = Field(description="Whether patient name/ID are included (setting `simulate_show_phi`).")
+    served_stale: list[str] = Field(default_factory=list,
+                                    description="Sources answered from the cache (they were down).")
+    sources: list[WorklistPreviewSource] = Field(description="Per-source contribution and timing.")
+    items: list[WorklistPreviewItem] = Field(description="The merged items (capped, see `truncated`).")
+    truncated: bool = Field(description="True when more items exist than were returned.")
+
+
+class SourceQueryOut(BaseModel):
+    """Result of a direct C-FIND against one source (the sources page's test)."""
+
+    source_id: int = Field(description="Source that was asked.")
+    name: str = Field(description="Source name.")
+    ok: bool = Field(description="Whether the query succeeded.")
+    error: str = Field(default="", description="Plain-language failure reason (empty on success).")
+    answers: int = Field(description="Number of answers the source returned.")
+    duration_ms: int = Field(description="Round-trip time of the query.")
+    phi: bool = Field(description="Whether patient name/ID are included (setting `simulate_show_phi`).")
+    items: list[WorklistPreviewItem] = Field(description="The answers (capped, see `truncated`).")
+    truncated: bool = Field(description="True when more answers exist than were returned.")

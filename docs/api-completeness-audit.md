@@ -111,7 +111,7 @@ man die ganze Liste holen und filtern.
 **Fix:** sieben `GET /{id}`-Routen (dünne Wrapper auf die bestehende
 Abfragelogik) inkl. Vertragstests.
 
-### A8 — Kein C-FIND-Test je Quelle (P3)
+### A8 — Kein C-FIND-Test je Quelle (P3) — **behoben**
 
 Der Betreiber kann per C-ECHO prüfen, ob eine Quelle **lebt** — aber nicht, ob
 sie **Arbeitslisten liefert**. Genau das ist die häufigste Supportfrage
@@ -122,7 +122,7 @@ C-FIND-Abfrage gegen eine Quelle ausführt und die Antwort zeigt.
 Anzahl Antworten, Dauer, erste Treffer (PHI-frei: Accession/Station/Modalität/
 Datum), Fehlertext. Ergebnis geht ins Query-Log.
 
-### A9 — Keine Vorschau der **zusammengeführten** Arbeitsliste (P3)
+### A9 — Keine Vorschau der **zusammengeführten** Arbeitsliste (P3) — **behoben**
 
 `simulate/*` beantwortet „wohin würde dieser Fall gehen?" (Routing) und
 „welche Quellen sieht diese Konsole?" (Stationsregeln) — aber nicht die
@@ -209,7 +209,25 @@ umschaltbar** (Standard: PHI-frei wie das Query-Log; das Umschalten ist im
 Health-Panel sichtbar). Damit bleibt der Standard datenschutzfreundlich und die
 Fehlersuche trotzdem möglich.
 
-## 4. Empfohlene Reihenfolge (Sprint 3+4)
+## 4. Umgesetzt (Sprint 3)
+
+| Befund | Umsetzung | Nachweis |
+|---|---|---|
+| **A8** | `POST /api/v1/sources/{id}/query` fragt **eine** Quelle per echtem C-FIND und antwortet mit Anzahl, Dauer, Fehlertext und einer PHI-freien Auswahl (Zugangsnummer, Modalität, Station, Datum, UIDs). Button in jeder Quellenzeile (Tabelle und Mobilkarte) mit Ergebnis-Dialog. Für Nur-Leser erlaubt (RBAC-Absicht) | `test_source_query_test_answers_for_one_source`, `test_source_query_test_summarizes_answers` (per Monkeypatch mit Treffern), `test_cfind_test_is_read_only_for_rbac`, verify-ui-Check |
+| **A9** | `POST /api/v1/simulate/worklist` führt die **echte** Aggregation aus — dafür ist der Code aus `dimse.handle_find` nach `aggregation.collect()` gewandert, das **beide** Wege nutzen (Projektregel „Simulation und Echtbetrieb teilen den Code"). Die Antwort enthält die zusammengeführten Einträge, je Eintrag die Quelle und „auch in" (Dedup), die Stationsregel, verborgene Einträge, Cache-Nutzung, Dauer und die Beiträge je Quelle. **Kein** Routing-`seen_items`, keine C-FIND-Metriken (eine Vorschau ist keine Modalitätsabfrage). PHI-frei; mit `simulate_show_phi=true` erscheinen Patientennamen, und das Health-Panel meldet es (`worklist_preview_shows_phi`) | `test_worklist_preview_runs_the_real_aggregation`, `test_worklist_preview_can_show_phi_when_switched_on`, `WorklistPreviewPanel.test.tsx` (3), verify-ui (2) |
+
+**Nebenfund in `build.sh`:** Ein Teil-Build ohne Demo-Overlay (`./build.sh mwl-broker`)
+hat durch `--remove-orphans` die Demo-Container entfernt — ein Demo-Stack verlor
+damit still seine Mock-RIS. Jetzt lädt das Script das Overlay automatisch mit,
+wenn Demo-Services in diesem Projekt laufen, und setzt `--remove-orphans` nur
+noch beim vollständigen Up (ohne Service-Auswahl).
+
+**Nebenfund im Backend:** Der Antwortpfad von A8 mit Treffern warf 500
+(`ResponseValidationError`), weil `source`/`also_in` im Einzelquellen-Ergebnis
+fehlten — mein erster Test hatte keine Treffer und deckte das nicht ab. Behoben
+und mit einem Test **mit** Treffern abgesichert.
+
+## 5. Empfohlene Reihenfolge (Sprint 4)
 
 | Sprint | Inhalt | Aufwand |
 |---|---|---|

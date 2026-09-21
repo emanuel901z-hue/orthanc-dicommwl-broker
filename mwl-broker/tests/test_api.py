@@ -1466,3 +1466,135 @@ def test_logs_can_be_filtered_by_time(client):
                       params={"since": now.date().isoformat()}).status_code == 200
     assert client.get("/api/v1/logs/stores",
                       params={"since": now.date().isoformat()}).status_code == 200
+
+
+# ── A8/A9: the two operator features ───────────────────────────────────
+
+def test_worklist_preview_runs_the_real_aggregation(client):
+    """A dry-run must show what a modality would get — with provenance."""
+    src = client.post("/api/v1/sources", json=SOURCE).json()
+    from mwl_broker import cache
+    from pydicom.dataset import Dataset
+
+    def item(accession, sps_id, station="CT_01"):
+        ds = Dataset()
+        ds.AccessionNumber = accession
+        ds.PatientID = "P-1"
+        ds.PatientName = "Mustermann^Erika"
+        ds.StudyInstanceUID = "1.2.3"
+        sps = Dataset()
+        sps.ScheduledProcedureStepID = sps_id
+        sps.Modality = "CT"
+        sps.ScheduledStationAETitle = station
+        sps.ScheduledProcedureStepStartDate = "20260921"
+        ds.ScheduledProcedureStepSequence = [sps]
+        return ds
+
+    cache.store_snapshot(src["id"], [item("ACC-A-001", "1")])
+
+    r = client.post("/api/v1/simulate/worklist", json={"station_aet": "CT_01"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["answers"] >= 1
+    assert body["phi"] is False, "the preview must be PHI-free by default"
+    entry = body["items"][0]
+    assert entry["accession"] == "ACC-A-001"
+    assert entry["station_aet"] == "CT_01"
+    assert "patient_name" not in entry, entry
+    # provenance: which source answered, and the timing
+    assert any(s["name"] == "ris-a" for s in body["sources"]), body["sources"]
+    assert body["duration_ms"] >= 0
+
+
+def test_worklist_preview_can_show_phi_when_switched_on(client):
+    """The operator's decision: off by default, visible in the health panel."""
+    src = client.post("/api/v1/sources", json=SOURCE).json()
+    from mwl_broker import cache
+    from pydicom.dataset import Dataset
+
+    ds = Dataset()
+    ds.AccessionNumber = "ACC-A-002"
+    ds.PatientID = "P-2"
+    ds.PatientName = "Muster^Max"
+    sps = Dataset()
+    sps.ScheduledProcedureStepID = "2"
+    ds.ScheduledProcedureStepSequence = [sps]
+    cache.store_snapshot(src["id"], [ds])
+
+    client.put("/api/v1/settings/simulate_show_phi", json={"value": "true"})
+
+    body = client.post("/api/v1/simulate/worklist", json={}).json()
+    assert body["phi"] is True
+    assert body["items"][0]["patient_name"] == "Muster^Max"
+
+    # and the health panel says so
+    findings = client.get("/api/v1/health/config").json()["findings"]
+    assert any(f["code"] == "worklist_preview_shows_phi" for f in findings), findings
+
+    client.delete("/api/v1/settings/simulate_show_phi")
+    body = client.post("/api/v1/simulate/worklist", json={}).json()
+    assert body["phi"] is False
+    assert "patient_name" not in body["items"][0]
+
+
+def test_source_query_test_answers_for_one_source(client):
+    """'Does this RIS deliver worklists?' — the question a C-ECHO cannot answer."""
+    from mwl_broker import cache
+    from pydicom.dataset import Dataset
+
+    src = client.post("/api/v1/sources", json=SOURCE).json()
+
+    # nothing cached and the host is unreachable → an honest failure
+    r = client.post(f"/api/v1/sources/{src['id']}/query", json={})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "ris-a"
+    assert body["ok"] is False
+    assert body["error"], "the failure reason must be visible"
+
+    assert client.post("/api/v1/sources/999/query", json={}).status_code == 404
+
+
+def test_source_query_test_summarizes_answers(client, monkeypatch):
+    """A source that answers: the summary must be PHI-free and complete."""
+    from pydicom.dataset import Dataset
+
+    from mwl_broker import aggregation
+
+    src = client.post("/api/v1/sources", json=SOURCE).json()
+
+    ds = Dataset()
+    ds.AccessionNumber = "ACC-A-001"
+    ds.PatientID = "P-1"
+    ds.PatientName = "Muster^Max"
+    ds.StudyInstanceUID = "1.2.3"
+    sps = Dataset()
+    sps.ScheduledProcedureStepID = "SPS-1"
+    sps.Modality = "CT"
+    sps.ScheduledStationAETitle = "CT_01"
+    sps.ScheduledProcedureStepStartDate = "20260921"
+    ds.ScheduledProcedureStepSequence = [sps]
+
+    monkeypatch.setattr(aggregation, "query_one",
+                        lambda cfg, identifier: ([ds], 42, ""))
+
+    body = client.post(f"/api/v1/sources/{src['id']}/query", json={}).json()
+
+    assert body["ok"] is True
+    assert body["answers"] == 1
+    assert body["duration_ms"] == 42
+    item = body["items"][0]
+    assert item["accession"] == "ACC-A-001"
+    assert item["station_aet"] == "CT_01"
+    assert item["source"] == "ris-a"
+    assert "patient_name" not in item, "PHI-free by default"
+
+
+def test_cfind_test_is_read_only_for_rbac(client):
+    """The new diagnostic must not become the next 403 (see A1)."""
+    src = client.post("/api/v1/sources", json=SOURCE).json()
+    client.put("/api/v1/settings/rbac_mode", json={"value": "enforce"})
+
+    assert client.post(f"/api/v1/sources/{src['id']}/query", json={}).status_code == 200
+    assert client.post("/api/v1/simulate/worklist", json={}).status_code == 200

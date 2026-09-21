@@ -135,6 +135,11 @@ def forget(source_id: int) -> None:
     reset(source_id)
 
 
+def state_of(source_id: int) -> str:
+    """The breaker state of one source ("closed" when nothing was recorded)."""
+    return (snapshot().get(source_id) or {}).get("state", STATE_CLOSED)
+
+
 def snapshot() -> dict[int, dict]:
     """Breaker state per source id — used by /status and the health checks."""
     with session_factory()() as s:

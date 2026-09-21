@@ -86,3 +86,129 @@ def simulate_transform(session, values: dict, accession: str = "", study_uid: st
         "changes": changes,
         "errors": build_errors + errors,
     }
+
+
+# ---------------------------------------------------------------------------
+# Worklist preview (A9) and the per-source C-FIND test (A8)
+# ---------------------------------------------------------------------------
+
+# What the operator sees. PatientName/PatientID are PHI and only appear when
+# `simulate_show_phi` is switched on deliberately (health panel shows it).
+PHI_FREE_FIELDS = (
+    ("accession", "AccessionNumber"),
+    ("study_uid", "StudyInstanceUID"),
+    ("requested_procedure_id", "RequestedProcedureID"),
+)
+PHI_FREE_SPS_FIELDS = (
+    ("sps_id", "ScheduledProcedureStepID"),
+    ("station_aet", "ScheduledStationAETitle"),
+    ("modality", "Modality"),
+    ("start_date", "ScheduledProcedureStepStartDate"),
+    ("start_time", "ScheduledProcedureStepStartTime"),
+)
+
+
+def summarize_dataset(ds, *, phi: bool = False) -> dict:
+    """One worklist item as a flat, readable summary.
+
+    PHI-free by default: accession, station, modality, date, UIDs — the same
+    fields the query log carries. Patient name/ID need `phi=True`.
+    """
+    out: dict = {}
+    for key, tag in PHI_FREE_FIELDS:
+        value = str(ds.get(tag, "") or "")
+        if value:
+            out[key] = value
+    sps_seq = ds.get("ScheduledProcedureStepSequence") or []
+    if sps_seq:
+        for key, tag in PHI_FREE_SPS_FIELDS:
+            value = str(sps_seq[0].get(tag, "") or "")
+            if value:
+                out[key] = value
+    if phi:
+        out["patient_name"] = str(ds.get("PatientName", "") or "")
+        out["patient_id"] = str(ds.get("PatientID", "") or "")
+    return out
+
+
+def show_phi() -> bool:
+    """Whether the operator deliberately switched the preview to include names."""
+    from . import settings_service
+
+    return settings_service.get_bool("simulate_show_phi")
+
+
+def worklist_preview(identifier: Dataset, *, phi: bool | None = None,
+                     max_items: int = 50) -> dict:
+    """What would a modality with this query get? Runs the real aggregation."""
+    from . import aggregation
+
+    if phi is None:
+        phi = show_phi()
+    result = aggregation.collect(identifier, count_metrics=False)
+
+    # who else knew each merged case (the dedupe decisions, made visible)
+    from .upstream import dedupe_key
+
+    sources_by_key: dict[tuple, list[str]] = {}
+    for src, answers in result.collected:
+        for ds in answers:
+            sources_by_key.setdefault(dedupe_key(ds), []).append(src.name)
+
+    items = []
+    for ds, src in result.merged[:max_items]:
+        entry = summarize_dataset(ds, phi=phi)
+        entry["source"] = src.name
+        entry["also_in"] = [n for n in sources_by_key.get(dedupe_key(ds), []) if n != src.name]
+        items.append(entry)
+
+    return {
+        "station": result.station,
+        "rule": result.rule_name,
+        "status": result.status,
+        "duration_ms": result.duration_ms,
+        "answers": len(result.merged),
+        "hidden": result.hidden,
+        "phi": bool(phi),
+        "served_stale": result.served_stale,
+        "sources": [
+            {
+                "name": o.name,
+                "source_id": o.source_id,
+                "answers": o.answers,
+                "stale": o.stale,
+                "breaker_state": o.breaker_state,
+            }
+            for o in result.outcomes
+        ],
+        "items": items,
+        "truncated": len(result.merged) > max_items,
+    }
+
+
+def source_query_test(source_id: int, identifier: Dataset, *, phi: bool | None = None,
+                      max_items: int = 20) -> dict:
+    """Ask one source directly: does it deliver worklists, and what does it say?"""
+    from . import aggregation
+
+    if phi is None:
+        phi = show_phi()
+    src = aggregation.source_config(source_id)
+    if src is None:
+        return {"ok": False, "error": "not found", "answers": 0, "items": []}
+
+    answers, duration_ms, error = aggregation.query_one(src, identifier)
+    return {
+        "source_id": src.id,
+        "name": src.name,
+        "ok": not error,
+        "error": error,
+        "answers": len(answers),
+        "duration_ms": duration_ms,
+        "phi": bool(phi),
+        "items": [
+            {**summarize_dataset(ds, phi=phi), "source": src.name, "also_in": []}
+            for ds in answers[:max_items]
+        ],
+        "truncated": len(answers) > max_items,
+    }

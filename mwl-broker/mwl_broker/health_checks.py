@@ -279,6 +279,16 @@ def config_findings(session, settings) -> list[dict]:
 
     findings.sort(key=lambda f: (SEVERITY_ORDER.get(f["severity"], 9), f["code"]))
     _publish(findings)
+    # ── PHI exposure ───────────────────────────────────────────────────────
+    # The worklist preview is PHI-free by default. Switching it on is a
+    # deliberate act for troubleshooting, so the panel states it plainly.
+    if settings_service.get_bool("simulate_show_phi"):
+        findings.append(_finding(
+            "worklist_preview_shows_phi", "warning",
+            "The worklist preview shows patient name and ID. Switch "
+            "'simulate_show_phi' off when the troubleshooting is done.",
+        ))
+
     return findings
 
 

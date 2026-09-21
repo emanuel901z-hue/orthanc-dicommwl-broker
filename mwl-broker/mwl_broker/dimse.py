@@ -13,8 +13,8 @@ from pynetdicom.presentation import build_context
 from pynetdicom.sop_class import ModalityWorklistInformationFind, Verification
 from sqlalchemy import select
 
-from . import (atna, breaker, cache, cstore, local_worklist, metrics, routing,
-               settings_service, spool, station_rules, tls, transforms)
+from . import (aggregation, atna, breaker, cache, cstore, local_worklist, metrics,
+               routing, settings_service, spool, station_rules, tls, transforms)
 from .config import Settings
 from .db import session_factory
 from .models import QueryLog, RoutingRule, SeenItem, StoreLog, MwlSource, PacsTarget
@@ -134,6 +134,37 @@ class BrokerSCP:
             )
             for r in rows
         ]
+
+    # ------------------------------------------------------------------
+    def handle_find(self, event):
+        """C-FIND: fan out to all enabled sources, merge, stream answers.
+
+        The aggregation itself lives in `aggregation.collect` — the operator's
+        preview endpoint runs the same function, so a dry-run really shows what
+        a modality would get.
+        """
+        calling = event.assoc.requestor.ae_title
+        identifier = event.identifier
+
+        if not self._calling_allowed(calling):
+            log.warning("C-FIND rejected: calling AET %r not allowed", calling)
+            atna.audit(atna.EVENT_SECURITY, outcome="8", broker_aet=self.settings.broker_aet,
+                       source_aet=calling, query="C-FIND rejected (calling AET not allowed)",
+                       event_type=("ITI-19", "Node Authentication"))
+            yield S_OUT_OF_RESOURCES, None
+            return
+
+        result = aggregation.collect(identifier)
+        merged = result.merged
+
+        self._record_seen_items(merged)
+        self._write_query_log(calling, identifier, len(merged), result.per_source,
+                              result.duration_ms, result.status, result.served_stale)
+        self._audit_query(calling, identifier, merged)
+
+        for ds in result.items:
+            yield S_PENDING, ds
+        yield S_SUCCESS, None
 
     @staticmethod
     def _query_summary(identifier: Dataset) -> dict:

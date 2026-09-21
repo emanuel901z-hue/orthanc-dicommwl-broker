@@ -6,6 +6,8 @@ keeps them consistent with the synchronous DIMSE handlers.
 
 import logging
 from datetime import datetime, timezone
+
+from pydicom.dataset import Dataset
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
@@ -76,6 +78,10 @@ from .schemas import (
     TargetOut,
     TransformIn,
     TransformOut,
+    WorklistPreviewIn,
+    WorklistPreviewOut,
+    SourceQueryIn,
+    SourceQueryOut,
 )
 from . import (atna, audit, breaker, cache, config_io, health_checks, hl7,
                local_worklist, metrics, notify, rbac, retention, settings_service,
@@ -163,6 +169,26 @@ def _parse_since(value: str) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _identifier_from_preview(body) -> Dataset:
+    """Build the C-FIND identifier the preview runs (same fields as a modality)."""
+    identifier = Dataset()
+    if getattr(body, "accession", ""):
+        identifier.AccessionNumber = body.accession
+    if getattr(body, "study_uid", ""):
+        identifier.StudyInstanceUID = body.study_uid
+    if getattr(body, "patient_id", ""):
+        identifier.PatientID = body.patient_id
+    sps = Dataset()
+    if getattr(body, "modality", ""):
+        sps.Modality = body.modality
+    if getattr(body, "scheduled_date", ""):
+        sps.ScheduledProcedureStepStartDate = body.scheduled_date
+    if getattr(body, "station_aet", ""):
+        sps.ScheduledStationAETitle = body.station_aet
+    identifier.ScheduledProcedureStepSequence = [sps]
+    return identifier
 
 
 def _correlation(request: Request) -> str:
@@ -1266,6 +1292,49 @@ def rollback_configuration(
 
 
 # ── Simulation (dry-run) ───────────────────────────────────────────────
+
+
+@router.post(
+    "/simulate/worklist", response_model=WorklistPreviewOut,
+    response_model_exclude_none=True, tags=["simulation"],
+    summary="Preview the merged worklist for a station",
+    description="Runs the **real** C-FIND aggregation (fan-out, merge, dedupe, "
+                "station rules, cache, breaker) and returns what a modality would "
+                "receive — including which source contributed what. Nothing is "
+                "stored as routing provenance, so looking at a case cannot change "
+                "where its images go. Patient name/ID appear only when "
+                "`simulate_show_phi` is switched on (PHI-free by default).",
+    response_description="The merged worklist with per-source provenance and timings.",
+)
+def simulate_worklist(
+    request: Request,
+    body: WorklistPreviewIn,
+    s: Session = _db_dep,
+):
+    identifier = _identifier_from_preview(body)
+    return simulate.worklist_preview(identifier)
+
+
+@router.post(
+    "/sources/{source_id}/query", response_model=SourceQueryOut,
+    response_model_exclude_none=True, tags=["monitoring"],
+    summary="Test one source with a real C-FIND",
+    description="Asks a single source directly whether it delivers worklists — "
+                "the question a C-ECHO cannot answer. The answer is summarized "
+                "PHI-free (accession, station, modality, date, UIDs).",
+    response_description="How many answers the source returned, how long it took and a sample.",
+    responses={404: {"description": "No source with this ID."}},
+)
+def query_source_now(
+    request: Request,
+    source_id: Annotated[int, Path(description="ID of the source to ask.")],
+    body: SourceQueryIn | None = None,
+    s: Session = _db_dep,
+):
+    if s.get(MwlSource, source_id) is None:
+        raise HTTPException(404, "not found")
+    identifier = _identifier_from_preview(body or SourceQueryIn())
+    return simulate.source_query_test(source_id, identifier)
 
 
 @router.post(

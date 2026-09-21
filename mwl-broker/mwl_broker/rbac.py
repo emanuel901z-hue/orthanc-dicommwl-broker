@@ -28,6 +28,8 @@ MODE_ENFORCE = "enforce"
 READ_ONLY_POST_PATTERNS = (
     r"^/api/v1/simulate/(route|station|transform|worklist)$",
     r"^/api/v1/(sources|targets)/[^/]+/echo$",
+    # the C-FIND test on the sources page only asks — it changes nothing
+    r"^/api/v1/sources/[^/]+/query$",
     r"^/api/v1/tls/test$",
 )
 
