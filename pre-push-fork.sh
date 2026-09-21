@@ -101,7 +101,10 @@ echo "   ($STAT)"
 BLACKLIST='(^|/)\.env($|\.)|\.(db|sqlite|sqlite3)$|\.(pem|key|p12|pfx)$|(^|/)secrets?\.|(^|/)test-results/|(^|/)screenshots/|(^|/)shots/|(^|/)report/|(^|/)node_modules/|(^|/)\.venv/|(^|/)history_[0-9a-f]+\.md$|\.log$'
 # Intentionally public, secret-free config templates (still secret-scanned below).
 ENV_ALLOWLIST='(^|/)\.env\.(example|test)$'
-HITS="$(echo "$FILES" | grep -E "$BLACKLIST" | grep -vE "$ENV_ALLOWLIST" || true)"
+# Only additions/changes are a problem: *removing* a blacklisted file (cleanup)
+# must be possible — otherwise the guard would block its own remedy.
+HITS="$(git diff --name-status "$BASE_REF...HEAD" 2>/dev/null | awk '$1 != "D" {print $NF}' \
+        | grep -E "$BLACKLIST" | grep -vE "$ENV_ALLOWLIST" || true)"
 [ -z "$HITS" ] || die "blacklisted files in outgoing diff:
 $(echo "$HITS" | sed 's/^/   /')"
 
