@@ -34,7 +34,7 @@ stage() {
 # the operator scripts are code too: syntax, help text and the dry-run must work
 stage "scripts" bash -c '
   set -e
-  for script in build.sh bootstrap.sh ci-local.sh test-stack.sh pre-push-fork.sh mfa-test.sh; do
+  for script in setup.sh build.sh bootstrap.sh ci-local.sh test-stack.sh pre-push-fork.sh mfa-test.sh; do
     [ -f "$script" ] || { echo "missing: $script"; exit 1; }
     bash -n "$script" || { echo "syntax error: $script"; exit 1; }
   done
@@ -43,6 +43,9 @@ stage "scripts" bash -c '
   ./build.sh --dry-run --demo | grep -q "docker-compose.demo.yml" || { echo "build.sh --dry-run broken"; exit 1; }
   ./build.sh --dry-run | grep -q "Dry-Run" || { echo "build.sh dry-run guard missing"; exit 1; }
   ./bootstrap.sh --check >/dev/null || { echo "bootstrap.sh wrapper broken"; exit 1; }
+  ./setup.sh --self-test | grep -q "alle Prüfungen ok" || { echo "setup.sh --self-test broken"; exit 1; }
+  ./setup.sh --help | grep -q "check" || { echo "setup.sh --help incomplete"; exit 1; }
+  ./setup.sh --env-file .env.test --check | grep -q "Produktiv-Inbetriebnahme" || { echo "setup.sh --check broken"; exit 1; }
   node orthanc-explorer-3-usable/e2e/stack/verify-screens.cjs --help >/dev/null 2>&1 || true
   echo "   scripts ok"
 '

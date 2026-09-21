@@ -9,7 +9,8 @@ Interface und Monitoring, aufgebaut auf:
 | `mwl-broker/` | Backend | Python-Service (FastAPI + pynetdicom): MWL-SCP (C-FIND-Proxy/Aggregator), C-STORE-SCP mit Quellen-Routing, Config-API, Query-/Store-Log, Prometheus-Metriken |
 | `docker-compose.yml` | Stack | Orthanc + Postgres-Index + Broker + OE3 (produktionsfähige Basis) |
 | `docker-compose.demo.yml` | Overlay | Zwei Mock-RIS-Quellen + zweites PACS zum Testen des Routings |
-| `build.sh` | Setup/Betrieb | Bauen, starten, prüfen, stoppen, Registry — alle Optionen erklärt (`--help`); `bootstrap.sh` ist nur noch ein Wrapper darauf |
+| `setup.sh` | Erstinbetriebnahme | Geführter Produktiv-Bootstrap: prüft Umgebung/`.env`/Ports, füllt fehlende oder schwache Werte, startet den Stack, richtet RBAC/AET-Whitelist/TLS/Alarmierung/Aufbewahrung ein — mit Sicherung und Rückfragen ([Details](docs/production-setup.md)) |
+| `build.sh` | Betrieb | Bauen, starten, prüfen, stoppen, Registry — alle Optionen erklärt (`--help`); `bootstrap.sh` ist nur noch ein Wrapper darauf |
 | `.env.example` | Config | Alle Ports/Credentials — nach `.env` kopieren |
 
 ## Konzept in einem Satz
@@ -29,7 +30,9 @@ Konventionen für Coding-Agents: [`agents.md`](agents.md)
 ```bash
 git clone --recurse-submodules <repo-url> orthanc-dicommwl-broker
 cd orthanc-dicommwl-broker
-./build.sh                # Vorprüfung + bauen + starten + Erreichbarkeit
+./setup.sh                # Produktiv: geführt (prüft, konfiguriert, startet)
+./setup.sh --check        # nur prüfen, was noch offen ist
+./build.sh                # Alternative ohne Führung: bauen + starten
 ./build.sh --demo         # inkl. Mock-RIS-Quellen + zweitem PACS
 ./build.sh --check        # nur Vorprüfung, baut nichts
 ./build.sh --help         # alle Optionen erklärt

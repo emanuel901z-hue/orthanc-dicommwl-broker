@@ -20,6 +20,9 @@
 
 ```bash
 # Setup / Gesamtstack (Basis = produktionsfähig, Demo = + Mock-RIS + Peer)
+./setup.sh                  # Erstinbetriebnahme: prüft/füllt .env, Ports, RBAC, TLS, Alarmierung
+./setup.sh --check          # nur prüfen (ändert nichts) — auch für Bestandsanlagen
+./setup.sh --self-test      # Prüffunktionen testen (ohne Docker, CI-fähig)
 ./build.sh                  # Docker-Check, .env anlegen, Port-Check, build + up + Health
 ./build.sh --demo           # inkl. docker-compose.demo.yml
 ./build.sh --check          # nur Vorflight (Docker, .env, Ports)
