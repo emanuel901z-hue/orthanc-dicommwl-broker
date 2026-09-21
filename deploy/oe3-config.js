@@ -9,6 +9,9 @@ window.__OE3_CONFIG__ = {
   viewerSession: false,
   features: {
     enableMwlBroker: true,
+    // Orthanc's own worklists plugin REST API is off in this stack (the MWL
+    // broker serves the modalities) — the page is hidden while this is false.
+    enableWorklists: false,
     enableModalityConfig: true,
     enableUpload: true,
   },

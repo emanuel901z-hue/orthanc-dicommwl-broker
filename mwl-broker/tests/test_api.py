@@ -1215,6 +1215,10 @@ def test_every_setting_is_documented_for_the_ui(client):
             assert row["min"] is not None and row["max"] is not None, (
                 f"{row['key']} has no bounds")
             assert row["min"] <= row["max"]
+            # the fallback range (0 … 10^9) means nobody thought about this
+            # setting — the UI would offer a nonsense range
+            assert (row["min"], row["max"]) != (0, 10**9), (
+                f"{row['key']} has no explicit range in _INT_RANGES")
         if row["kind"].startswith("enum:"):
             assert row["choices"], f"{row['key']} has no choices"
 

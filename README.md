@@ -92,6 +92,20 @@ Die Texte für den GitHub-„About"-Bereich (Beschreibung, Themen, Release-Notiz
 und eine PR-Vorlage) liegen fertig in
 [docs/github-repo-about.md](docs/github-repo-about.md).
 
+## Bekannte Stolpersteine (behoben)
+
+- **`GET /worklists` → 404 im Browser-Log**: Orthancs Worklists-Plugin-API ist in
+  diesem Stack bewusst aus (MWL macht der Broker). Die OE3-Seite ist jetzt über
+  `enableWorklists` gegated — kein Eintrag, keine Anfrage, keine Konsolenfehler.
+  Zum Aktivieren: `"Worklists": {"Enable": true}` in `deploy/orthanc/orthanc.json`
+  **und** `enableWorklists: true` in `deploy/oe3-config.js`.
+- **Rohwerte in der Oberfläche** (`success`, `partial`, `open`, Ereignis- und
+  Retention-Texte, Einstellungs-Beschreibungen): alle API-Werte laufen jetzt
+  durch i18n (`broker.queryStatus_*`, `broker.event_*`, `broker.retentionTable_*`,
+  `broker.settingDesc_*`) mit dem API-Text als Fallback.
+- **Tabellenzeilen waren nicht klickbar**: ein Klick (oder Enter/Leertaste) auf
+  eine Zeile öffnet jetzt die Bearbeitung — in allen Broker-Listen.
+
 ## API-Dokumentation
 
 Swagger UI: `http://<broker>:8081/docs` · ReDoc: `/redoc` ·

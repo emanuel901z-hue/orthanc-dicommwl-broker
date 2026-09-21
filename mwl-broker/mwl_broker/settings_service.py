@@ -255,6 +255,7 @@ KNOWN: dict[str, tuple[str, str]] = {
 
 _INT_RANGES: dict[str, tuple[int, int]] = {
     "seen_item_ttl_days": (1, 3650),
+    "upstream_timeout_s": (1, 600),
     "echo_interval_s": (5, 3600),
     "retention_query_log_days": (0, 36500),
     "retention_store_log_days": (0, 3650),
