@@ -128,6 +128,13 @@ services:
         condition: service_healthy
       mwl-broker:
         condition: service_healthy
+    healthcheck:
+      # the SPA is served by nginx — a 200 on the app entry point is enough
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/oe3/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     logging:
       driver: "json-file"
       options:

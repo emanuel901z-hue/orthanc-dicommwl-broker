@@ -21,6 +21,13 @@ services:
   mock-ris-a:
     build: ./mwl-broker
     command: ["python", "-m", "mwl_broker.mock_ris", "--aet", "RIS_A", "--port", "11114", "--variant", "a"]
+    healthcheck:
+      # a DICOM SCP has no HTTP endpoint — probe its port instead
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('localhost', 11114), 3).close()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     ports:
       # Loopback only — demo services must not be reachable from the LAN.
       - "127.0.0.1:${MOCK_RIS_A_PORT}:11114"
@@ -29,6 +36,13 @@ services:
   mock-ris-b:
     build: ./mwl-broker
     command: ["python", "-m", "mwl_broker.mock_ris", "--aet", "RIS_B", "--port", "11115", "--variant", "b"]
+    healthcheck:
+      # a DICOM SCP has no HTTP endpoint — probe its port instead
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('localhost', 11115), 3).close()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     ports:
       - "127.0.0.1:${MOCK_RIS_B_PORT}:11115"
     restart: unless-stopped
