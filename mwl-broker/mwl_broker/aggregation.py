@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pydicom.dataset import Dataset
 from sqlalchemy import select
 
-from . import breaker, cache, local_worklist, metrics, mpps, station_rules
+from . import breaker, cache, local_worklist, merge_rules, metrics, mpps, station_rules
 from .db import session_factory
 from .models import MwlSource
 from .upstream import SourceCfg, merge_answers, query_source
@@ -58,6 +58,8 @@ class AggregationResult:
     per_source: dict[str, int | str] = field(default_factory=dict)
     served_stale: list[str] = field(default_factory=list)
     hidden: int = 0
+    # what the field-level merge rules changed (shown in the preview)
+    field_changes: list[dict] = field(default_factory=list)
     station: str = ""
     rule_name: str | None = None
     duration_ms: int = 0
@@ -216,6 +218,12 @@ def collect(
     order = {src.id: i for i, src in enumerate(sources)}
     collected.sort(key=lambda t: order.get(t[0].id, local_worklist.local_priority()))
     merged = merge_answers(collected)
+
+    # Field-level merge rules may take single attributes from another source
+    # (demographics from the HIS feed, study description from the RIS …). They
+    # run before the station filter, so visibility rules see the final item.
+    merged, field_changes = merge_rules.apply_field_rules(merged, collected)
+    result.field_changes = field_changes
 
     merged, hidden = station_rules.filter_merged(merged, rule)
 

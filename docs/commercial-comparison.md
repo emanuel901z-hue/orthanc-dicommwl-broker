@@ -98,7 +98,7 @@ Verifikation (`./ci-local.sh`) und einem Commit — ohne Regression.
 | Sprint | Inhalt | Status |
 |---|---|---|
 | 1 | **MPPS SCP + Status-Rückmeldung** — N-CREATE/N-SET annehmen, Schritt speichern, Status als HL7 an das RIS zurückmelden (MLLP oder Webhook), API + UI + Tests | ✅ **erledigt** |
-| 2 | **Feldweiser Merge + Mapping-Vorlagen** — je DICOM-Feld die Quelle bestimmen; HL7→DICOM-Mapping sichtbar und änderbar | ⏳ geplant |
+| 2 | **Feldweiser Merge + Mapping-Vorlagen** — je DICOM-Feld die Quelle bestimmen; HL7→DICOM-Mapping sichtbar und änderbar | ✅ **erledigt** |
 | 3 | **DICOM Conformance Statement + IHE-Aussage** — Dokumente plus ein Test, der Dokument und Code zusammenhält | ⏳ geplant |
 | 4 | **Statistik/Reporting** — Kennzahlen je Quelle/Modalität/Station und Tagesreihe, API + UI | ⏳ geplant |
 | 5 | **UPS-RS** — DICOMweb-Worklist (Suche, Abruf, Anlegen, Statuswechsel) auf derselben Aggregation | ⏳ geplant |
@@ -121,12 +121,20 @@ nicht zurück"), `MppsCard.test.tsx` (4), verify-ui (2 Checks), Migration
 `0008_mpps`, Retention-Tabelle `mpps_step`, Metriken
 `mwl_mpps_steps_total`/`mwl_mpps_forwarded_total`.
 
-### Sprint 2 — Feldweiser Merge und Mapping-Vorlagen (⏳ geplant)
+### Sprint 2 — Feldweiser Merge und Mapping-Vorlagen (✅ erledigt)
 
 Merge-Regeln legen **je DICOM-Feld** fest, aus welcher Quelle der Wert kommt
 (Reihenfolge = Priorität); ohne Regel gilt weiter „erste Quelle gewinnt". Ein
 Mapping-Editor macht die Zuordnung HL7 → DICOM-Worklist-Felder sichtbar und
 änderbar.
+
+**Nachweis:** `tests/test_merge_rules.py` (8: Standard-Merge unverändert, Feld aus
+anderer Quelle, Reihenfolge, inaktive Regel, Felder in der SPS-Sequenz, API +
+Validierung, Vorschau zeigt die Änderung), `tests/test_hl7_mapping.py` (7: ohne
+Zuordnung unverändert, Füllen, Trockenlauf, Wert landet am Eintrag **und in der
+C-FIND-Antwort**, inaktive Zuordnung, fehlendes Feld, Validierung),
+`MergeRulesCard.test.tsx` (6), `Hl7MappingCard.test.tsx` (6), Migrationen
+`0009_merge_rules`/`0010_hl7_field_map`/`0011_local_extra`.
 
 ### Sprint 3 — Conformance Statement und IHE-Aussage (⏳ geplant)
 

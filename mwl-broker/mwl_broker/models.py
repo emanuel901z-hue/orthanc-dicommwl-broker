@@ -176,6 +176,9 @@ class LocalWorklistItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     accession: Mapped[str] = mapped_column(String(64), index=True)
     sps_id: Mapped[str] = mapped_column(String(64), default="1")
+    # values a local HL7 field mapping added (DICOM keyword → value); they are
+    # merged into the C-FIND answer like any other attribute
+    extra_attributes: Mapped[dict] = mapped_column(JSON, default=dict)
     patient_id: Mapped[str] = mapped_column(String(64), default="")
     patient_name: Mapped[str] = mapped_column(String(128), default="")
     birth_date: Mapped[str] = mapped_column(String(16), default="")
@@ -401,3 +404,39 @@ class MppsStep(Base):
     forward_error: Mapped[str] = mapped_column(String(256), default="")
     forward_attempts: Mapped[int] = mapped_column(Integer, default=0)
     forwarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MergeRule(Base):
+    """Which source wins for one DICOM attribute.
+
+    The default merge takes the whole item from the highest-priority source that
+    knows the case. A rule like `PatientName ← his-feed,ris-a` overrides just
+    that field: demographics from the HIS feed, everything else from the RIS.
+    """
+
+    __tablename__ = "merge_rule"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tag: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    sources: Mapped[str] = mapped_column(String(512), default="")   # comma separated, in order
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Hl7FieldMap(Base):
+    """Read an extra value out of the ORM message into a worklist attribute.
+
+    Hospitals put local information in non-standard places (room in OBR-18,
+    contrast agent in a ZSD segment). A mapping names the HL7 location and the
+    DICOM attribute it fills — no code change for a local convention.
+    """
+
+    __tablename__ = "hl7_field_map"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    segment: Mapped[str] = mapped_column(String(8), default="")     # ORC, OBR, ZDS, PID …
+    field: Mapped[int] = mapped_column(Integer, default=1)          # HL7 field number (1-based)
+    component: Mapped[int] = mapped_column(Integer, default=0)      # component inside the field
+    target_tag: Mapped[str] = mapped_column(String(64), default="")  # DICOM keyword
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

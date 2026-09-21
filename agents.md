@@ -247,6 +247,14 @@ Token rotieren = nur die Store-Datei neu schreiben:
 - **Lokale Einträge nie mit Patientendaten ins Änderungsprotokoll.** Der
   Audit-Snapshot enthält nur Termindaten; sonst landet PHI im
   Konfigurations-Export. Die Tabelle selbst ist der PHI-Speicher.
+- **Feldweiser Merge nur über Regeln.** Der Standard bleibt „ganzes Item von der
+  Quelle mit der höchsten Priorität"; `merge_rules.apply_field_rules` überschreibt
+  einzelne Attribute (vor dem Stationsfilter, damit Sichtbarkeitsregeln das
+  Endergebnis sehen). Schreiben auf Datasets **immer per `setattr`** — `ds[tag] = …`
+  wirft in pydicom „Dataset items must be 'DataElement' instances".
+- **HL7-Zusatzfelder kommen aus `hl7_field_map`, nie aus Code.** Komponenten
+  werden wie in HL7 gezählt (1-basiert, 0 = ganzes Feld); gefüllte Werte landen in
+  `local_worklist_item.extra_attributes` und damit in der C-FIND-Antwort.
 - **MPPS: Zustellung nie im DIMSE-Thread.** N-CREATE/N-SET nehmen an, speichern
   und melden asynchron (Thread) an das RIS zurück; Fehler werden gezählt und sind
   über `/api/v1/mpps/forward-pending` erneut auslösbar. Die MPPS-SOP-Klasse wird

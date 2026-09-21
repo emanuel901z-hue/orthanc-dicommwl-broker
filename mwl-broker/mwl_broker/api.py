@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Reques
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .db import get_session
+from .db import get_session, session_factory
 from .echo import echo_one, snapshot
 from .models import (
     MwlSource,
@@ -90,8 +90,13 @@ from .schemas import (
     MppsStepOut,
     MppsStatsOut,
     MppsForwardOut,
+    MergeRuleIn,
+    MergeRuleOut,
+    Hl7FieldMapIn,
+    Hl7FieldMapOut,
 )
-from . import (atna, audit, breaker, cache, config_io, health_checks, hl7, mpps,
+from . import (atna, audit, breaker, cache, config_io, health_checks, hl7, hl7_mapping,
+               merge_rules, mpps,
                local_worklist, metrics, notify, rbac, retention, settings_service,
                simulate, spool, station_rules, tls, transforms)
 from .models import (BrokerSetting, ConfigAudit, Hl7Message, LocalWorklistItem,
@@ -197,6 +202,40 @@ def _identifier_from_preview(body) -> Dataset:
         sps.ScheduledStationAETitle = body.station_aet
     identifier.ScheduledProcedureStepSequence = [sps]
     return identifier
+
+
+def _check_merge_rule(body) -> None:
+    """A rule must name a real DICOM attribute and at least one known source."""
+    from pydicom.datadict import tag_for_keyword
+
+    if tag_for_keyword(body.tag) is None:
+        raise HTTPException(422, [f"'{body.tag}' is not a DICOM attribute name "
+                                  "(use the keyword, e.g. PatientName)"])
+    wanted = [s.strip() for s in body.sources if s.strip()]
+    if not wanted:
+        raise HTTPException(422, ["at least one source is required"])
+    with session_factory()() as s:
+        known = {name for name in s.scalars(select(MwlSource.name)).all()}
+    unknown = [name for name in wanted if name not in known and name != "local"]
+    if unknown:
+        raise HTTPException(422, [f"unknown source(s): {', '.join(unknown)} "
+                                  "(configure them under Upstream sources first)"])
+
+
+def _check_hl7_map(body) -> None:
+    """A mapping must name a real HL7 segment, a field number and a DICOM attribute."""
+    from pydicom.datadict import tag_for_keyword
+
+    segment = (body.segment or "").strip().upper()
+    if len(segment) != 3 or not segment.isalpha():
+        raise HTTPException(422, [f"'{body.segment}' is not an HL7 segment (three letters, e.g. OBR)"])
+    if body.field < 1 or body.field > 200:
+        raise HTTPException(422, ["the HL7 field number must be between 1 and 200"])
+    if body.component < 0 or body.component > 50:
+        raise HTTPException(422, ["the component index must be between 0 and 50"])
+    if tag_for_keyword(body.target_tag) is None:
+        raise HTTPException(422, [f"'{body.target_tag}' is not a DICOM attribute name "
+                                  "(use the keyword, e.g. ScheduledStationAETitle)"])
 
 
 def _correlation(request: Request) -> str:
@@ -495,6 +534,63 @@ def _check_scope(s: Session, body: TransformIn) -> None:
     ):
         if mid is not None and s.get(model, mid) is None:
             raise HTTPException(404, f"{label} {mid} not found")
+
+
+@router.get(
+    "/merge-rules", response_model=list[MergeRuleOut], tags=["merge"],
+    summary="List field-level merge rules",
+    description="Rules that decide, per DICOM attribute, which source wins — "
+                "demographics from the HIS feed while the study description comes "
+                "from the RIS. Without a rule the whole item comes from the "
+                "highest-priority source that knows the case.",
+    response_description="All rules, ordered by tag.",
+)
+def list_merge_rules():
+    return merge_rules.list_rules()
+
+
+@router.post(
+    "/merge-rules", response_model=MergeRuleOut, status_code=201, tags=["merge"],
+    summary="Create or replace a merge rule",
+    description="One rule per DICOM attribute; posting the same tag again "
+                "replaces the order.",
+    response_description="The stored rule.",
+    responses=_docs(VALIDATION_422, READ_ONLY_403),
+)
+def create_merge_rule(
+    request: Request,
+    body: Annotated[MergeRuleIn, Body(description="Attribute and source order.")],
+    s: Session = _db_dep,
+):
+    _check_merge_rule(body)
+    row = merge_rules.upsert_rule(body.tag, body.sources, body.enabled)
+    audit.record(s, _actor(request), "merge_rule.create", "merge_rule", row["id"],
+                 None, {"tag": row["tag"], "sources": row["sources"]},
+                 _correlation(request))
+    s.commit()
+    return row
+
+
+@router.delete(
+    "/merge-rules/{rule_id}", status_code=204, tags=["merge"],
+    summary="Delete a merge rule",
+    description="Removes the rule; the attribute falls back to the normal merge.",
+    response_description="The rule was deleted.",
+    responses=_docs(READ_ONLY_403, NOT_FOUND_404),
+)
+def delete_merge_rule(
+    request: Request,
+    rule_id: Annotated[int, Path(description="ID of the rule.")],
+    s: Session = _db_dep,
+):
+    row = merge_rules.get_rule(rule_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    merge_rules.delete_rule(rule_id)
+    audit.record(s, _actor(request), "merge_rule.delete", "merge_rule", rule_id,
+                 {"tag": row["tag"], "sources": row["sources"]}, None,
+                 _correlation(request))
+    s.commit()
 
 
 @router.get(
@@ -1101,6 +1197,62 @@ def forward_pending_mpps(request: Request, s: Session = _db_dep):
 
 
 @router.get(
+    "/hl7/field-maps", response_model=list[Hl7FieldMapOut], tags=["local"],
+    summary="List HL7 field mappings",
+    description="Extra HL7 fields the broker reads into worklist attributes — for "
+                "local conventions like the room in OBR-18.",
+    response_description="All mappings.",
+)
+def list_hl7_field_maps():
+    return hl7_mapping.list_maps()
+
+
+@router.post(
+    "/hl7/field-maps", response_model=Hl7FieldMapOut, status_code=201, tags=["local"],
+    summary="Create or replace an HL7 field mapping",
+    description="One mapping per HL7 location (segment, field, component). Posting "
+                "the same location again replaces the target attribute.",
+    response_description="The stored mapping.",
+    responses=_docs(VALIDATION_422, READ_ONLY_403),
+)
+def create_hl7_field_map(
+    request: Request,
+    body: Annotated[Hl7FieldMapIn, Body(description="HL7 location and target attribute.")],
+    s: Session = _db_dep,
+):
+    _check_hl7_map(body)
+    row = hl7_mapping.upsert_map(body.segment, body.field, body.target_tag,
+                                 body.component, body.enabled)
+    audit.record(s, _actor(request), "hl7_field_map.create", "hl7_field_map", row["id"],
+                 None, {"segment": row["segment"], "field": row["field"],
+                        "target": row["target_tag"]}, _correlation(request))
+    s.commit()
+    return row
+
+
+@router.delete(
+    "/hl7/field-maps/{map_id}", status_code=204, tags=["local"],
+    summary="Delete an HL7 field mapping",
+    description="Removes the mapping; the field is no longer read.",
+    response_description="The mapping was deleted.",
+    responses=_docs(READ_ONLY_403, NOT_FOUND_404),
+)
+def delete_hl7_field_map(
+    request: Request,
+    map_id: Annotated[int, Path(description="ID of the mapping.")],
+    s: Session = _db_dep,
+):
+    row = hl7_mapping.get_map(map_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    hl7_mapping.delete_map(map_id)
+    audit.record(s, _actor(request), "hl7_field_map.delete", "hl7_field_map", map_id,
+                 {"segment": row["segment"], "target": row["target_tag"]}, None,
+                 _correlation(request))
+    s.commit()
+
+
+@router.get(
     "/hl7/messages/{message_id}", response_model=Hl7MessageDetailOut, tags=["local"],
     summary="Read one inbound HL7 message",
     description="The log entry of one message: what was parsed, what the broker "
@@ -1204,11 +1356,13 @@ def apply_hl7_orm(
     parsed = hl7.parse(body)
     if not parsed["accession"]:
         raise HTTPException(422, parsed["warnings"] or ["no accession number"])
+    # local conventions: extra fields the hospital configured
+    parsed, mapped = hl7_mapping.apply_maps(parsed, body)
     if dry_run:
         action = "cancelled" if hl7.is_cancel(parsed) else "created-or-updated"
         return {"dry_run": True, "action": action, "item": None,
                 **{k: parsed[k] for k in ("message_type", "control_id", "order_control", "accession")},
-                "parsed": parsed, "warnings": parsed["warnings"]}
+                "parsed": parsed, "warnings": parsed["warnings"], "mapped": mapped}
 
     result = local_worklist.upsert_from_hl7(
         parsed, transport="http",
@@ -1223,9 +1377,11 @@ def apply_hl7_orm(
     s.commit()
     metrics.HL7_MESSAGES.labels(transport="http", result=result["action"]).inc()
     return {"dry_run": False, "action": result["action"],
+            "item_id": result["item_id"],
             "item": _local_snapshot(row) if row is not None else None,
             **{k: parsed[k] for k in ("message_type", "control_id", "order_control", "accession")},
-            "parsed": parsed, "warnings": parsed["warnings"] + ([result["error"]] if result.get("error") else [])}
+            "parsed": parsed, "mapped": mapped,
+            "warnings": parsed["warnings"] + ([result["error"]] if result.get("error") else [])}
 
 
 # ── ATNA audit trail ───────────────────────────────────────────────────

@@ -614,6 +614,16 @@ class Hl7MessageOut(BaseModel):
     error: str = Field(default="", description="Reason when the message was not applied.")
 
 
+class Hl7MappedField(BaseModel):
+    """One field a local HL7 mapping filled."""
+
+    from_: str = Field(alias="from", description="HL7 location, e.g. OBR-18.2.")
+    tag: str = Field(description="DICOM attribute that was filled.")
+    value: str = Field(description="The value that was read.")
+
+    model_config = {"populate_by_name": True}
+
+
 class Hl7ParseOut(BaseModel):
     """Result of an ORM message (dry-run shows what would happen)."""
 
@@ -625,6 +635,11 @@ class Hl7ParseOut(BaseModel):
     action: str = Field(description="planned/applied action, e.g. created | cancelled.")
     item: LocalItemOut | None = Field(default=None, description="The affected local item.")
     parsed: dict = Field(description="All fields the parser mapped.")
+    mapped: list[Hl7MappedField] = Field(
+        default_factory=list,
+        description="Extra fields the configured HL7 mappings filled.",
+    )
+    item_id: int | None = Field(default=None, description="Local item that was created/updated.")
     warnings: list[str] = Field(description="What could not be mapped (the UI shows it).")
 
 
@@ -970,6 +985,18 @@ class WorklistPreviewSource(BaseModel):
     breaker_state: str | None = Field(default=None, description="Circuit-breaker state when skipped.")
 
 
+class MergeFieldChange(BaseModel):
+    """One attribute the rules took from another source (shown in the preview)."""
+
+    accession: str = Field(description="Case the change belongs to.")
+    tag: str = Field(description="Attribute that was replaced.")
+    from_: str = Field(alias="from", description="Source the value came from.")
+    before: str = Field(default="", description="Value before the rule.")
+    after: str = Field(description="Value after the rule.")
+
+    model_config = {"populate_by_name": True}
+
+
 class WorklistPreviewOut(BaseModel):
     """Result of running the real C-FIND aggregation without a modality."""
 
@@ -984,6 +1011,10 @@ class WorklistPreviewOut(BaseModel):
                                     description="Sources answered from the cache (they were down).")
     sources: list[WorklistPreviewSource] = Field(description="Per-source contribution and timing.")
     items: list[WorklistPreviewItem] = Field(description="The merged items (capped, see `truncated`).")
+    field_changes: list[MergeFieldChange] = Field(
+        default_factory=list,
+        description="Attributes the field-level merge rules took from another source.",
+    )
     truncated: bool = Field(description="True when more items exist than were returned.")
 
 
@@ -1109,3 +1140,46 @@ class MppsForwardOut(BaseModel):
     attempted: int = Field(default=0, description="Steps tried (batch only).")
     sent: int = Field(default=0, description="Steps delivered (batch only).")
     failed: int = Field(default=0, description="Steps that failed (batch only).")
+
+
+class MergeRuleIn(BaseModel):
+    """Which source wins for one DICOM attribute."""
+
+    tag: str = Field(description="DICOM keyword, e.g. PatientName or ScheduledStationAETitle.",
+                     examples=["PatientName"])
+    sources: list[str] = Field(description="Source names in the order they are asked (first hit wins).",
+                               examples=[["his-feed", "ris-a"]])
+    enabled: bool = Field(default=True, description="Rule active?")
+
+
+class MergeRuleOut(BaseModel):
+    """A stored field-level merge rule."""
+
+    id: int = Field(description="Row ID.")
+    tag: str = Field(description="DICOM keyword the rule applies to.")
+    sources: list[str] = Field(description="Source order for this attribute.")
+    enabled: bool = Field(description="Rule active?")
+    created_at: datetime = Field(description="When the rule was created.")
+
+
+class Hl7FieldMapIn(BaseModel):
+    """Read one HL7 field into a DICOM worklist attribute."""
+
+    segment: str = Field(description="HL7 segment, e.g. OBR.", examples=["OBR"])
+    field: int = Field(description="HL7 field number (1-based; MSH counts from 1 too).", examples=[18])
+    component: int = Field(default=0, description="Component inside the field (0 = whole field).")
+    target_tag: str = Field(description="DICOM keyword to fill.",
+                            examples=["ScheduledStationAETitle"])
+    enabled: bool = Field(default=True, description="Mapping active?")
+
+
+class Hl7FieldMapOut(BaseModel):
+    """A stored HL7 field mapping."""
+
+    id: int = Field(description="Row ID.")
+    segment: str = Field(description="HL7 segment.")
+    field: int = Field(description="HL7 field number.")
+    component: int = Field(description="Component index.")
+    target_tag: str = Field(description="DICOM keyword that is filled.")
+    enabled: bool = Field(description="Mapping active?")
+    created_at: datetime = Field(description="When the mapping was created.")

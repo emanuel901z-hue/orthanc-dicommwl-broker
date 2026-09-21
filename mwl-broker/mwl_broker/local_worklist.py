@@ -92,6 +92,12 @@ def to_dataset(item: LocalWorklistItem, charset: str = "ISO_IR 100") -> Dataset:
     sps.Modality = item.modality or ""
     sps.ScheduledProcedureStepDescription = item.procedure_description or ""
     sps.ScheduledProcedureStepStatus = item.sps_status or "SCHEDULED"
+    # fields a local HL7 mapping added belong in the answer like any other
+    for tag, value in (getattr(item, "extra_attributes", None) or {}).items():
+        try:
+            setattr(ds, tag, value)
+        except Exception:  # an unknown keyword must not break the answer
+            log.warning("local item %s: cannot set mapped attribute %s", item.id, tag)
     ds.ScheduledProcedureStepSequence = [sps]
     return ds
 
@@ -241,14 +247,18 @@ def upsert_from_hl7(parsed: dict, *, transport: str = "http",
             "enabled": True,
             "origin": "hl7",
         }
+        mapped = parsed.get("mapped") or {}
         if row is None:
-            row = LocalWorklistItem(accession=accession, sps_id=sps_id, **values)
+            row = LocalWorklistItem(accession=accession, sps_id=sps_id,
+                                    extra_attributes=dict(mapped), **values)
             s.add(row)
             action = "created"
         else:
             for key, value in values.items():
                 if value:            # never blank an existing field with an empty HL7 field
                     setattr(row, key, value)
+            if mapped:
+                row.extra_attributes = {**(row.extra_attributes or {}), **mapped}
             action = "updated"
         s.commit()
         item_id = row.id

@@ -182,6 +182,7 @@ def worklist_preview(identifier: Dataset, *, phi: bool | None = None,
             for o in result.outcomes
         ],
         "items": items,
+        "field_changes": result.field_changes,
         "truncated": len(result.merged) > max_items,
     }
 
