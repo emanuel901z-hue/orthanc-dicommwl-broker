@@ -17,7 +17,7 @@ gegen den Stack.
 | **Keine tote Route** | 66 Routen; nur `/healthz`, `/healthz/ready`, `/metrics` werden von der UI nicht aufgerufen — das ist deren Zweck (Monitoring) |
 | **CRUD je Ressource** | `sources`, `targets`, `rules`, `transforms`, `station-rules`, `local-items` haben vollständiges GET/POST/PUT/DELETE; `settings` GET/PUT/DELETE (PUT = Upsert) |
 | **Tests je Route** | jede Route hat Treffer in `tests/` bzw. E2E; vier Scheinlücken waren f-String-Artefakte (`/sources/{id}/echo` etc. sind getestet) |
-| **Audit bei Konfigmutationen** | alle `POST/PUT/DELETE` auf Konfigurationsobjekte schreiben einen Änderungsprotokoll-Eintrag — **inklusive Import** (`config_io` protokolliert je Element `import.source|target|rule|transform|setting`) |
+| **Audit bei Konfigmutationen** | alle `POST/PUT/DELETE` auf Konfigurationsobjekte schreiben einen Änderungsprotokoll-Eintrag — **inklusive Import** (`config_io` protokolliert je Element: `import.source`, `import.target`, `import.rule`, `import.transform`, `import.setting`) |
 | **Metriken** | 45 Metrikfamilien: C-FIND (Dauer, Antworten je Quelle), C-STORE, Spool, Cache, Breaker, ATNA (gesendet/fehlgeschlagen/verworfen), Alerting, Retention-Alter, TLS-Restlaufzeit, Konfig-Findings |
 | **Health** | `/healthz` (liveness) + `/healthz/ready` (`{"ready":true,"checks":{"db":true,"scp":true}}`) + `/api/v1/health/config` (Konfigurationskonsistenz) |
 | **DICOM-Schnittstelle** | MWL **C-FIND**, **C-STORE**, **C-ECHO** (SCP+SCU), DICOM-TLS/mTLS eingehend (zweiter Listener) und ausgehend je Knoten |
