@@ -528,14 +528,14 @@ def stats() -> dict:
     }
 
 
-def items(status: str | None = None, limit: int = 100) -> list[dict]:
+def items(status: str | None = None, limit: int = 100, offset: int = 0) -> list[dict]:
     """Spooled entries (metadata only — the payload stays on disk)."""
     now = _now()
     with session_factory()() as s:
         query = select(StoreSpool).order_by(StoreSpool.created_at.desc(), StoreSpool.id.desc())
         if status:
             query = query.where(StoreSpool.status == status)
-        rows = s.scalars(query.limit(limit)).all()
+        rows = s.scalars(query.offset(offset).limit(limit)).all()
         return [
             {
                 "id": row.id,

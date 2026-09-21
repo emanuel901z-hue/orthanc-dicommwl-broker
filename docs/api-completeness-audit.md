@@ -25,7 +25,7 @@ gegen den Stack.
 
 ## 2. Befunde
 
-### A1 — RBAC sperrt die **Nur-Lese**-Diagnose (P1)
+### A1 — RBAC sperrt die **Nur-Lese**-Diagnose (P1) — **behoben**
 
 In `rbac_mode=enforce` blockt die Middleware **jeden** Nicht-GET unter
 `/api/v1` ohne Schreibrolle (`main.py`, Middleware). Damit sind auch die
@@ -48,7 +48,7 @@ zurückhaltenden Rollen unbenutzbar.
 `hl7/orm` und `config/import`. `atna/test` und `notify/test` bleiben geschützt
 (sie lösen echte Nachrichten aus) — die blendet die UI dann für Nur-Leser aus.
 
-### A2 — Cache-Leeren wird nicht protokolliert (P1)
+### A2 — Cache-Leeren wird nicht protokolliert (P1) — **behoben**
 
 `DELETE /api/v1/cache` und `DELETE /api/v1/cache/sources/{id}` löschen den
 Arbeitslisten-Cache — also **die Ausfallüberbrückung**, die die Modalitäten
@@ -59,7 +59,7 @@ Nachvollziehbar ist hinterher nicht, wer die Überbrückung abgeschaltet hat.
 **Fix:** `audit.record` in beiden Handlern (Aktion `cache.clear`,
 `cache.clear_source`).
 
-### A3 — Breaker-Reset ohne Spur (P2)
+### A3 — Breaker-Reset ohne Spur (P2) — **behoben**
 
 `POST /sources/{id}/reset-breaker` schließt den Circuit Breaker einer Quelle —
 also die Entscheidung, ein als gestört erkanntes System wieder zu befragen.
@@ -68,7 +68,7 @@ Logzeile.
 
 **Fix:** Protokolleintrag (Aktion `breaker.reset`) + Logzeile.
 
-### A4 — `GET /status` kennt keine Version (P2)
+### A4 — `GET /status` kennt keine Version (P2) — **behoben**
 
 Der Status liefert `counts`, `db_ok`, `scp_listening`, `sources`, `targets` —
 aber **keine Version und keine Laufzeit**. „Welcher Stand läuft hier?" ist per
@@ -77,7 +77,7 @@ API und in der Oberfläche nicht beantwortbar (nur über `/openapi.json`).
 **Fix:** `version` (aus `pyproject`/`__init__`) und `started_at`/`uptime_s`
 ergänzen; die UI zeigt es in der Kopfzeile/Überblickskarte.
 
-### A5 — Paginierung inkonsistent (P2)
+### A5 — Paginierung inkonsistent (P2) — **behoben**
 
 | Liste | Parameter | Tiefe erreichbar? |
 |---|---|---|
@@ -91,7 +91,7 @@ erreichbar, auch nicht mit Werkzeugen.
 **Fix:** `offset` überall ergänzen (gleiche Semantik wie die Logs), UI mit
 „mehr laden".
 
-### A6 — Keine Zeitraum-Filter (P2)
+### A6 — Keine Zeitraum-Filter (P2) — **behoben**
 
 Weder die Logs noch das Änderungsprotokoll lassen sich auf einen Zeitraum
 einschränken (`logs/queries` kennt `calling_aet`/`status`, `audit/config` nur
@@ -161,7 +161,7 @@ senden.
 - Kein **„Cache jetzt aktualisieren"** (nur löschen).
 - Kein **Konfigurations-Diff zweier Exporte**.
 
-### A13 — Veraltete Aussage in der Integrationsdoku (P2, Doku)
+### A13 — Veraltete Aussage in der Integrationsdoku (P2, Doku) — **behoben**
 
 `docs/mwl-broker-integration.md` Zeile 118 behauptet:
 
@@ -170,7 +170,7 @@ senden.
 Die CRUD-Editoren **existieren** (`NodeFormDialog` + Quellen-/Ziel-/
 Regel-/Transform-/Stationsseiten). Die Zeile muss weg.
 
-### A14 — Bewusste Grenzen sind nicht als solche dokumentiert (P2, Doku)
+### A14 — Bewusste Grenzen sind nicht als solche dokumentiert (P2, Doku) — **behoben**
 
 Die Prüfung hat drei „fehlende" Fähigkeiten gefunden, die **Absicht** sind —
 sie stehen aber nicht als Grenze in der Integrationsdoku, weshalb jede spätere
@@ -183,7 +183,33 @@ Prüfung sie erneut als Lücke meldet:
 
 **Fix:** Abschnitt „Bewusste Grenzen" in der Integrationsdoku.
 
-## 3. Empfohlene Reihenfolge
+## 3. Umgesetzt (Sprint 1+2)
+
+| Befund | Umsetzung | Nachweis |
+|---|---|---|
+| **A1** | `rbac.is_read_only_request()` prüft die Absicht: Trockenläufe, C-ECHO und der TLS-Test bleiben für Nur-Leser erlaubt, `?dry_run=true` schaltet `hl7/orm` und `config/import` frei. `atna/test` und `notify/test` bleiben geschützt (sie senden echte Nachrichten) — die UI blendet genau diese zwei für Nur-Leser aus (`useCanWrite`) | 4 neue RBAC-Tests (u. a. „Trockenlauf 200, Anwenden 403"); live gegengeprüft |
+| **A2** | `audit.record` in `DELETE /cache` und `/cache/sources/{id}` (Aktion `cache.clear` / `cache.clear_source`, mit Anzahl entfernter Einträge) | `test_clearing_the_cache_is_audited` |
+| **A3** | `audit.record` + Logzeile in `reset-breaker` (vorheriger Breaker-Zustand, Akteur) | `test_breaker_reset_is_audited` (prüft den Akteur `mfa.schmidt`) |
+| **A4** | `GET /status` liefert `version`, `started_at`, `uptime_s`; die Version kommt aus `pyproject.toml` (Install-Metadaten können veralten); die Übersicht zeigt eine Karte „Laufende Version / Laufzeit" | `test_status_reports_version_and_uptime`, UI-Test |
+| **A5** | `offset` auf `spool`, `hl7/messages`, `cache/items` (wie bei den Logs); die Spool-Seite lädt seitenweise („Mehr laden") | `test_lists_can_page_deeper_with_offset`, UI-Test |
+| **A6** | `since` (ISO-Datum/-Zeit) auf `logs/queries`, `logs/stores`, `audit/config`; Datumsfelder im Änderungsprotokoll und im Abfrageprotokoll; ungültige Werte → 422 mit Klartext | `test_logs_can_be_filtered_by_time`, UI-Test |
+| **A13** | Die Zeile „CRUD editors are a planned UI phase" ist ersetzt (inkl. Transforms) | Doku |
+| **A14** | Neuer Abschnitt „Deliberate boundaries" (MPPS, Spool-Payload/PHI, Proxy-Auth, PHI in Logs) und „Read/write split (RBAC)" in der Integrationsdoku | Doku |
+
+**Zusätzlich gefunden und behoben:** Der Zeilenklick („Tabelleneintrag öffnet die
+Bearbeitung") war nur bei Quellen und Zielen verdrahtet — Regeln, Transforms und
+Stationsregeln hatten ihn nicht, und die Mobilkarten (die auf schmalen Geräten
+die Tabelle ersetzen) ebenfalls nicht. Jetzt öffnet in **allen fünf** Listen ein
+Klick (oder Enter/Leertaste) auf Zeile bzw. Karte die Bearbeitung, vorbelegt mit
+dem Eintrag; Knöpfe/Schalter darin bleiben unberührt. Test in `RulesPage.test.tsx`.
+
+**Entschieden für Sprint 3 (A9):** Die Vorschau der zusammengeführten
+Arbeitsliste wird **PHI-frei ausgeliefert und über eine Einstellung
+umschaltbar** (Standard: PHI-frei wie das Query-Log; das Umschalten ist im
+Health-Panel sichtbar). Damit bleibt der Standard datenschutzfreundlich und die
+Fehlersuche trotzdem möglich.
+
+## 4. Empfohlene Reihenfolge (Sprint 3+4)
 
 | Sprint | Inhalt | Aufwand |
 |---|---|---|

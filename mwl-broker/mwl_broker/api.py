@@ -3,6 +3,9 @@
 All endpoints are sync `def` — they run in the FastAPI threadpool, which
 keeps them consistent with the synchronous DIMSE handlers.
 """
+
+import logging
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
@@ -82,6 +85,11 @@ from .models import (BrokerSetting, ConfigAudit, Hl7Message, LocalWorklistItem,
 
 router = APIRouter(prefix="/api/v1")
 
+log = logging.getLogger("mwl_broker.api")
+
+# process start — the status endpoint reports uptime from here
+_STARTED_AT = datetime.now(timezone.utc)
+
 _scp = None  # set by main.py for /status
 
 
@@ -138,6 +146,23 @@ def _docs(*parts: dict) -> dict:
 
 def _actor(request: Request) -> str:
     return audit.actor_from(request.headers)
+
+
+def _parse_since(value: str) -> datetime:
+    """Parse an ISO date or timestamp into an aware UTC datetime.
+
+    Accepts "2026-09-20" and "2026-09-20T08:00" (what an operator types) and
+    raises a 422 with a plain sentence instead of a stack trace.
+    """
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        raise HTTPException(422, f"'{value}' is not a valid date or timestamp "
+                                 "(use 2026-09-20 or 2026-09-20T08:00).")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _correlation(request: Request) -> str:
@@ -831,9 +856,11 @@ def delete_local_item(
 def list_hl7_messages(
     s: Session = _db_dep,
     limit: int = Query(default=50, ge=1, le=500, description="Maximum number of messages."),
+    offset: int = Query(default=0, ge=0, description="Number of messages to skip (paging)."),
 ):
     return s.scalars(
-        select(Hl7Message).order_by(Hl7Message.ts.desc(), Hl7Message.id.desc()).limit(limit)
+        select(Hl7Message).order_by(Hl7Message.ts.desc(), Hl7Message.id.desc())
+        .offset(offset).limit(limit)
     ).all()
 
 
@@ -981,8 +1008,9 @@ def spool_items(
         default=None, description="Only entries with this status (queued | failed | dead | sent).",
     ),
     limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of entries."),
+    offset: int = Query(default=0, ge=0, description="Number of entries to skip (paging)."),
 ):
-    return spool.items(status, limit)
+    return spool.items(status, limit, offset)
 
 
 @router.post(
@@ -1070,8 +1098,9 @@ def cache_items(
     s: Session = _db_dep,
     source_id: int | None = Query(default=None, description="Only items of this source."),
     limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of items."),
+    offset: int = Query(default=0, ge=0, description="Number of items to skip (paging)."),
 ):
-    return cache.items(source_id, limit)
+    return cache.items(source_id, limit, offset)
 
 
 @router.delete(
@@ -1081,8 +1110,12 @@ def cache_items(
                 "upstream again; an outage can no longer be bridged until then.",
     response_description="The cache was cleared.",
 )
-def clear_cache(s: Session = _db_dep):
-    cache.clear()
+def clear_cache(request: Request, s: Session = _db_dep):
+    # clearing the cache removes the outage bridge — the change log has to show it
+    removed = cache.clear()
+    audit.record(s, _actor(request), "cache.clear", "cache", None,
+                 {"items": removed}, {"items": 0}, _correlation(request))
+    s.commit()
 
 
 @router.delete(
@@ -1093,12 +1126,16 @@ def clear_cache(s: Session = _db_dep):
     responses={404: {"description": "No source with this ID."}},
 )
 def clear_source_cache(
+    request: Request,
     source_id: Annotated[int, Path(description="ID of the source whose cache is cleared.")],
     s: Session = _db_dep,
 ):
     if s.get(MwlSource, source_id) is None:
         raise HTTPException(404, "not found")
-    cache.clear(source_id)
+    removed = cache.clear(source_id)
+    audit.record(s, _actor(request), "cache.clear_source", "source", source_id,
+                 {"cached_items": removed}, {"cached_items": 0}, _correlation(request))
+    s.commit()
 
 
 # ── Change log, export/import, rollback ────────────────────────────────
@@ -1116,8 +1153,9 @@ def list_config_audit(
     limit: int = Query(default=50, ge=1, le=500, description="Maximum number of entries."),
     offset: int = Query(default=0, ge=0, description="Number of entries to skip."),
     entity: str | None = Query(default=None, description="Only entries for this entity (source | target | rule | transform | setting)."),
+    since: str = Query(default="", description="Only entries at or after this ISO timestamp (e.g. 2026-09-20 or 2026-09-20T08:00)."),
 ):
-    return audit.list_entries(s, entity=entity, limit=limit, offset=offset)
+    return audit.list_entries(s, entity=entity, limit=limit, offset=offset, since=since)
 
 
 @router.get(
@@ -1300,12 +1338,15 @@ def query_logs(
     offset: int = Query(default=0, ge=0, description="Number of entries to skip."),
     calling_aet: str | None = Query(default=None, description="Only entries from this calling AE title."),
     status: str | None = Query(default=None, description="Only entries with this status (success | partial | failed)."),
+    since: str = Query(default="", description="Only entries at or after this ISO timestamp (e.g. 2026-09-20 or 2026-09-20T08:00)."),
 ):
     q = select(QueryLog).order_by(QueryLog.ts.desc()).limit(limit).offset(offset)
     if calling_aet:
         q = q.where(QueryLog.calling_aet == calling_aet)
     if status:
         q = q.where(QueryLog.status == status)
+    if since:
+        q = q.where(QueryLog.ts >= _parse_since(since))
     return s.scalars(q).all()
 
 
@@ -1321,10 +1362,13 @@ def store_logs(
     limit: int = Query(default=50, ge=1, le=500, description="Maximum number of entries."),
     offset: int = Query(default=0, ge=0, description="Number of entries to skip."),
     status: str | None = Query(default=None, description="Only entries with this status (success | failed | unrouted)."),
+    since: str = Query(default="", description="Only entries at or after this ISO timestamp (e.g. 2026-09-20 or 2026-09-20T08:00)."),
 ):
     q = select(StoreLog).order_by(StoreLog.ts.desc()).limit(limit).offset(offset)
     if status:
         q = q.where(StoreLog.status == status)
+    if since:
+        q = q.where(StoreLog.ts >= _parse_since(since))
     return s.scalars(q).all()
 
 
@@ -1379,13 +1423,21 @@ def echo_target(
     responses={404: {"description": "No source with this ID."}},
 )
 def reset_breaker(
+    request: Request,
     source_id: Annotated[int, Path(description="ID of the source whose breaker is reset.")],
     s: Session = _db_dep,
 ):
     row = s.get(MwlSource, source_id)
     if row is None:
         raise HTTPException(404, "not found")
+    before = (breaker.snapshot().get(source_id) or {}).get("state")
     breaker.reset(source_id)
+    # who re-enabled a source that the broker had skipped?
+    audit.record(s, _actor(request), "breaker.reset", "source", source_id,
+                 {"breaker_state": before}, {"breaker_state": breaker.STATE_CLOSED},
+                 _correlation(request))
+    s.commit()
+    log.info("breaker reset for source %s by %s", source_id, _actor(request))
     state = breaker.snapshot().get(source_id)
     return {
         "source_id": source_id,
@@ -1441,7 +1493,13 @@ def status(s: Session = _db_dep):
             out.append(e)
         return out
 
+    from . import __version__
+
     return {
+        # which build is this? (the operator asked exactly that)
+        "version": __version__,
+        "started_at": _STARTED_AT.isoformat(),
+        "uptime_s": int((datetime.now(timezone.utc) - _STARTED_AT).total_seconds()),
         "scp_listening": _scp.listening if _scp is not None else False,
         "db_ok": check_db(),
         "sources": with_echo(s.scalars(select(MwlSource).order_by(MwlSource.id)).all(), "source"),

@@ -98,3 +98,68 @@ def test_rbac_status_endpoint(client):
 
     settings_service.set_value("rbac_mode", "off")
 
+
+
+# ── Read-only work stays allowed (the operator must be able to look) ────
+
+def test_read_only_posts_stay_allowed_in_enforce_mode(client):
+    """Dry-runs, C-ECHO and the TLS check are POSTs but change nothing.
+
+    Measured before the fix: every one of them answered 403 for a read-only
+    operator, so the safest tools were the ones they could not use.
+    """
+    src = client.post("/api/v1/sources", json=_source_payload()).json()
+    client.put("/api/v1/settings/rbac_mode", json={"value": "enforce"})
+
+    # a read-only caller (no roles header)
+    assert client.post("/api/v1/simulate/route",
+                       json={"accession": "ACC-1"}).status_code == 200
+    assert client.post("/api/v1/simulate/station",
+                       json={"station_aet": "CT_01"}).status_code == 200
+    assert client.post("/api/v1/simulate/transform",
+                       json={"accession": "ACC-1"}).status_code == 200
+    assert client.post(f"/api/v1/sources/{src['id']}/echo").status_code == 200
+    assert client.post("/api/v1/tls/test",
+                       json={"host": "127.0.0.1", "port": 1}).status_code == 200
+
+    # …but applying something still needs the write role
+    assert client.post("/api/v1/simulate/route",
+                       json={"accession": "ACC-1"}).status_code == 200
+    assert client.post("/api/v1/sources", json=_source_payload(name="x", aet="X")).status_code == 403
+
+
+def test_dry_run_is_allowed_but_applying_is_not(client):
+    """`?dry_run=true` is a read; the same route without it is a write."""
+    client.put("/api/v1/settings/rbac_mode", json={"value": "enforce"})
+
+    # the dry run reaches the handler (422 = the empty message is invalid,
+    # but it was *not* rejected for missing rights)
+    assert client.post("/api/v1/hl7/orm?dry_run=true", content="",
+                       headers={"Content-Type": "text/plain"}).status_code != 403
+    assert client.post("/api/v1/hl7/orm", content="",
+                       headers={"Content-Type": "text/plain"}).status_code == 403
+    assert client.post("/api/v1/config/import?dry_run=true", json={}).status_code != 403
+    assert client.post("/api/v1/config/import", json={}).status_code == 403
+
+
+def test_side_effecting_tests_keep_the_write_role(client):
+    """A test message really leaves the building — that stays a write."""
+    client.put("/api/v1/settings/rbac_mode", json={"value": "enforce"})
+
+    assert client.post("/api/v1/atna/test").status_code == 403
+    assert client.post("/api/v1/notify/test").status_code == 403
+    # with the role it works
+    assert client.post("/api/v1/notify/test",
+                       headers={"X-OE3-Roles": "brokerWrite"}).status_code == 200
+
+
+def test_read_only_helper_matches_the_policy():
+    assert rbac.is_read_only_request("GET", "/api/v1/sources") is True
+    assert rbac.is_read_only_request("POST", "/api/v1/simulate/route") is True
+    assert rbac.is_read_only_request("POST", "/api/v1/tls/test") is True
+    assert rbac.is_read_only_request("POST", "/api/v1/sources/7/echo") is True
+    assert rbac.is_read_only_request("POST", "/api/v1/config/import",
+                                     "dry_run=true") is True
+    assert rbac.is_read_only_request("POST", "/api/v1/config/import") is False
+    assert rbac.is_read_only_request("POST", "/api/v1/sources") is False
+    assert rbac.is_read_only_request("DELETE", "/api/v1/cache") is False

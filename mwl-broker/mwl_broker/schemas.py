@@ -909,6 +909,9 @@ class EchoResult(BaseModel):
 class StatusOut(BaseModel):
     """Aggregated broker status snapshot for dashboards."""
 
+    version: str = Field(description="Broker version that is running (which build).")
+    started_at: str = Field(description="ISO timestamp the process started.")
+    uptime_s: int = Field(description="Seconds since the process started.")
     scp_listening: bool = Field(description="Whether the DICOM SCP is listening.")
     db_ok: bool = Field(description="Whether the config/log database is reachable.")
     sources: list[EchoResult] = Field(description="All sources with their last echo result.")

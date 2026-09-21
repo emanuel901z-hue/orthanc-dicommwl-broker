@@ -1348,3 +1348,121 @@ def test_openapi_documents_all_endpoints(client):
             assert prop.get("description"), (
                 f"{schema_name}.{field} missing description"
             )
+
+
+# ── API completeness audit: A2–A6 ──────────────────────────────────────
+
+def test_clearing_the_cache_is_audited(client):
+    """Clearing the cache removes the outage bridge — the change log must show it."""
+    src = client.post("/api/v1/sources", json=SOURCE).json()
+    from mwl_broker import cache
+
+    from pydicom.dataset import Dataset
+
+    ds = Dataset()
+    ds.AccessionNumber = "ACC-1"
+    ds.PatientID = "P1"
+    cache.store_snapshot(src["id"], [ds])
+    assert client.delete(f"/api/v1/cache/sources/{src['id']}").status_code == 204
+
+    entries = client.get("/api/v1/audit/config", params={"entity": "source"}).json()
+    assert any(e["action"] == "cache.clear_source" for e in entries), entries
+
+    assert client.delete("/api/v1/cache").status_code == 204
+    entries = client.get("/api/v1/audit/config").json()
+    assert any(e["action"] == "cache.clear" for e in entries)
+
+
+def test_breaker_reset_is_audited(client):
+    """Who put a skipped source back into the fan-out?"""
+    from mwl_broker import breaker, settings_service
+
+    src = client.post("/api/v1/sources", json=SOURCE).json()
+    settings_service.set_value("breaker_fail_threshold", "1")
+    breaker.record_failure(src["id"], "boom")
+    assert breaker.is_available(src["id"]) is False
+
+    r = client.post(f"/api/v1/sources/{src['id']}/reset-breaker",
+                    headers={"X-OE3-User": "mfa.schmidt"})
+    assert r.status_code == 200
+    assert r.json()["state"] == "closed"
+
+    entries = client.get("/api/v1/audit/config", params={"entity": "source"}).json()
+    reset = [e for e in entries if e["action"] == "breaker.reset"]
+    assert reset, entries
+    assert reset[0]["actor"] == "mfa.schmidt"
+    assert reset[0]["before_json"]["breaker_state"] == "open"
+
+
+def test_status_reports_version_and_uptime(client):
+    """'Which build runs here, and since when?' must be answerable via the API."""
+    body = client.get("/api/v1/status").json()
+
+    assert body["version"], body
+    assert body["version"] != "0.1.0"  # kept in sync with pyproject.toml
+    assert body["started_at"].startswith("20")
+    assert isinstance(body["uptime_s"], int) and body["uptime_s"] >= 0
+
+
+def test_lists_can_page_deeper_with_offset(client):
+    """limit alone only ever reaches the newest N entries."""
+    src = client.post("/api/v1/sources", json=SOURCE).json()
+    from mwl_broker import spool
+
+    from mwl_broker.db import get_engine
+    from mwl_broker.models import StoreSpool
+    from sqlalchemy.orm import Session as OrmSession
+
+    # rows directly: the test is about paging, not about the spool worker
+    with OrmSession(get_engine()) as s:
+        for i in range(3):
+            s.add(StoreSpool(sop_instance_uid=f"1.2.3.{i}", study_uid="1.2.3",
+                             target_name="pacs", status="queued", attempts=0,
+                             payload_bytes=8))
+        s.commit()
+
+    first = client.get("/api/v1/spool", params={"limit": 2}).json()
+    second = client.get("/api/v1/spool", params={"limit": 2, "offset": 2}).json()
+    assert len(first) == 2
+    assert len(second) == 1
+    assert {e["id"] for e in first}.isdisjoint({e["id"] for e in second})
+
+    # the same parameter exists on the other two lists
+    assert client.get("/api/v1/hl7/messages",
+                      params={"limit": 1, "offset": 1}).status_code == 200
+    assert client.get("/api/v1/cache/items",
+                      params={"limit": 1, "offset": 1}).status_code == 200
+
+
+def test_logs_can_be_filtered_by_time(client):
+    """'Show me yesterday's failures' instead of paging through weeks."""
+    from datetime import datetime, timedelta, timezone
+
+    from mwl_broker.db import get_engine
+    from mwl_broker.models import QueryLog
+    from sqlalchemy.orm import Session as OrmSession
+
+    now = datetime.now(timezone.utc)
+    with OrmSession(get_engine()) as s:
+        s.add(QueryLog(ts=now - timedelta(days=3), calling_aet="OLD", status="failed",
+                       answers=0, duration_ms=1))
+        s.add(QueryLog(ts=now, calling_aet="NEW", status="failed", answers=0, duration_ms=1))
+        s.commit()
+
+    recent = client.get("/api/v1/logs/queries",
+                        params={"since": (now - timedelta(days=1)).date().isoformat()}).json()
+    assert [e["calling_aet"] for e in recent] == ["NEW"]
+
+    everything = client.get("/api/v1/logs/queries").json()
+    assert {"NEW", "OLD"} <= {e["calling_aet"] for e in everything}
+
+    # a nonsense value is a plain 422, not a stack trace
+    bad = client.get("/api/v1/logs/queries", params={"since": "gestern"})
+    assert bad.status_code == 422
+    assert "not a valid date" in bad.json()["detail"]
+
+    # the change log accepts it too
+    assert client.get("/api/v1/audit/config",
+                      params={"since": now.date().isoformat()}).status_code == 200
+    assert client.get("/api/v1/logs/stores",
+                      params={"since": now.date().isoformat()}).status_code == 200

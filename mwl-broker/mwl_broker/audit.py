@@ -140,8 +140,21 @@ def record(session, actor: str, action: str, entity: str, entity_id: int | None,
 
 
 def list_entries(session, entity: str | None = None, limit: int = 50,
-                 offset: int = 0) -> list[ConfigAudit]:
+                 offset: int = 0, since: str = "") -> list[ConfigAudit]:
+    """Change-log entries, newest first.
+
+    `since` accepts an ISO date or timestamp ("2026-09-20", "2026-09-20T08:00")
+    so an operator can ask for a shift or a day instead of paging through weeks.
+    """
     query = select(ConfigAudit).order_by(ConfigAudit.ts.desc(), ConfigAudit.id.desc())
     if entity:
         query = query.where(ConfigAudit.entity == entity)
+    if since:
+        from datetime import datetime, timezone
+
+        text = since.strip().replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        query = query.where(ConfigAudit.ts >= parsed)
     return session.scalars(query.limit(limit).offset(offset)).all()

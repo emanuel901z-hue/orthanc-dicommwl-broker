@@ -156,8 +156,12 @@ def create_app() -> FastAPI:
     # a single-admin installation works unchanged.
     @app.middleware("http")
     async def rbac_guard(request, call_next):
-        if request.method not in ("GET", "HEAD", "OPTIONS") \
-                and request.url.path.startswith("/api/v1") \
+        # Read-only work stays allowed for everyone: dry-runs, C-ECHO and the TLS
+        # check are POSTs but change nothing. Only the intent to *change* needs
+        # the write role.
+        if request.url.path.startswith("/api/v1") \
+                and not rbac.is_read_only_request(request.method, request.url.path,
+                                                  request.url.query) \
                 and not rbac.can_write(request.headers):
             log.warning("RBAC: write denied for %s %s (roles: %s)", request.method,
                         request.url.path, rbac.roles_from_headers(request.headers))

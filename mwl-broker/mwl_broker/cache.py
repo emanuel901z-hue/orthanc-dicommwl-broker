@@ -259,7 +259,7 @@ def stats() -> list[dict]:
         return out
 
 
-def items(source_id: int | None = None, limit: int = 100) -> list[dict]:
+def items(source_id: int | None = None, limit: int = 100, offset: int = 0) -> list[dict]:
     """Cached items as metadata (deliberately without patient identifiers)."""
     with session_factory()() as s:
         query = select(WorklistCache, MwlSource.name).join(
@@ -267,7 +267,7 @@ def items(source_id: int | None = None, limit: int = 100) -> list[dict]:
         ).order_by(WorklistCache.fetched_at.desc(), WorklistCache.id)
         if source_id is not None:
             query = query.where(WorklistCache.source_id == source_id)
-        rows = s.execute(query.limit(limit)).all()
+        rows = s.execute(query.offset(offset).limit(limit)).all()
         now = _now()
         return [
             {
