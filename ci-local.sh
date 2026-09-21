@@ -31,6 +31,21 @@ stage() {
   fi
 }
 
+# the operator scripts are code too: syntax, help text and the dry-run must work
+stage "scripts" bash -c '
+  set -e
+  for script in build.sh bootstrap.sh ci-local.sh test-stack.sh pre-push-fork.sh mfa-test.sh; do
+    [ -f "$script" ] || { echo "missing: $script"; exit 1; }
+    bash -n "$script" || { echo "syntax error: $script"; exit 1; }
+  done
+  ./build.sh --help | grep -q "SERVICE" || { echo "build.sh --help incomplete"; exit 1; }
+  ./build.sh --check | tail -1 | grep -q "Vorprüfung" || { echo "build.sh --check broken"; exit 1; }
+  ./build.sh --dry-run --demo | grep -q "docker-compose.demo.yml" || { echo "build.sh --dry-run broken"; exit 1; }
+  ./build.sh --dry-run | grep -q "Dry-Run" || { echo "build.sh dry-run guard missing"; exit 1; }
+  ./bootstrap.sh --check >/dev/null || { echo "bootstrap.sh wrapper broken"; exit 1; }
+  echo "   scripts ok"
+'
+
 stage "backend: pytest"   bash -c 'cd mwl-broker && .venv/bin/pytest tests -q'
 stage "frontend: tsc"     bash -c 'cd orthanc-explorer-3-usable && npx tsc --noEmit -p tsconfig.app.json'
 stage "frontend: lint"    bash -c 'cd orthanc-explorer-3-usable && npm run lint'

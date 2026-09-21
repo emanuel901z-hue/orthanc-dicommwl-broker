@@ -9,7 +9,7 @@ Interface und Monitoring, aufgebaut auf:
 | `mwl-broker/` | Backend | Python-Service (FastAPI + pynetdicom): MWL-SCP (C-FIND-Proxy/Aggregator), C-STORE-SCP mit Quellen-Routing, Config-API, Query-/Store-Log, Prometheus-Metriken |
 | `docker-compose.yml` | Stack | Orthanc + Postgres-Index + Broker + OE3 (produktionsfähige Basis) |
 | `docker-compose.demo.yml` | Overlay | Zwei Mock-RIS-Quellen + zweites PACS zum Testen des Routings |
-| `bootstrap.sh` | Setup | Plug-and-play-Installer für Ubuntu Server |
+| `build.sh` | Setup/Betrieb | Bauen, starten, prüfen, stoppen, Registry — alle Optionen erklärt (`--help`); `bootstrap.sh` ist nur noch ein Wrapper darauf |
 | `.env.example` | Config | Alle Ports/Credentials — nach `.env` kopieren |
 
 ## Konzept in einem Satz
@@ -29,14 +29,37 @@ Konventionen für Coding-Agents: [`agents.md`](agents.md)
 ```bash
 git clone --recurse-submodules <repo-url> orthanc-dicommwl-broker
 cd orthanc-dicommwl-broker
-./bootstrap.sh            # prüft Docker, .env, Port-Kollisionen; startet Stack
-./bootstrap.sh --demo     # inkl. Mock-RIS-Quellen + zweitem PACS
-./bootstrap.sh --check    # nur Preflight, startet nichts
+./build.sh                # Vorprüfung + bauen + starten + Erreichbarkeit
+./build.sh --demo         # inkl. Mock-RIS-Quellen + zweitem PACS
+./build.sh --check        # nur Vorprüfung, baut nichts
+./build.sh --help         # alle Optionen erklärt
 ```
 
-`bootstrap.sh` installiert Docker falls nötig, legt `.env` aus
-`.env.example` an, warnt bei Port-Kollisionen (wichtig auf Hosts mit anderen
-Docker-Projekten) und wartet auf die Healthchecks.
+`build.sh` prüft Docker (und installiert es auf Wunsch mit
+`--install-docker`), legt `.env` aus `.env.example` an, warnt bei
+Port-Kollisionen (wichtig auf Hosts mit anderen Docker-Projekten), baut die
+Images, wartet auf die Erreichbarkeit und zeigt am Ende die Adressen und den
+Smoke-Test-Befehl.
+
+### Die wichtigsten Optionen
+
+| Aufruf | Wirkung |
+|---|---|
+| `./build.sh` | Basis-Stack bauen und starten (postgres, orthanc, mwl-broker, oe3) |
+| `./build.sh mwl-broker oe3` | Nur diese Services — nach einer Code-Änderung |
+| `./build.sh --demo` | Demo-Services zusätzlich (Mock-RIS, Peer-PACS) — nie produktiv |
+| `./build.sh --viewer` | OHIF-Viewer zusätzlich (Build 5–10 min) |
+| `./build.sh --no-cache` / `--pull` | Ohne Cache bauen / Basis-Images aktualisieren |
+| `./build.sh --check` | Nur Vorprüfung: Docker, `.env`, Ports |
+| `./build.sh --health` | Nach dem Start warten, bis alles „healthy" ist |
+| `./build.sh --ps` / `--logs mwl-broker` | Status ansehen / Logs folgen |
+| `./build.sh --restart` / `--down` | Neustarten ohne Build / stoppen |
+| `./build.sh --down --volumes` | Stoppen **und Daten löschen** (fragt nach) |
+| `./build.sh --tag REG/mwl --push` | Images für eine Registry taggen und pushen |
+| `./build.sh --dry-run` | Nur anzeigen, was passieren würde |
+
+`bootstrap.sh` bleibt als Wrapper erhalten (alte Anleitungen funktionieren
+weiter) und installiert Docker wie bisher automatisch, wenn es fehlt.
 
 ### Default-Ports (in `.env` anpassbar)
 
@@ -66,7 +89,7 @@ und DICOMweb kommt aus dem mitgelieferten Orthanc (`/orthanc-proxy/dicom-web`).
 ```bash
 # baut OHIF aus dem Quelltext (Clone + Install + Build, ~5-10 min beim ersten Mal)
 docker compose --profile viewer up -d --build ohif
-# oder beim Bootstrap: ./bootstrap.sh --viewer
+# oder beim Start: ./build.sh --viewer
 
 # Aufruf:  http://<host>:18082/ohif/viewer?StudyInstanceUIDs=<UID>
 #          bzw. aus OE3 heraus über den Button in der Studienansicht
@@ -163,7 +186,7 @@ Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
 
 - [x] Architektur & Projektstruktur (README/project/agents)
 - [x] mwl-broker: MWL-Proxy-SCP, Store-Routing, Config-API, Metriken, Echo-Monitoring
-- [x] Dev-/Demo-Stack, .env-basierte Konfiguration, bootstrap.sh
+- [x] Dev-/Demo-Stack, .env-basierte Konfiguration, build.sh (bootstrap.sh als Wrapper)
 - [x] OE3: `broker.ts` API-Client + Broker-Dashboard
 - [x] Tests: 60 Backend, 45 Frontend neu (inkl. Konfig-UI + Audit-Vertrag)
 - [x] Verifiziert auf Zielhost: C-FIND-Fan-out, Dedupe, Store-Routing, Echo

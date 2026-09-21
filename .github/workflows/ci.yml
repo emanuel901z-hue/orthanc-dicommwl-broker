@@ -17,6 +17,26 @@ on:
   workflow_dispatch:
 
 jobs:
+  scripts:
+    runs-on: ubuntu-latest
+    name: Operator scripts — syntax, help, dry-run
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Script sanity (build.sh, bootstrap.sh, wrappers)
+      run: |
+        set -e
+        for script in build.sh bootstrap.sh ci-local.sh test-stack.sh pre-push-fork.sh mfa-test.sh; do
+          echo "syntax: $script"
+          bash -n "$script"
+        done
+        ./build.sh --help | grep -q "SERVICE"
+        ./build.sh --dry-run --demo | grep -q "docker-compose.demo.yml"
+        ./build.sh --dry-run | grep -q "Dry-Run"
+        ./build.sh --check | tail -1 | grep -q "Vorprüfung"
+        ./bootstrap.sh --check >/dev/null
+        echo "scripts ok"
+
   backend-test:
     runs-on: ubuntu-latest
     name: Backend — pytest (API + DIMSE integration)

@@ -20,9 +20,15 @@
 
 ```bash
 # Setup / Gesamtstack (Basis = produktionsfähig, Demo = + Mock-RIS + Peer)
-./bootstrap.sh              # Docker-Check, .env anlegen, Port-Check, up -d
-./bootstrap.sh --demo       # inkl. docker-compose.demo.yml
-./bootstrap.sh --check      # nur Preflight
+./build.sh                  # Docker-Check, .env anlegen, Port-Check, build + up + Health
+./build.sh --demo           # inkl. docker-compose.demo.yml
+./build.sh --check          # nur Vorflight (Docker, .env, Ports)
+./build.sh --health         # warten, bis alle Container "healthy" melden
+./build.sh --logs mwl-broker
+./build.sh --down [--volumes]
+./build.sh mwl-broker oe3   # nur einzelne Services neu bauen
+./build.sh --help           # alle Optionen (Tag/Push, no-cache, pull, dry-run …)
+./bootstrap.sh              # Wrapper um build.sh (installiert Docker bei Bedarf)
 docker compose up -d --build
 docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d
 
