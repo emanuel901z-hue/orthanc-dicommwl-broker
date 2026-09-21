@@ -135,7 +135,6 @@ Die Vollständigkeitsprüfung der API (Routen ↔ UI-Aufrufe ↔ Tests ↔ Doku,
 inklusive Live-Belegen und offenen Befunden) steht in
 [`docs/api-completeness-audit.md`](docs/api-completeness-audit.md).
 
-
 Swagger UI: `http://<broker>:8081/docs` · ReDoc: `/redoc` ·
 Spezifikation: `/openapi.json` — jede Operation mit Beschreibung, dokumentierten
 Parametern und Fehlerantworten (der Vertrag wird per Test erzwungen).
