@@ -45,7 +45,9 @@ cleanup() {
     echo "── keeping test stack up (./test-stack.sh --down to remove) ──"
   fi
 }
-trap cleanup EXIT
+# also clean up when the runner terminates us (CI timeouts, Ctrl-C): an EXIT-only
+# trap is skipped on SIGTERM and would leave the stack behind
+trap cleanup EXIT INT TERM
 
 echo "── building + starting test stack ──"
 # start from a clean database: the scenarios below (local items, station rules,
