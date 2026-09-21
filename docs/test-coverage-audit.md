@@ -73,7 +73,23 @@ Mobile-Karten zeigen alle Felder, Sprachumschaltung ohne Rohschlüssel,
 TLS-Karte mit gesperrtem Upload-Knopf bis zur Dateiauswahl, Vorschau mit
 Herkunft und Dedupe-Anzeige, Hilfe-Dialog mit drei Abschnitten.
 
-## 4. Bewusst nicht getestet
+## 4. Hygiene-Fund beim Aufräumen
+
+Der Screenshot-Walk schreibt nach `e2e/stack/shots/`, `vitest --coverage` nach
+`coverage/` — beide Verzeichnisse waren **nicht** in der `.gitignore` (sie deckte
+nur die älteren Playwright-Ausgaben ab), sodass 53 Screenshots und 334
+Coverage-Dateien im öffentlichen Fork landeten. Entfernt und ignoriert; ebenso
+die Altbestände `e2e/prod/screenshots/` und die versehentlich verschachtelte
+Kopie `e2e/prod/e2e/` aus einem früheren Lauf.
+
+Dabei kam ein Fehler im eigenen Schutzskript zum Vorschein: `pre-push-fork.sh`
+verweigerte **jeden** Push, in dessen Diff eine blacklistete Datei vorkam — also
+auch die Aufräum-Commits, die genau diese Dateien löschen. Der Guard prüft jetzt
+den Diff-Status: **hinzugefügte oder geänderte** blacklistete Pfade werden
+abgelehnt, **Löschungen** sind erlaubt. Der Schutz bleibt damit erhalten und
+blockiert nicht mehr seine eigene Abhilfe.
+
+## 5. Bewusst nicht getestet
 
 | Bereich | Begründung |
 |---|---|
@@ -82,7 +98,7 @@ Herkunft und Dedupe-Anzeige, Hilfe-Dialog mit drei Abschnitten.
 | Basis-OE3-Features außerhalb des Broker-Slice (Studien, Serien, Viewer) | Nicht Teil dieses Forks; die Abdeckung dort (14–70 %) ist Upstream-Stand. Der Screenshot-Walk prüft sie trotzdem auf **Darstellung** (keine Konsolenfehler, eine H1, kein Overflow) |
 | ATNA-Nachrichtenhistorie, Export-Diff | absichtlich nicht gebaut (siehe `api-completeness-audit.md`, Sprint 4) |
 
-## 5. Reproduzieren
+## 6. Reproduzieren
 
 ```bash
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
