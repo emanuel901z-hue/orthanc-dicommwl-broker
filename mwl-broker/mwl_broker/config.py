@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     cache_enabled: bool = True          # serve cached answers when a source fails
     # worklist preview: PHI-free by default, patient name/ID only when switched on
     simulate_show_phi: bool = False
+    # keep the raw HL7 message (PHI) for troubleshooting and replay
+    hl7_store_raw: bool = False
     cache_stale_max_s: int = 120        # hard cap for stale serving (0 = never)
     cache_hide_completed: bool = True   # never resurrect COMPLETED/DISCONTINUED steps
     cache_max_items: int = 5000         # safety cap per source snapshot

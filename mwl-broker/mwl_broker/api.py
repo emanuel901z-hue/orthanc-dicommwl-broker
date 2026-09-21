@@ -82,6 +82,11 @@ from .schemas import (
     WorklistPreviewOut,
     SourceQueryIn,
     SourceQueryOut,
+    Hl7MessageDetailOut,
+    Hl7ReprocessOut,
+    CacheRefreshOut,
+    TlsUploadIn,
+    TlsUploadOut,
 )
 from . import (atna, audit, breaker, cache, config_io, health_checks, hl7,
                local_worklist, metrics, notify, rbac, retention, settings_service,
@@ -230,6 +235,23 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
         )
         if errors:
             raise HTTPException(422, "; ".join(errors))
+
+    @router.get(
+        path + "/{row_id}", response_model=out_schema, name=f"get_{path[1:]}",
+        tags=[f"{path[1:]}"], summary=f"Read one {kind}",
+        description=f"One {kind} by ID — for scripts and integrations that should "
+                    f"not fetch the whole list.",
+        response_description=f"The {kind}.",
+        responses=_docs(VALIDATION_422, NOT_FOUND_404),
+    )
+    def _get_one(
+        row_id: Annotated[int, Path(description=f"ID of the {kind}.")],
+        s: Session = _db_dep,
+    ):
+        row = s.get(model, row_id)
+        if row is None:
+            raise HTTPException(404, "not found")
+        return row
 
     @router.post(
         path, response_model=out_schema, status_code=201, name=f"create_{path[1:]}",
@@ -383,6 +405,24 @@ def create_rule(
     return row
 
 
+@router.get(
+    "/rules/{rule_id}", response_model=RuleOut, tags=["rules"],
+    summary="Read one routing rule",
+    description="One routing rule by ID — for scripts and integrations that should not "
+                "fetch the whole list.",
+    response_description="The routing rule.",
+    responses={404: {"description": "No routing rule with this ID."}},
+)
+def get_rules_rule(
+    rule_id: Annotated[int, Path(description="ID of the routing rule.")],
+    s: Session = _db_dep,
+):
+    row = s.get(RoutingRule, rule_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    return row
+
+
 @router.put(
     "/rules/{rule_id}", response_model=RuleOut, tags=["rules"],
     summary="Update a routing rule",
@@ -502,6 +542,24 @@ def create_transform(
     return row
 
 
+@router.get(
+    "/transforms/{rule_id}", response_model=TransformOut, tags=["transforms"],
+    summary="Read one modify rule",
+    description="One modify (transform) rule by ID — for scripts and integrations "
+                "that should not fetch the whole list.",
+    response_description="The modify rule.",
+    responses={404: {"description": "No modify rule with this ID."}},
+)
+def get_transform_rule(
+    rule_id: Annotated[int, Path(description="ID of the modify rule.")],
+    s: Session = _db_dep,
+):
+    row = s.get(TransformRule, rule_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    return row
+
+
 @router.put(
     "/transforms/{rule_id}", response_model=TransformOut, tags=["transforms"],
     summary="Update a transform rule",
@@ -573,6 +631,23 @@ def delete_transform(
 )
 def list_settings():
     return settings_service.list_all()
+
+
+@router.get(
+    "/settings/{key}", response_model=SettingOut, tags=["settings"],
+    summary="Read one setting",
+    description="One setting with its effective value, the deployment default and "
+                "the UI metadata (kind, bounds, choices).",
+    response_description="The setting.",
+    responses={404: {"description": "No setting with this key."}},
+)
+def get_setting(
+    key: Annotated[str, Path(description="Setting key, e.g. echo_interval_s.")],
+):
+    row = next((entry for entry in settings_service.list_all() if entry["key"] == key), None)
+    if row is None:
+        raise HTTPException(404, "not found")
+    return row
 
 
 @router.put(
@@ -727,6 +802,38 @@ def tls_self_signed(
 
 
 @router.post(
+    "/tls/upload", response_model=TlsUploadOut, tags=["tls"], status_code=201,
+    summary="Install a certificate from the PKI",
+    description="Stores a certificate/key pair (and optionally a CA bundle) that came "
+                "from the hospital PKI. The pair is validated: the key must belong to "
+                "the certificate and the certificate must be currently valid. The "
+                "private key is written with mode 0600 and **never** returned. The "
+                "change is written to the audit log.",
+    response_description="Where the material was stored and what the certificate says.",
+    responses=_docs(VALIDATION_422, READ_ONLY_403),
+)
+def upload_tls_certificate(
+    request: Request,
+    body: Annotated[TlsUploadIn, Body(description="Certificate, key and optional CA bundle (PEM).")],
+    s: Session = _db_dep,
+):
+    try:
+        stored = tls.store_uploaded(
+            body.certificate_pem, body.key_pem, ca_pem=body.ca_pem,
+            filename=body.filename, is_ca=body.is_ca,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    audit.record(s, _actor(request), "tls.upload", "tls", None,
+                 {"filename": body.filename, "had_ca": bool(body.ca_pem)},
+                 {"certificate_path": stored["certificate_path"],
+                  "expires": (stored["certificate"] or {}).get("not_after", "")},
+                 _correlation(request))
+    s.commit()
+    return stored
+
+
+@router.post(
     "/tls/test", response_model=TlsTestOut, tags=["tls"],
     summary="Check a TLS endpoint",
     description="Performs a real handshake and reports protocol, cipher and the "
@@ -821,6 +928,24 @@ def create_local_item(
     return _local_snapshot(row)
 
 
+@router.get(
+    "/local-items/{item_id}", response_model=LocalItemOut, tags=["local-items"],
+    summary="Read one local worklist item",
+    description="One local worklist item by ID — for scripts and integrations that should not "
+                "fetch the whole list.",
+    response_description="The local worklist item.",
+    responses={404: {"description": "No local worklist item with this ID."}},
+)
+def get_local_items_item(
+    item_id: Annotated[int, Path(description="ID of the local worklist item.")],
+    s: Session = _db_dep,
+):
+    row = s.get(LocalWorklistItem, item_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    return row
+
+
 @router.put(
     "/local-items/{item_id}", response_model=LocalItemOut, tags=["local"],
     summary="Update a local worklist item",
@@ -890,6 +1015,86 @@ def list_hl7_messages(
     ).all()
 
 
+@router.get(
+    "/hl7/messages/{message_id}", response_model=Hl7MessageDetailOut, tags=["local"],
+    summary="Read one inbound HL7 message",
+    description="The log entry of one message: what was parsed, what the broker "
+                "did with it and why it failed. The **raw message** (PHI) is only "
+                "included when `hl7_store_raw` is switched on — otherwise "
+                "reprocessing needs the sender to resend it.",
+    response_description="The message log entry (raw text only when stored).",
+    responses={404: {"description": "No message with this ID."}},
+)
+def get_hl7_message(
+    message_id: Annotated[int, Path(description="ID of the message log entry.")],
+    s: Session = _db_dep,
+):
+    row = s.get(Hl7Message, message_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    return {
+        "id": row.id,
+        "ts": row.ts,
+        "transport": row.transport,
+        "message_type": row.message_type,
+        "control_id": row.control_id,
+        "order_control": row.order_control,
+        "accession": row.accession,
+        "action": row.action,
+        "error": row.error,
+        "raw": row.raw or "",
+        "replayable": bool(row.raw),
+    }
+
+
+@router.post(
+    "/hl7/messages/{message_id}/reprocess", response_model=Hl7ReprocessOut, tags=["local"],
+    summary="Apply a stored HL7 message again",
+    description="Parses the stored raw message again and applies it — for a message "
+                "that failed because of a temporary problem (intake disabled, "
+                "database busy). Requires `hl7_store_raw`; without the raw text the "
+                "broker answers 409 and the sender has to resend. `dry_run=true` "
+                "reports what would happen without writing.",
+    response_description="What the replay did (or would do).",
+    responses={404: {"description": "No message with this ID."},
+               409: {"description": "The raw message was not stored (hl7_store_raw is off)."}},
+)
+def reprocess_hl7_message(
+    request: Request,
+    message_id: Annotated[int, Path(description="ID of the message log entry.")],
+    dry_run: bool = Query(default=True, description="Only report; write nothing."),
+    s: Session = _db_dep,
+):
+    row = s.get(Hl7Message, message_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    if not row.raw:
+        raise HTTPException(
+            409,
+            "The raw message was not stored (setting hl7_store_raw is off) — "
+            "the sender has to resend it.",
+        )
+    parsed = hl7.parse(row.raw)
+    if not parsed["accession"]:
+        raise HTTPException(422, parsed["warnings"] or ["no accession number"])
+    action = "cancelled" if hl7.is_cancel(parsed) else "created-or-updated"
+    if dry_run:
+        return {"dry_run": True, "action": action, "item_id": None, "error": ""}
+
+    result = local_worklist.upsert_from_hl7(
+        parsed, transport=f"replay:{row.transport}",
+        default_station_aet=settings_service.get_str("hl7_default_station_aet"),
+        default_modality=settings_service.get_str("hl7_default_modality"),
+        raw=row.raw,
+    )
+    audit.record(s, _actor(request), f"hl7.reprocess", "hl7_message", row.id,
+                 None, {"action": result["action"], "item_id": result["item_id"]},
+                 _correlation(request))
+    s.commit()
+    return {"dry_run": False, "action": result["action"],
+            "item_id": result["item_id"], "error": result.get("error", "")}
+
+
 @router.post(
     "/hl7/orm", response_model=Hl7ParseOut, tags=["local"],
     summary="Apply an HL7 ORM order",
@@ -924,6 +1129,7 @@ def apply_hl7_orm(
         parsed, transport="http",
         default_station_aet=settings_service.get_str("hl7_default_station_aet"),
         default_modality=settings_service.get_str("hl7_default_modality"),
+        raw=body,
     )
     row = s.get(LocalWorklistItem, result["item_id"]) if result["item_id"] else None
     audit.record(s, _actor(request), f"hl7.{result['action']}", "local_item",
@@ -1127,6 +1333,44 @@ def cache_items(
     offset: int = Query(default=0, ge=0, description="Number of items to skip (paging)."),
 ):
     return cache.items(source_id, limit, offset)
+
+
+@router.post(
+    "/cache/refresh", response_model=CacheRefreshOut, tags=["cache"],
+    summary="Refresh the worklist cache now",
+    description="Queries the sources again and replaces their cached snapshots — "
+                "useful during an outage, when the next modality query would "
+                "otherwise come too late. Answers how many items each source "
+                "contributed.",
+    response_description="Per source: how many items were cached and whether the source answered.",
+    responses=_docs(READ_ONLY_403),
+)
+def refresh_cache(
+    request: Request,
+    source_id: int | None = Query(default=None, description="Only this source (default: all enabled)."),
+    s: Session = _db_dep,
+):
+    from . import aggregation
+    from pydicom.dataset import Dataset
+
+    sources = aggregation.enabled_sources()
+    if source_id is not None:
+        if s.get(MwlSource, source_id) is None:
+            raise HTTPException(404, "not found")
+        sources = [src for src in sources if src.id == source_id]
+
+    out = []
+    identifier = Dataset()  # empty = every scheduled step
+    for src in sources:
+        answers, duration_ms, error = aggregation.query_one(src, identifier)
+        if not error:
+            cache.store_snapshot(src.id, answers)
+        out.append({"name": src.name, "source_id": src.id, "items": len(answers),
+                    "duration_ms": duration_ms, "ok": not error, "error": error})
+    audit.record(s, _actor(request), "cache.refresh", "cache", source_id, None,
+                 {"sources": len(out)}, _correlation(request))
+    s.commit()
+    return {"sources": out}
 
 
 @router.delete(

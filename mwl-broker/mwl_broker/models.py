@@ -5,7 +5,7 @@ seen_items (needed for store routing) and subject to retention purge.
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Text, JSON, Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -213,6 +213,10 @@ class Hl7Message(Base):
     accession: Mapped[str] = mapped_column(String(64), default="")
     action: Mapped[str] = mapped_column(String(32), default="")
     error: Mapped[str] = mapped_column(String(256), default="")
+    # The raw message is PHI (it carries the patient name). It is only kept when
+    # the operator switches `hl7_store_raw` on — otherwise reprocessing needs the
+    # RIS to resend the message.
+    raw: Mapped[str] = mapped_column(Text, default="")
 
 
 class StationRule(Base):

@@ -101,7 +101,7 @@ einschränken (`logs/queries` kennt `calling_aet`/`status`, `audit/config` nur
 **Fix:** `from`/`to` (ISO-Zeit) auf `logs/queries`, `logs/stores`,
 `audit/config`; UI-Felder dafür.
 
-### A7 — Kein Einzelabruf (P3)
+### A7 — Kein Einzelabruf (P3) — **behoben**
 
 `GET /api/v1/<ressource>/{id}` fehlt für `sources`, `targets`, `rules`,
 `transforms`, `station-rules`, `local-items`, `settings`. Die UI braucht es
@@ -135,7 +135,7 @@ zu erkennen, **bevor** sie am Gerät auffällt.
 Einträge mit Herkunft je Feld, Dedup-Entscheidungen, Cache-Nutzung und
 Dauer je Quelle. PHI-frei konfigurierbar (Standard: wie im Query-Log).
 
-### A10 — Kein Zertifikat-Upload (P3)
+### A10 — Kein Zertifikat-Upload (P3) — **behoben**
 
 `POST /tls/self-signed` erzeugt Zertifikate; im Krankenhaus kommen sie aber von
 der **PKI**. Heute muss man sie per Hand auf den Host kopieren und die Pfade in
@@ -145,7 +145,7 @@ den Einstellungen setzen — der Broker kann sie nicht annehmen.
 Validierung (Schlüssel passt zum Zertifikat, Gültigkeit), Rechten `0600`,
 Protokolleintrag, **niemals** Rückgabe des Schlüssels.
 
-### A11 — Keine HL7-Nachricht im Detail (P3)
+### A11 — Keine HL7-Nachricht im Detail (P3) — **behoben**
 
 `GET /hl7/messages` listet nur (limit). Eine abgelehnte ORM-Nachricht kann man
 weder im Detail ansehen noch erneut anwenden — der Betreiber muss sie neu
@@ -154,7 +154,7 @@ senden.
 **Fix:** `GET /hl7/messages/{id}` (Roh-Nachricht + Parse-Ergebnis + Fehler) und
 `POST /hl7/messages/{id}/reprocess` (dry-run-fähig, auditiert).
 
-### A12 — Kleinere Lücken (P4)
+### A12 — Kleinere Lücken (P4) — **behoben**
 
 - Kein Blick in die **zuletzt gesendeten ATNA-Nachrichten** (nur Zähler + ein
   Beispiel-XML).
@@ -227,7 +227,21 @@ noch beim vollständigen Up (ohne Service-Auswahl).
 fehlten — mein erster Test hatte keine Treffer und deckte das nicht ab. Behoben
 und mit einem Test **mit** Treffern abgesichert.
 
-## 5. Empfohlene Reihenfolge (Sprint 4)
+## 5. Umgesetzt (Sprint 4)
+
+| Befund | Umsetzung | Nachweis |
+|---|---|---|
+| **A7** | `GET /{id}` für Quellen, Ziele, Regeln, Transforms, Stationsregeln, lokale Einträge und `GET /settings/{key}` — 7 Einzelabrufe, 404 mit Klartext | `test_single_resource_reads` (inkl. aller 404-Fälle) |
+| **A10** | `POST /api/v1/tls/upload` nimmt Zertifikat/Schlüssel/CA aus der PKI an, **prüft** (Schlüssel gehört zum Zertifikat, Zertifikat gültig), schreibt den Schlüssel mit 0600, gibt ihn **nie** zurück und protokolliert. UI: Datei-Auswahl in der TLS-Karte | `test_certificate_upload_validates_and_never_returns_the_key` (inkl. falscher Schlüssel, abgelaufenes Zertifikat, Müll, 0600-Modus, Audit ohne Schlüsselmaterial), UI-Test |
+| **A11** | `GET /hl7/messages/{id}` (Metadaten + Roh-Text, wenn gespeichert) und `POST /hl7/messages/{id}/reprocess?dry_run=` (auditiert). Die Roh-Nachricht ist **PHI** und wird nur mit `hl7_store_raw=true` gespeichert (Health-Finding `hl7_raw_messages_stored`); ohne sie antwortet der Replay mit 409 und Klartext. Neue Spalte über Alembic-Revision `0007_hl7_raw` (defensiv). UI: Detail-Dialog mit „Erneut anwenden" | `test_hl7_message_detail_and_reprocess`, Alembic-Test |
+| **A12** | `POST /api/v1/cache/refresh` (optional je Quelle) fragt die Quellen neu ab, ersetzt die Snapshots, auditiert und meldet je Quelle Treffer/Dauer/Fehler. UI: „Jetzt aktualisieren" in der Cache-Karte. Die ATNA-Verlaufsliste und der Export-Vergleich bleiben bewusst offen (im Dokument vermerkt) | `test_cache_refresh_queries_now`, UI-Test |
+
+**Bewusst nicht umgesetzt (A12-Rest):** eine Liste der zuletzt gesendeten
+ATNA-Nachrichten (der Broker zählt nur — ein Verlauf wäre ein zweiter PHI-Speicher)
+und ein Diff zweier Konfigurations-Exporte (der Import zeigt bereits einen Plan;
+ein Diff-Werkzeug gehört in ein Betriebs-Skript, nicht in die API).
+
+## 6. Empfohlene Reihenfolge (Sprint 4)
 
 | Sprint | Inhalt | Aufwand |
 |---|---|---|

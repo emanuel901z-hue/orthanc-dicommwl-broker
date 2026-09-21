@@ -468,3 +468,107 @@ def describe() -> dict:
         "inbound_client_auth": cfg["inbound_client_auth"],
         "outbound_verify": cfg["outbound_verify"],
     }
+
+
+def _load_pem_certificate(pem: str) -> x509.Certificate:
+    """Parse one PEM certificate, with a plain-language error."""
+    try:
+        return x509.load_pem_x509_certificate(pem.encode())
+    except Exception as exc:
+        raise ValueError(f"not a readable PEM certificate: {str(exc)[:120]}")
+
+
+def _load_pem_key(pem: str):
+    from cryptography.hazmat.primitives import serialization as ser
+
+    for loader in (ser.load_pem_private_key,):
+        try:
+            return loader(pem.encode(), password=None)
+        except Exception as exc:
+            raise ValueError(
+                "not a readable unencrypted PEM private key "
+                f"(encrypted keys are not supported): {str(exc)[:120]}"
+            )
+    raise ValueError("not a readable private key")
+
+
+def store_uploaded(certificate_pem: str, key_pem: str, *, ca_pem: str = "",
+                   filename: str = "uploaded", is_ca: bool = False) -> dict:
+    """Validate and store a certificate/key pair that came from a PKI.
+
+    The broker never returns the key material, and the key is written 0600.
+    A key that does not belong to the certificate is rejected — otherwise the
+    operator would find out at the modality, hours later.
+    """
+    from datetime import datetime, timezone
+
+    if not certificate_pem.strip():
+        raise ValueError("the certificate is missing")
+    if not key_pem.strip():
+        raise ValueError("the private key is missing")
+    if not filename.strip() or "/" in filename or ".." in filename:
+        raise ValueError("the file name must be a plain name (no path)")
+
+    certificate = _load_pem_certificate(certificate_pem)
+    key = _load_pem_key(key_pem)
+
+    # does the key belong to the certificate?
+    from cryptography.hazmat.primitives import serialization as ser
+
+    cert_public = certificate.public_key().public_bytes(
+        encoding=ser.Encoding.PEM, format=ser.PublicFormat.SubjectPublicKeyInfo,
+    )
+    key_public = key.public_key().public_bytes(
+        encoding=ser.Encoding.PEM, format=ser.PublicFormat.SubjectPublicKeyInfo,
+    )
+    if cert_public != key_public:
+        raise ValueError("the private key does not belong to this certificate")
+
+    now = datetime.now(timezone.utc)
+    not_after = certificate.not_valid_after_utc
+    not_before = certificate.not_valid_before_utc
+    if not_after < now:
+        raise ValueError(
+            f"the certificate expired on {not_after.date().isoformat()} — "
+            "renew it at the PKI before installing it",
+        )
+    if not_before > now:
+        raise ValueError(
+            f"the certificate is not valid before {not_before.date().isoformat()} "
+            "(check the system clock of the broker host)",
+        )
+
+    target = directory()
+    target.mkdir(parents=True, exist_ok=True)
+    cert_path = target / f"{filename}.crt"
+    key_path = target / f"{filename}.key"
+    ca_path = target / f"{filename}-ca.crt"
+
+    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    cert_path.chmod(0o644)
+    key_path.write_bytes(key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    ))
+    key_path.chmod(0o600)
+
+    stored_ca = ""
+    if ca_pem.strip():
+        # a CA bundle may hold several certificates — keep the text as it is
+        for block in ca_pem.split("-----END CERTIFICATE-----"):
+            if "-----BEGIN CERTIFICATE-----" in block:
+                _load_pem_certificate(block + "-----END CERTIFICATE-----\n")
+        ca_path.write_text(ca_pem)
+        ca_path.chmod(0o644)
+        stored_ca = str(ca_path)
+
+    log.info("TLS: stored an uploaded certificate '%s' (%s)", filename, cert_path)
+    return {
+        "certificate_path": str(cert_path),
+        "key_path": str(key_path),
+        "ca_path": stored_ca,
+        "certificate": inspect_certificate(str(cert_path)),
+        "key": inspect_private_key(str(key_path)),
+        "is_ca": is_ca,
+    }

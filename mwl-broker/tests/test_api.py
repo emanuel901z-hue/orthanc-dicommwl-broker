@@ -1598,3 +1598,202 @@ def test_cfind_test_is_read_only_for_rbac(client):
 
     assert client.post(f"/api/v1/sources/{src['id']}/query", json={}).status_code == 200
     assert client.post("/api/v1/simulate/worklist", json={}).status_code == 200
+
+
+# ── Sprint 4: single reads, TLS upload, HL7 detail, cache refresh ──────
+
+def test_single_resource_reads(client):
+    """Scripts and integrations should not have to fetch whole lists."""
+    src = client.post("/api/v1/sources", json=SOURCE).json()
+    tgt = client.post("/api/v1/targets", json=TARGET).json()
+    rule = client.post("/api/v1/rules",
+                       json={"source_id": src["id"], "target_id": tgt["id"],
+                             "priority": 10, "enabled": True}).json()
+
+    assert client.get(f"/api/v1/sources/{src['id']}").json()["name"] == src["name"]
+    assert client.get(f"/api/v1/targets/{tgt['id']}").json()["name"] == tgt["name"]
+    assert client.get(f"/api/v1/rules/{rule['id']}").json()["id"] == rule["id"]
+    assert client.get("/api/v1/settings/echo_interval_s").json()["key"] == "echo_interval_s"
+
+    for path in ("/api/v1/sources/999", "/api/v1/targets/999", "/api/v1/rules/999",
+                 "/api/v1/transforms/999", "/api/v1/station-rules/999",
+                 "/api/v1/local-items/999", "/api/v1/settings/nonsense"):
+        assert client.get(path).status_code == 404, path
+
+
+def test_certificate_upload_validates_and_never_returns_the_key(client, tmp_path):
+    """A PKI certificate pair must be checked before it reaches a modality."""
+    from datetime import datetime, timedelta, timezone
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    from mwl_broker import tls
+
+    settings_service.set_value("tls_dir", str(tmp_path))
+    # the TLS module caches its config for a few seconds — without this the
+    # upload would go to the deployment default (/var/lib/mwl-broker/tls)
+    tls.reset_for_tests()
+
+    def make_pair(common_name="mwl-broker.hospital.local", days=365):
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+        now = datetime.now(timezone.utc)
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(name).issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(days=1))
+            .not_valid_after(now + timedelta(days=days))
+            .sign(key, hashes.SHA256())
+        )
+        return (
+            cert.public_bytes(serialization.Encoding.PEM).decode(),
+            key.private_bytes(serialization.Encoding.PEM,
+                              serialization.PrivateFormat.TraditionalOpenSSL,
+                              serialization.NoEncryption()).decode(),
+        )
+
+    cert_pem, key_pem = make_pair()
+
+    r = client.post("/api/v1/tls/upload", json={
+        "certificate_pem": cert_pem, "key_pem": key_pem,
+        "filename": "hospital", "is_ca": False,
+    })
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["certificate_path"].endswith("hospital.crt")
+    assert body["key_path"].endswith("hospital.key")
+    # the response must never contain the key material
+    assert "PRIVATE KEY" not in r.text
+    # the key file is only readable by the service
+    import os
+    import stat
+
+    mode = stat.S_IMODE(os.stat(body["key_path"]).st_mode)
+    assert mode == 0o600, oct(mode)
+
+    # a key that belongs to another certificate is refused with a clear message
+    _, other_key = make_pair()
+    bad = client.post("/api/v1/tls/upload", json={
+        "certificate_pem": cert_pem, "key_pem": other_key, "filename": "mismatch",
+    })
+    assert bad.status_code == 422
+    assert "does not belong" in bad.json()["detail"]
+
+    # an expired certificate is refused too
+    expired_cert, expired_key = make_pair(days=-1)
+    expired = client.post("/api/v1/tls/upload", json={
+        "certificate_pem": expired_cert, "key_pem": expired_key, "filename": "old",
+    })
+    assert expired.status_code == 422
+    assert "expired" in expired.json()["detail"]
+
+    # nonsense is a plain 422, not a stack trace
+    garbage = client.post("/api/v1/tls/upload", json={
+        "certificate_pem": "not a pem", "key_pem": key_pem,
+    })
+    assert garbage.status_code == 422
+    assert "PEM" in garbage.json()["detail"]
+
+    # and the upload is in the change log
+    entries = client.get("/api/v1/audit/config").json()
+    assert any(e["action"] == "tls.upload" for e in entries), entries
+    # …without key material
+    assert "PRIVATE KEY" not in str(entries)
+
+
+def test_hl7_message_detail_and_reprocess(client):
+    """A failed message must be inspectable — and replayable when it was kept."""
+    from mwl_broker import hl7, local_worklist
+
+    orm = (
+        "MSH|^~\\&|RIS|KH|MWLBROKER|KH|20260921100000||ORM^O01|MSG-1|P|2.4\r"
+        "PID|1||P-1||Muster^Max||19800101|M\r"
+        "ORC|NW|ACC-A-001\r"
+        "OBR|1|ACC-A-001||CT\r"
+    )
+    parsed = hl7.parse(orm)
+
+    # default: the raw message is not stored (PHI)
+    local_worklist.log_hl7("http", parsed, "created-or-updated")
+    entry = client.get("/api/v1/hl7/messages").json()[0]
+    detail = client.get(f"/api/v1/hl7/messages/{entry['id']}").json()
+    assert detail["accession"] == "ACC-A-001"
+    assert detail["replayable"] is False
+    assert detail["raw"] == ""
+
+    # replaying without the raw text is a clear 409, not a silent failure
+    blocked = client.post(f"/api/v1/hl7/messages/{entry['id']}/reprocess")
+    assert blocked.status_code == 409
+    assert "hl7_store_raw" in blocked.json()["detail"]
+
+    # with the setting on, the raw message is kept and the replay works
+    client.put("/api/v1/settings/hl7_store_raw", json={"value": "true"})
+    local_worklist.log_hl7("http", parsed, "created-or-updated", raw=orm)
+    entry = client.get("/api/v1/hl7/messages").json()[0]
+    detail = client.get(f"/api/v1/hl7/messages/{entry['id']}").json()
+    assert detail["replayable"] is True
+    assert "ORM^O01" in detail["raw"]
+
+    # dry run first, then apply — and the health panel reports the PHI setting
+    preview = client.post(f"/api/v1/hl7/messages/{entry['id']}/reprocess",
+                          params={"dry_run": True}).json()
+    assert preview["dry_run"] is True
+
+    applied = client.post(f"/api/v1/hl7/messages/{entry['id']}/reprocess",
+                          params={"dry_run": False}, headers={"X-OE3-User": "mfa.k"})
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["item_id"]
+
+    entries = client.get("/api/v1/audit/config").json()
+    assert any(e["action"] == "hl7.reprocess" and e["actor"] == "mfa.k" for e in entries)
+
+    findings = client.get("/api/v1/health/config").json()["findings"]
+    assert any(f["code"] == "hl7_raw_messages_stored" for f in findings), findings
+
+    assert client.get("/api/v1/hl7/messages/999").status_code == 404
+    assert client.post("/api/v1/hl7/messages/999/reprocess").status_code == 404
+
+
+def test_cache_refresh_queries_now(client, monkeypatch):
+    """During an outage the operator wants the newest snapshot immediately."""
+    from pydicom.dataset import Dataset
+
+    from mwl_broker import aggregation
+
+    src = client.post("/api/v1/sources", json=SOURCE).json()
+
+    ds = Dataset()
+    ds.AccessionNumber = "ACC-A-001"
+    sps = Dataset()
+    sps.ScheduledProcedureStepID = "1"
+    ds.ScheduledProcedureStepSequence = [sps]
+
+    calls = {"n": 0}
+
+    def fake_query(cfg, identifier):
+        calls["n"] += 1
+        return [ds], 7, ""
+
+    monkeypatch.setattr(aggregation, "query_one", fake_query)
+
+    r = client.post("/api/v1/cache/refresh")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert calls["n"] >= 1
+    assert body["sources"][0]["items"] == 1
+    assert body["sources"][0]["ok"] is True
+
+    # the snapshot is really there afterwards
+    items = client.get("/api/v1/cache/items").json()
+    assert any(i["accession"] == "ACC-A-001" for i in items), items
+
+    # and it is in the change log
+    entries = client.get("/api/v1/audit/config").json()
+    assert any(e["action"] == "cache.refresh" for e in entries)
+
+    assert client.post("/api/v1/cache/refresh", params={"source_id": 999}).status_code == 404

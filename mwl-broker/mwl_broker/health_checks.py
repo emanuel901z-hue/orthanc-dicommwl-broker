@@ -289,6 +289,14 @@ def config_findings(session, settings) -> list[dict]:
             "'simulate_show_phi' off when the troubleshooting is done.",
         ))
 
+    if settings_service.get_bool("hl7_store_raw"):
+        findings.append(_finding(
+            "hl7_raw_messages_stored", "warning",
+            "Raw HL7 messages are stored, including patient data. Switch "
+            "'hl7_store_raw' off when the troubleshooting is done (retention "
+            "still applies).",
+        ))
+
     return findings
 
 

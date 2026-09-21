@@ -171,8 +171,16 @@ def purge_expired() -> int:
     return removed
 
 
-def log_hl7(transport: str, parsed: dict, action: str, error: str = "") -> None:
-    """Record an inbound message (both transports) for troubleshooting."""
+def log_hl7(transport: str, parsed: dict, action: str, error: str = "",
+            raw: str = "") -> None:
+    """Record an inbound message (both transports) for troubleshooting.
+
+    The raw message is PHI, so it is only kept when `hl7_store_raw` is on — then
+    the operator can inspect and replay it (retention still applies).
+    """
+    from . import settings_service
+
+    keep_raw = settings_service.get_bool("hl7_store_raw")
     try:
         with session_factory()() as s:
             s.add(Hl7Message(
@@ -180,6 +188,7 @@ def log_hl7(transport: str, parsed: dict, action: str, error: str = "") -> None:
                 control_id=parsed.get("control_id", ""),
                 order_control=parsed.get("order_control", ""),
                 accession=parsed.get("accession", ""), action=action, error=error[:256],
+                raw=(raw[:100_000] if keep_raw else ""),
             ))
             s.commit()
     except Exception as exc:  # logging must never break the intake
@@ -187,7 +196,8 @@ def log_hl7(transport: str, parsed: dict, action: str, error: str = "") -> None:
 
 
 def upsert_from_hl7(parsed: dict, *, transport: str = "http",
-                    default_station_aet: str = "", default_modality: str = "") -> dict:
+                    default_station_aet: str = "", default_modality: str = "",
+                    raw: str = "") -> dict:
     """Apply one parsed ORM message. Returns {action, accession, item_id}."""
     accession = parsed.get("accession", "")
     sps_id = parsed.get("sps_id") or "1"
@@ -244,7 +254,7 @@ def upsert_from_hl7(parsed: dict, *, transport: str = "http",
         item_id = row.id
 
     publish_metrics()
-    log_hl7(transport, parsed, action)
+    log_hl7(transport, parsed, action, raw=raw)
     log.info("local worklist: HL7 %s %s (accession %s, transport %s)",
              parsed.get("order_control", "?"), action, accession, transport)
     return {"action": action, "accession": accession, "item_id": item_id}

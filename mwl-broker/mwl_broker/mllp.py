@@ -51,10 +51,11 @@ def handle_message(text: str, transport: str = "mllp") -> tuple[bool, str, str]:
             parsed, transport=transport,
             default_station_aet=settings_service.get_str("hl7_default_station_aet"),
             default_modality=settings_service.get_str("hl7_default_modality"),
+            raw=text,
         )
     except Exception as exc:  # a bad message must never kill the listener
         error = str(exc)[:200]
-        local_worklist.log_hl7(transport, parsed, "error", error)
+        local_worklist.log_hl7(transport, parsed, "error", error, raw=text)
         metrics.HL7_MESSAGES.labels(transport=transport, result="error").inc()
         return False, control_id, error
 

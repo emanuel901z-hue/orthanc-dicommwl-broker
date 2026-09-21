@@ -999,3 +999,68 @@ class SourceQueryOut(BaseModel):
     phi: bool = Field(description="Whether patient name/ID are included (setting `simulate_show_phi`).")
     items: list[WorklistPreviewItem] = Field(description="The answers (capped, see `truncated`).")
     truncated: bool = Field(description="True when more answers exist than were returned.")
+
+
+class Hl7MessageDetailOut(BaseModel):
+    """One inbound HL7 message as the log sees it."""
+
+    id: int = Field(description="Log entry ID.")
+    ts: datetime = Field(description="When the message arrived.")
+    transport: str = Field(description="http | mllp | replay:<transport>.")
+    message_type: str = Field(description="HL7 message type, e.g. ORM^O01.")
+    control_id: str = Field(description="MSH-10 message control ID.")
+    order_control: str = Field(description="ORC-1 order control (NW, CA, …).")
+    accession: str = Field(description="Accession number the message carried.")
+    action: str = Field(description="created-or-updated | cancelled | rejected | cancel-unknown | error.")
+    error: str = Field(description="Why the message was rejected (empty when it worked).")
+    raw: str = Field(description="The raw message — only when `hl7_store_raw` is on (PHI!).")
+    replayable: bool = Field(description="Whether the raw message is stored, so a replay is possible.")
+
+
+class Hl7ReprocessOut(BaseModel):
+    """Result of replaying a stored HL7 message."""
+
+    dry_run: bool = Field(description="True when nothing was written.")
+    action: str = Field(description="What the replay did (or would do).")
+    item_id: int | None = Field(default=None, description="Local worklist item that was touched.")
+    error: str = Field(default="", description="Why the replay failed, if it did.")
+
+
+class CacheRefreshSource(BaseModel):
+    """One source's contribution to a manual cache refresh."""
+
+    name: str = Field(description="Source name.")
+    source_id: int = Field(description="Source ID.")
+    items: int = Field(description="Items that were cached (0 when the query failed).")
+    duration_ms: int = Field(description="Query duration.")
+    ok: bool = Field(description="Whether the source answered.")
+    error: str = Field(default="", description="Failure reason, if any.")
+
+
+class CacheRefreshOut(BaseModel):
+    """Result of a manual cache refresh."""
+
+    sources: list[CacheRefreshSource] = Field(description="Per-source result of the refresh.")
+
+
+class TlsUploadIn(BaseModel):
+    """A certificate/key pair that came from the hospital PKI."""
+
+    certificate_pem: str = Field(description="The certificate in PEM form (the server certificate).",
+                                 examples=["-----BEGIN CERTIFICATE-----\n…"])
+    key_pem: str = Field(description="The matching private key in PEM form (unencrypted). "
+                                     "It is never returned again.")
+    ca_pem: str = Field(default="", description="Optional CA bundle (PEM) to verify the other side.")
+    filename: str = Field(default="uploaded", description="Base name of the stored files (no path).")
+    is_ca: bool = Field(default=False, description="Set when the certificate itself is a CA certificate.")
+
+
+class TlsUploadOut(BaseModel):
+    """Where the uploaded material was stored (never the key itself)."""
+
+    certificate_path: str = Field(description="Where the certificate was stored.")
+    key_path: str = Field(description="Where the private key was stored (mode 0600).")
+    ca_path: str = Field(default="", description="Where the CA bundle was stored (empty when none).")
+    certificate: dict = Field(description="Subject, validity and SANs of the certificate.")
+    key: dict = Field(description="Type and size of the key (no key material).")
+    is_ca: bool = Field(description="Whether the certificate was marked as a CA certificate.")

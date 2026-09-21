@@ -227,6 +227,11 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "Interval of the spool retry worker in seconds.",
     ),
+    "hl7_store_raw": (
+        "bool",
+        "Keep the raw HL7 message for troubleshooting and replay. The message "
+        "contains patient data (PHI) — off by default; the health panel reports it.",
+    ),
     "simulate_show_phi": (
         "bool",
         "Include patient name and ID in the worklist preview (off = PHI-free, "
