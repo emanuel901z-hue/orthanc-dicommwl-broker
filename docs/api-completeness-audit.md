@@ -241,15 +241,16 @@ ATNA-Nachrichten (der Broker zählt nur — ein Verlauf wäre ein zweiter PHI-Sp
 und ein Diff zweier Konfigurations-Exporte (der Import zeigt bereits einen Plan;
 ein Diff-Werkzeug gehört in ein Betriebs-Skript, nicht in die API).
 
-## 6. Empfohlene Reihenfolge (Sprint 4)
+## 6. Stand: alle Sprints abgeschlossen
 
-| Sprint | Inhalt | Aufwand |
+| Sprint | Inhalt | Stand |
 |---|---|---|
-| **1** | A1 (RBAC-Absicht) + A2 (Cache-Audit) + A3 (Breaker-Audit) — Sicherheit/Nachvollziehbarkeit | klein |
-| **2** | A4 (Version/Uptime) + A5 (Offset) + A6 (Zeitraum) + A13/A14 (Doku) | klein–mittel |
-| **3** | A8 (C-FIND-Test) + A9 (Merged-Vorschau) — die zwei stärksten Betreiber-Features | mittel |
-| **4** | A7 (Einzelabruf) + A10 (Zertifikat-Upload) + A11 (HL7-Detail) + A12 | mittel |
+| **1** | A1 (RBAC-Absicht) + A2 (Cache-Audit) + A3 (Breaker-Audit) | erledigt |
+| **2** | A4 (Version/Uptime) + A5 (Offset) + A6 (Zeitraum) + A13/A14 (Doku) | erledigt |
+| **3** | A8 (C-FIND-Test) + A9 (Merged-Vorschau) | erledigt |
+| **4** | A7 (Einzelabruf) + A10 (Zertifikat-Upload) + A11 (HL7-Detail) + A12 | erledigt |
 
-Alle Punkte sind mit Tests, Doku und Commit abzuschließen; für A1 gehört ein
-Test dazu, der die **Absicht** festschreibt (Trockenlauf bleibt für Nur-Leser
-erlaubt, Anwenden nicht).
+**Kein Sprint offen.** Zwei Punkte aus A12 sind bewusst nicht gebaut (siehe
+Sprint-4-Abschnitt) — sie stehen als Betriebs-Skript-Thema, nicht als Lücke.
+Die Test-Abdeckung wurde anschließend separat geprüft:
+[`docs/test-coverage-audit.md`](test-coverage-audit.md).

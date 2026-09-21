@@ -131,6 +131,10 @@ und eine PR-Vorlage) liegen fertig in
 
 ## API-Dokumentation
 
+Die Test-Abdeckung (pytest, vitest, Playwright, Chrome-headless-DOM-Audit und
+der Screenshot-Walk über alle Views) ist in
+[`docs/test-coverage-audit.md`](docs/test-coverage-audit.md) dokumentiert.
+
 Die Vollständigkeitsprüfung der API (Routen ↔ UI-Aufrufe ↔ Tests ↔ Doku,
 inklusive Live-Belegen und offenen Befunden) steht in
 [`docs/api-completeness-audit.md`](docs/api-completeness-audit.md).

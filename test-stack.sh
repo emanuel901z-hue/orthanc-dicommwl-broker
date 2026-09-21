@@ -486,4 +486,7 @@ echo "── Playwright (desktop + mobile) ──"
 (cd orthanc-explorer-3-usable && OE3_BASE="$OE3_BASE" \
   npx playwright test --config=e2e/stack/playwright.stack.config.ts)
 
+echo "── Screenshot-Walk über alle Views/Menüs (Chrome headless) ──"
+(cd orthanc-explorer-3-usable && node e2e/stack/verify-screens.cjs)
+
 echo "── all checks passed ──"

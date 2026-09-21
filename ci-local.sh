@@ -43,6 +43,7 @@ stage "scripts" bash -c '
   ./build.sh --dry-run --demo | grep -q "docker-compose.demo.yml" || { echo "build.sh --dry-run broken"; exit 1; }
   ./build.sh --dry-run | grep -q "Dry-Run" || { echo "build.sh dry-run guard missing"; exit 1; }
   ./bootstrap.sh --check >/dev/null || { echo "bootstrap.sh wrapper broken"; exit 1; }
+  node orthanc-explorer-3-usable/e2e/stack/verify-screens.cjs --help >/dev/null 2>&1 || true
   echo "   scripts ok"
 '
 
