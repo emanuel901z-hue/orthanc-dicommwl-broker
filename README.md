@@ -134,6 +134,9 @@ und eine PR-Vorlage) liegen fertig in
 
 ## API-Dokumentation
 
+Der Vergleich mit kommerziellen MWL-Brokern (Funktionslücken, priorisierte
+Sprints) steht in [`docs/commercial-comparison.md`](docs/commercial-comparison.md).
+
 Die Test-Abdeckung (pytest, vitest, Playwright, Chrome-headless-DOM-Audit und
 der Screenshot-Walk über alle Views) ist in
 [`docs/test-coverage-audit.md`](docs/test-coverage-audit.md) dokumentiert.

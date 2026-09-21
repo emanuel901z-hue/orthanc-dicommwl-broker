@@ -19,7 +19,8 @@ from sqlalchemy import delete, func, select
 
 from . import metrics, settings_service
 from .db import session_factory
-from .models import (ConfigAudit, Hl7Message, LocalWorklistItem, QueryLog,
+from .models import (
+    MppsStep,ConfigAudit, Hl7Message, LocalWorklistItem, QueryLog,
                      SeenItem, StoreLog, StoreSpool)
 
 log = logging.getLogger("mwl_broker.retention")
@@ -32,6 +33,8 @@ TABLES: dict[str, tuple[str, str, type, str]] = {
                   StoreLog, "ts"),
     "seen_item": ("seen_item_ttl_days", "Worklist provenance for routing",
                   SeenItem, "ts"),
+    "mpps_step": ("retention_mpps_days", "Performed procedure steps (MPPS)",
+                  MppsStep, "ts"),
     "hl7_message": ("retention_hl7_days", "Inbound HL7 messages",
                     Hl7Message, "ts"),
     "local_worklist_item": ("retention_local_items_days",

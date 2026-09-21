@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     simulate_show_phi: bool = False
     # keep the raw HL7 message (PHI) for troubleshooting and replay
     hl7_store_raw: bool = False
+    # MPPS: accept performed procedure steps and report them back to the RIS
+    mpps_enabled: bool = True
+    mpps_forward_enabled: bool = False
+    mpps_forward_transport: str = "mllp"
+    mpps_forward_host: str = ""
+    mpps_forward_port: int = 2575
+    mpps_forward_url: str = ""
+    mpps_hide_completed: bool = True
     cache_stale_max_s: int = 120        # hard cap for stale serving (0 = never)
     cache_hide_completed: bool = True   # never resurrect COMPLETED/DISCONTINUED steps
     cache_max_items: int = 5000         # safety cap per source snapshot
@@ -81,6 +89,7 @@ class Settings(BaseSettings):
     # Retention (days; 0 = keep forever) — see GET /retention
     retention_query_log_days: int = 90
     retention_store_log_days: int = 180
+    retention_mpps_days: int = 365
     retention_hl7_days: int = 30
     retention_local_items_days: int = 0     # the items carry their own validity
     retention_spool_days: int = 7           # delivered + dead entries

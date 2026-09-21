@@ -366,3 +366,38 @@ class StoreLog(Base):
     error: Mapped[str] = mapped_column(String(512), default="")
     # Names of the transform rules applied to this instance (audit trail).
     applied_transforms: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class MppsStep(Base):
+    """A performed procedure step reported by a modality (MPPS).
+
+    The broker accepts N-CREATE ("IN PROGRESS") and N-SET ("COMPLETED" /
+    "DISCONTINUED"), keeps the identifiers the RIS needs for its own status
+    update and — when switched on — forwards the state back as HL7. Without this
+    the order would stay open in the RIS, because the RIS never learns that the
+    examination happened.
+
+    PHI: the table holds the patient ID only (like `seen_items`), never the name.
+    """
+
+    __tablename__ = "mpps_step"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    sop_instance_uid: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="IN PROGRESS", index=True)
+    accession: Mapped[str] = mapped_column(String(64), default="")
+    patient_id: Mapped[str] = mapped_column(String(64), default="")
+    sps_id: Mapped[str] = mapped_column(String(64), default="")
+    station_aet: Mapped[str] = mapped_column(String(16), default="")
+    modality: Mapped[str] = mapped_column(String(16), default="")
+    study_uid: Mapped[str] = mapped_column(String(128), default="")
+    performed_procedure_step_id: Mapped[str] = mapped_column(String(64), default="")
+    # when the modality reported the transitions (not when the broker stored them)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # forwarding the state back to the RIS
+    forwarded: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    forward_error: Mapped[str] = mapped_column(String(256), default="")
+    forward_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    forwarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

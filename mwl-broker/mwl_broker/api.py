@@ -87,8 +87,11 @@ from .schemas import (
     CacheRefreshOut,
     TlsUploadIn,
     TlsUploadOut,
+    MppsStepOut,
+    MppsStatsOut,
+    MppsForwardOut,
 )
-from . import (atna, audit, breaker, cache, config_io, health_checks, hl7,
+from . import (atna, audit, breaker, cache, config_io, health_checks, hl7, mpps,
                local_worklist, metrics, notify, rbac, retention, settings_service,
                simulate, spool, station_rules, tls, transforms)
 from .models import (BrokerSetting, ConfigAudit, Hl7Message, LocalWorklistItem,
@@ -1013,6 +1016,88 @@ def list_hl7_messages(
         select(Hl7Message).order_by(Hl7Message.ts.desc(), Hl7Message.id.desc())
         .offset(offset).limit(limit)
     ).all()
+
+
+@router.get(
+    "/mpps", response_model=list[MppsStepOut], tags=["mpps"],
+    summary="Performed procedure steps (MPPS)",
+    description="Steps the modalities reported, newest first. Without this the "
+                "RIS never learns that an examination was performed and the order "
+                "stays open.",
+    response_description="MPPS entries, newest first.",
+    responses=_docs(VALIDATION_422),
+)
+def list_mpps(
+    limit: int = Query(default=50, ge=1, le=500, description="Maximum number of entries."),
+    offset: int = Query(default=0, ge=0, description="Number of entries to skip (paging)."),
+    status: str = Query(default="", description="Only this status (IN PROGRESS | COMPLETED | DISCONTINUED)."),
+):
+    return mpps.list_steps(limit=limit, offset=offset, status=status)
+
+
+@router.get(
+    "/mpps/stats", response_model=MppsStatsOut, tags=["mpps"],
+    summary="MPPS counters",
+    description="How many steps arrived, how many were reported back and what is "
+                "still pending.",
+    response_description="Counters for the dashboard.",
+)
+def mpps_stats():
+    return mpps.stats()
+
+
+@router.get(
+    "/mpps/{step_id}", response_model=MppsStepOut, tags=["mpps"],
+    summary="Read one performed procedure step",
+    description="One performed procedure step by ID — the identifiers and the "
+                "state the modality reported, plus whether it reached the RIS.",
+    response_description="The step.",
+    responses={404: {"description": "No step with this ID."}},
+)
+def get_mpps(
+    step_id: Annotated[int, Path(description="ID of the MPPS entry.")],
+):
+    step = mpps.get_step(step_id)
+    if step is None:
+        raise HTTPException(404, "not found")
+    return step
+
+
+@router.post(
+    "/mpps/{step_id}/forward", response_model=MppsForwardOut, tags=["mpps"],
+    summary="Report one step's state again",
+    description="Delivers the state message for this step to the RIS again — for "
+                "a message that failed while the RIS was unreachable.",
+    response_description="Whether the RIS accepted it.",
+    responses={404: {"description": "No step with this ID."}, **_docs(READ_ONLY_403)},
+)
+def forward_mpps(
+    request: Request,
+    step_id: Annotated[int, Path(description="ID of the MPPS entry.")],
+    s: Session = _db_dep,
+):
+    if mpps.get_step(step_id) is None:
+        raise HTTPException(404, "not found")
+    result = mpps.forward(step_id)
+    audit.record(s, _actor(request), "mpps.forward", "mpps_step", step_id,
+                 None, {"ok": result["ok"]}, _correlation(request))
+    s.commit()
+    return result
+
+
+@router.post(
+    "/mpps/forward-pending", response_model=MppsForwardOut, tags=["mpps"],
+    summary="Report every pending step again",
+    description="Retries all finished steps whose state did not reach the RIS.",
+    response_description="How many were tried and how many succeeded.",
+    responses=_docs(READ_ONLY_403),
+)
+def forward_pending_mpps(request: Request, s: Session = _db_dep):
+    result = mpps.forward_pending()
+    audit.record(s, _actor(request), "mpps.forward_pending", "mpps_step", None,
+                 None, result, _correlation(request))
+    s.commit()
+    return result
 
 
 @router.get(

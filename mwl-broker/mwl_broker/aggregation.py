@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pydicom.dataset import Dataset
 from sqlalchemy import select
 
-from . import breaker, cache, local_worklist, metrics, station_rules
+from . import breaker, cache, local_worklist, metrics, mpps, station_rules
 from .db import session_factory
 from .models import MwlSource
 from .upstream import SourceCfg, merge_answers, query_source
@@ -218,7 +218,19 @@ def collect(
     merged = merge_answers(collected)
 
     merged, hidden = station_rules.filter_merged(merged, rule)
-    result.hidden = hidden
+
+    # A performed step that the modality reported as COMPLETED/DISCONTINUED must
+    # not come back on the worklist — that is the whole point of accepting MPPS.
+    completed_hidden = 0
+    if mpps.hide_completed():
+        done = mpps.completed_identifiers()
+        if done:
+            kept = [(ds, src_) for ds, src_ in merged
+                    if str(ds.get("AccessionNumber", "") or "") not in done]
+            completed_hidden = len(merged) - len(kept)
+            merged = kept
+
+    result.hidden = hidden + completed_hidden
     if hidden:
         log.info("C-FIND for station %s: %d answer(s) hidden by rule '%s'",
                  station or "(any)", hidden, (rule or {}).get("name"))

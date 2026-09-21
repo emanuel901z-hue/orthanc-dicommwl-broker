@@ -1064,3 +1064,48 @@ class TlsUploadOut(BaseModel):
     certificate: dict = Field(description="Subject, validity and SANs of the certificate.")
     key: dict = Field(description="Type and size of the key (no key material).")
     is_ca: bool = Field(description="Whether the certificate was marked as a CA certificate.")
+
+
+class MppsStepOut(BaseModel):
+    """A performed procedure step reported by a modality."""
+
+    id: int = Field(description="Row ID.")
+    ts: datetime = Field(description="When the broker received the message.")
+    sop_instance_uid: str = Field(description="MPPS SOP instance UID (the step's identity).")
+    status: str = Field(description="IN PROGRESS | COMPLETED | DISCONTINUED.")
+    accession: str = Field(description="Accession number — the key the RIS needs.")
+    patient_id: str = Field(description="Patient ID (no name: PHI stays out of the logs).")
+    sps_id: str = Field(description="Scheduled procedure step ID.")
+    station_aet: str = Field(description="Station that performed the step.")
+    modality: str = Field(description="Modality.")
+    study_uid: str = Field(description="Study instance UID, when reported.")
+    performed_procedure_step_id: str = Field(description="Performed procedure step ID.")
+    started_at: datetime | None = Field(default=None, description="Start as reported by the modality.")
+    ended_at: datetime | None = Field(default=None, description="End as reported by the modality.")
+    forwarded: bool = Field(description="Whether the state reached the RIS.")
+    forward_error: str = Field(default="", description="Why the last delivery failed (empty = ok).")
+    forward_attempts: int = Field(description="Delivery attempts so far.")
+    forwarded_at: datetime | None = Field(default=None, description="When it was delivered.")
+
+
+class MppsStatsOut(BaseModel):
+    """How many steps arrived, how many went back to the RIS."""
+
+    total: int = Field(description="Steps stored.")
+    by_status: dict = Field(description="Counts per MPPS status.")
+    forwarded: int = Field(description="Steps whose state reached the RIS.")
+    pending_forward: int = Field(description="Finished steps that were not delivered yet.")
+    last_error: str = Field(default="", description="The most recent delivery error.")
+    forward_enabled: bool = Field(description="Whether forwarding is switched on.")
+    hide_completed: bool = Field(description="Whether finished steps are hidden from the worklist.")
+
+
+class MppsForwardOut(BaseModel):
+    """Result of a manual delivery attempt (single step or batch)."""
+
+    ok: bool = Field(default=False,
+                     description="Whether the RIS accepted the message (single step).")
+    error: str = Field(default="", description="Reason for a failure.")
+    attempted: int = Field(default=0, description="Steps tried (batch only).")
+    sent: int = Field(default=0, description="Steps delivered (batch only).")
+    failed: int = Field(default=0, description="Steps that failed (batch only).")

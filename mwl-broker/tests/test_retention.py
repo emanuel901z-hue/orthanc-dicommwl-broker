@@ -46,7 +46,7 @@ def test_overview_lists_every_table_with_its_retention():
     data = retention.overview()
 
     tables = {entry["table"]: entry for entry in data["tables"]}
-    assert set(tables) == {"query_log", "store_log", "seen_item", "hl7_message",
+    assert set(tables) == {"query_log", "store_log", "seen_item", "hl7_message", "mpps_step",
                            "local_worklist_item", "store_spool", "config_audit"}
     assert tables["query_log"]["retention_days"] == 90
     assert tables["config_audit"]["retention_days"] == 0     # the accounting trail
@@ -140,7 +140,7 @@ def test_purge_of_an_unknown_table_is_rejected(client):
 def test_retention_endpoints(client):
     overview = client.get("/api/v1/retention").json()
     tables = {entry["table"]: entry for entry in overview["tables"]}
-    assert set(tables) == {"query_log", "store_log", "seen_item", "hl7_message",
+    assert set(tables) == {"query_log", "store_log", "seen_item", "hl7_message", "mpps_step",
                            "local_worklist_item", "store_spool", "config_audit"}
     assert all("rows" in entry and "retention_days" in entry for entry in tables.values())
 

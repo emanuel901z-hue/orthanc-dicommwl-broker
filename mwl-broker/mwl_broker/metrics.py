@@ -32,6 +32,17 @@ TLS_HANDSHAKE = Counter(
     "mwl_tls_handshake_total", "TLS endpoint checks", ["result"]
 )
 LOCAL_ITEMS = Gauge("mwl_local_worklist_items", "Active local worklist items")
+MPPS_STEPS = Counter(
+    "mwl_mpps_steps_total",
+    "Performed procedure steps received from modalities",
+    ["status"],
+)
+MPPS_FORWARDED = Counter(
+    "mwl_mpps_forwarded_total",
+    "MPPS state messages delivered back to the RIS",
+    ["result"],
+)
+
 HL7_MESSAGES = Counter(
     "mwl_hl7_messages_total", "Inbound HL7 messages", ["transport", "result"]
 )

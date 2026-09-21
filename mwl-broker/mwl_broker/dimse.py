@@ -10,11 +10,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydicom.dataset import Dataset
 from pynetdicom import AE, StoragePresentationContexts, evt
 from pynetdicom.presentation import build_context
-from pynetdicom.sop_class import ModalityWorklistInformationFind, Verification
+from pynetdicom.sop_class import (ModalityPerformedProcedureStep, ModalityWorklistInformationFind,
+                                  Verification)
 from sqlalchemy import select
 
 from . import (aggregation, atna, breaker, cache, cstore, local_worklist, metrics,
-               routing, settings_service, spool, station_rules, tls, transforms)
+               mpps, routing, settings_service, spool, station_rules, tls, transforms)
 from .config import Settings
 from .db import session_factory
 from .models import QueryLog, RoutingRule, SeenItem, StoreLog, MwlSource, PacsTarget
@@ -57,6 +58,11 @@ class BrokerSCP:
         ae = AE(ae_title=settings.broker_aet)
         ae.add_supported_context(ModalityWorklistInformationFind)
         ae.add_supported_context(Verification)
+        # MPPS: the modality reports the performed procedure step (N-CREATE/N-SET).
+        # Offered only when switched on — a broker that does not report the state
+        # back should not accept the step, otherwise the RIS waits forever.
+        if mpps.enabled():
+            ae.add_supported_context(ModalityPerformedProcedureStep)
         for cx in StoragePresentationContexts:
             ae.add_supported_context(cx.abstract_syntax)
         ae.maximum_associations = settings.max_associations
@@ -66,6 +72,8 @@ class BrokerSCP:
         handlers = [
             (evt.EVT_C_FIND, self.handle_find),
             (evt.EVT_C_STORE, self.handle_store),
+            (evt.EVT_N_CREATE, self.handle_mpps_create),
+            (evt.EVT_N_SET, self.handle_mpps_update),
         ]
         self.server = self.ae.start_server(
             ("0.0.0.0", self.settings.dicom_port),
@@ -309,6 +317,35 @@ class BrokerSCP:
                 query=f"worklist disclosure {keys[:120]}",
                 event_type=("ITI-20", "Modality Worklist Query"),
             )
+
+    # ------------------------------------------------------------------
+    def handle_mpps_create(self, event):
+        """N-CREATE: the modality started an examination (MPPS IN PROGRESS)."""
+        if not mpps.enabled():
+            return S_CANNOT_UNDERSTAND, None
+        sop_uid = str(getattr(event.request, "AffectedSOPInstanceUID", "") or "")
+        if not sop_uid:
+            return S_CANNOT_UNDERSTAND, None
+        try:
+            mpps.record_create(sop_uid, event.attribute_list)
+        except Exception as exc:  # never kill the association over bookkeeping
+            log.warning("MPPS create failed: %s", exc)
+            return S_CANNOT_UNDERSTAND, None
+        return S_SUCCESS, None
+
+    def handle_mpps_update(self, event):
+        """N-SET: status change of a performed procedure step."""
+        if not mpps.enabled():
+            return S_CANNOT_UNDERSTAND, None
+        sop_uid = str(getattr(event.request, "RequestedSOPInstanceUID", "") or "")
+        if not sop_uid:
+            return S_CANNOT_UNDERSTAND, None
+        try:
+            mpps.record_update(sop_uid, event.attribute_list)
+        except Exception as exc:
+            log.warning("MPPS update failed: %s", exc)
+            return S_CANNOT_UNDERSTAND, None
+        return S_SUCCESS, None
 
     def _record_seen_items(self, merged: list[tuple[Dataset, SourceCfg]]) -> None:
         if not merged:

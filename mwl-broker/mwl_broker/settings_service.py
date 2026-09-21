@@ -66,6 +66,10 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "Also delete local worklist items older than this (0 = only their own validity applies).",
     ),
+    "retention_mpps_days": (
+        "int",
+        "Keep performed procedure steps (MPPS) for this many days (0 = forever).",
+    ),
     "retention_hl7_days": (
         "int",
         "Keep inbound HL7 messages for this many days (0 = forever).",
@@ -227,6 +231,35 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "Interval of the spool retry worker in seconds.",
     ),
+    "mpps_enabled": (
+        "bool",
+        "Accept MPPS (performed procedure step) from the modalities. Without it "
+        "the RIS never learns that an examination was performed.",
+    ),
+    "mpps_forward_enabled": (
+        "bool",
+        "Report the MPPS state back to the RIS as an HL7 message.",
+    ),
+    "mpps_forward_transport": (
+        "enum:mllp,webhook",
+        "How the state goes back: 'mllp' (RIS listens) or 'webhook' (HTTP POST).",
+    ),
+    "mpps_forward_host": (
+        "str",
+        "Host of the RIS that receives the state messages.",
+    ),
+    "mpps_forward_port": (
+        "int",
+        "MLLP port of the RIS (usually 2575).",
+    ),
+    "mpps_forward_url": (
+        "str",
+        "Webhook URL for the state message when the transport is 'webhook'.",
+    ),
+    "mpps_hide_completed": (
+        "bool",
+        "Hide completed steps from the worklist the broker serves.",
+    ),
     "hl7_store_raw": (
         "bool",
         "Keep the raw HL7 message for troubleshooting and replay. The message "
@@ -270,6 +303,7 @@ _INT_RANGES: dict[str, tuple[int, int]] = {
     "retention_query_log_days": (0, 36500),
     "retention_store_log_days": (0, 3650),
     "retention_local_items_days": (0, 3650),
+    "retention_mpps_days": (0, 3650),
     "retention_hl7_days": (0, 3650),
     "retention_spool_days": (0, 3650),
     "retention_config_audit_days": (0, 36500),
@@ -280,6 +314,7 @@ _INT_RANGES: dict[str, tuple[int, int]] = {
     "atna_syslog_port": (1, 65535),
     "atna_queue_max": (100, 1000000),
     "notify_min_interval_s": (0, 86400),
+    "mpps_forward_port": (1, 65535),
     "spool_max_items": (1, 1000000),
     "spool_max_bytes": (1048576, 1099511627776),
     "spool_max_attempts": (1, 1000),

@@ -247,6 +247,12 @@ Token rotieren = nur die Store-Datei neu schreiben:
 - **Lokale Einträge nie mit Patientendaten ins Änderungsprotokoll.** Der
   Audit-Snapshot enthält nur Termindaten; sonst landet PHI im
   Konfigurations-Export. Die Tabelle selbst ist der PHI-Speicher.
+- **MPPS: Zustellung nie im DIMSE-Thread.** N-CREATE/N-SET nehmen an, speichern
+  und melden asynchron (Thread) an das RIS zurück; Fehler werden gezählt und sind
+  über `/api/v1/mpps/forward-pending` erneut auslösbar. Die MPPS-SOP-Klasse wird
+  nur angeboten, wenn `mpps_enabled` — sonst nimmt der Broker Schritte an, die er
+  nicht zurückmelden kann, und das RIS wartet ewig. Fertige Schritte
+  (`mpps_hide_completed`) verschwinden aus der gelieferten Arbeitsliste.
 - **Audit-/Alerting-Zustellung blockiert nie den DICOM-Pfad** (Queue bzw.
   Hintergrund-Thread); ATNA ist opt-in, Fehler werden nur gezählt.
 - **Alerting darf nie blockieren.** Versand läuft auf einem Hintergrund-Thread,
