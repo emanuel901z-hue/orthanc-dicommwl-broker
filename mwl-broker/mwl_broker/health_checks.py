@@ -289,6 +289,55 @@ def config_findings(session, settings) -> list[dict]:
             "'simulate_show_phi' off when the troubleshooting is done.",
         ))
 
+    # ── self-monitoring: the broker watches its own prerequisites ─────────
+    import shutil
+    import time
+
+    if settings_service.get_bool("spool_enabled"):
+        spool_dir = spool.directory()
+        try:
+            # the spool creates its directory on first write; do the same here so
+            # a fresh installation does not look broken
+            spool_dir.mkdir(parents=True, exist_ok=True)
+            usage = shutil.disk_usage(spool_dir)
+            free_gb = usage.free / (1024 ** 3)
+            if free_gb < 1:
+                findings.append(_finding(
+                    "spool_disk_low", "error",
+                    f"Only {free_gb:.1f} GB left on the spool volume — the broker "
+                    "refuses new instances when it runs out.",
+                    details={"path": str(spool_dir), "free_gb": round(free_gb, 2)},
+                ))
+            elif free_gb < 5:
+                findings.append(_finding(
+                    "spool_disk_tight", "warning",
+                    f"Only {free_gb:.1f} GB left on the spool volume.",
+                    details={"path": str(spool_dir), "free_gb": round(free_gb, 2)},
+                ))
+        except OSError as exc:
+            findings.append(_finding(
+                "spool_dir_unusable", "error",
+                f"The spool directory is not usable: {exc}",
+                details={"path": str(spool_dir)},
+            ))
+
+    # database latency: a slow database delays every modality answer
+    try:
+        from sqlalchemy import text as _text
+
+        started = time.monotonic()
+        session.execute(_text("SELECT 1"))
+        latency_ms = int((time.monotonic() - started) * 1000)
+        if latency_ms > 500:
+            findings.append(_finding(
+                "db_slow", "warning",
+                f"The database answers a trivial query in {latency_ms} ms — "
+                "queries to the modalities will be slow as well.",
+                details={"latency_ms": latency_ms},
+            ))
+    except Exception as exc:  # a broken DB is already reported elsewhere
+        log.debug("health check: database latency not measurable: %s", exc)
+
     if settings_service.get_bool("hl7_store_raw"):
         findings.append(_finding(
             "hl7_raw_messages_stored", "warning",
@@ -297,6 +346,9 @@ def config_findings(session, settings) -> list[dict]:
             "still applies).",
         ))
 
+    # sort once more: checks added later (self-monitoring, PHI switches) must not
+    # break the promise that the caller gets findings worst-first
+    findings.sort(key=lambda f: (SEVERITY_ORDER.get(f["severity"], 9), f["code"]))
     return findings
 
 

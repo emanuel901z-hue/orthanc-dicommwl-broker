@@ -349,6 +349,16 @@ class SourceQueryIn(BaseModel):
     patient_id: str = Field(default="", description="Only this patient ID.")
 
 
+class StationsSimulateIn(BaseModel):
+    """Which stations to compare (empty = all that have a rule)."""
+
+    station_aets: list[str] = Field(
+        default_factory=list,
+        description="Station AETs to preview; empty means every station with a rule.",
+        examples=[["CT_01", "MR_01"]],
+    )
+
+
 class SimulateRouteIn(BaseModel):
     """A case to check against the routing rules."""
 
@@ -1124,6 +1134,7 @@ class MppsStatsOut(BaseModel):
 
     total: int = Field(description="Steps stored.")
     by_status: dict = Field(description="Counts per MPPS status.")
+    by_modality: dict = Field(description="Counts per modality — which modality reports nothing?")
     forwarded: int = Field(description="Steps whose state reached the RIS.")
     pending_forward: int = Field(description="Finished steps that were not delivered yet.")
     last_error: str = Field(default="", description="The most recent delivery error.")

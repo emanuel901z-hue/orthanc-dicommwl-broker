@@ -206,17 +206,63 @@ def get_step(step_id: int) -> dict | None:
         return _as_dict(row) if row is not None else None
 
 
+def get_step_by_uid(sop_instance_uid: str) -> dict | None:
+    """One step by its SOP instance UID (used by N-GET)."""
+    with session_factory()() as s:
+        row = s.scalars(
+            select(MppsStep).where(MppsStep.sop_instance_uid == sop_instance_uid)
+        ).first()
+        return _as_dict(row) if row is not None else None
+
+
+def to_dataset(step: dict):
+    """The step as a DICOM dataset — what a modality expects from N-GET."""
+    from pydicom.dataset import Dataset
+
+    ds = Dataset()
+    ds.SOPInstanceUID = step["sop_instance_uid"]
+    ds.PerformedProcedureStepStatus = step["status"]
+    if step.get("performed_procedure_step_id"):
+        ds.PerformedProcedureStepID = step["performed_procedure_step_id"]
+    if step.get("started_at"):
+        started = step["started_at"]
+        ds.PerformedProcedureStepStartDate = started.strftime("%Y%m%d")
+        ds.PerformedProcedureStepStartTime = started.strftime("%H%M%S")
+    if step.get("ended_at"):
+        ended = step["ended_at"]
+        ds.PerformedProcedureStepEndDate = ended.strftime("%Y%m%d")
+        ds.PerformedProcedureStepEndTime = ended.strftime("%H%M%S")
+    if step.get("study_uid"):
+        ds.StudyInstanceUID = step["study_uid"]
+    sps = Dataset()
+    if step.get("accession"):
+        sps.AccessionNumber = step["accession"]
+    if step.get("sps_id"):
+        sps.ScheduledProcedureStepID = step["sps_id"]
+    if step.get("station_aet"):
+        sps.ScheduledStationAETitle = step["station_aet"]
+    if step.get("modality"):
+        sps.Modality = step["modality"]
+    ds.ScheduledStepAttributesSequence = [sps]
+    return ds
+
+
 def stats() -> dict:
     """Counts for the dashboard: how many steps, how many forwarded."""
     with session_factory()() as s:
         rows = s.scalars(select(MppsStep)).all()
     by_status: dict[str, int] = {}
+    by_modality: dict[str, int] = {}
     for row in rows:
         by_status[row.status] = by_status.get(row.status, 0) + 1
+        key = row.modality or "(unbekannt)"
+        by_modality[key] = by_modality.get(key, 0) + 1
     pending = [r for r in rows if not r.forwarded and r.status != STATUS_IN_PROGRESS]
     return {
         "total": len(rows),
         "by_status": by_status,
+        # "which modality reports nothing?" is the operator's question
+        "by_modality": dict(sorted(by_modality.items(), key=lambda kv: -kv[1])),
         "forwarded": sum(1 for r in rows if r.forwarded),
         "pending_forward": len(pending),
         "last_error": next((r.forward_error for r in rows if r.forward_error), ""),

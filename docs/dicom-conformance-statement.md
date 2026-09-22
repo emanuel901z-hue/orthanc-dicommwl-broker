@@ -141,8 +141,11 @@ Angeboten, wenn `mpps_enabled` (Standard an):
 * **N-CREATE** → Schritt mit Status `IN PROGRESS`, Speicherung der Identifier
   (Accession, PatientID, SPS-ID, Station, Modalität, Study-UID) und Zeitstempel.
 * **N-SET** → `COMPLETED` oder `DISCONTINUED`.
-* **N-GET/N-ACTION** werden **nicht** unterstützt (die Modalität liest den
-  Schritt nicht zurück; der Broker ist kein MPPS-Manager).
+* **N-GET** wird unterstützt: die Modalität kann den gespeicherten Schritt
+  zurücklesen (Status, Accession, SPS-ID, Station, Modalität, Zeiten) — manche
+  Geräte prüfen das vor dem Weiterarbeiten.
+* **N-ACTION** wird **nicht** unterstützt (kein MPPS-Manager; der Broker
+  schließt Aufträge nicht selbst).
 * Rückmeldung an das RIS: HL7 `ORU^R01` (Z01/Z02/Z03) über MLLP
   (`mpps_forward_port`, Standard 2575) oder HTTP-Webhook, asynchron, mit
   Wiederholungsmöglichkeit über die API.

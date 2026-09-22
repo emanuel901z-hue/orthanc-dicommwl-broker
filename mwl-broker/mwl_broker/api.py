@@ -47,6 +47,7 @@ from .schemas import (
     SpoolStatsOut,
     StationPreviewOut,
     StationSimulateIn,
+    StationsSimulateIn,
     StationRuleIn,
     StationRuleOut,
     RbacStatusOut,
@@ -1860,6 +1861,44 @@ def simulate_station(
         for r in sources
     ]
     return station_rules.preview(body.station_aet, cfgs)
+
+
+@router.post(
+    "/simulate/stations", tags=["simulation"],
+    summary="Preview several stations at once",
+    description="What would each of these consoles see? Answers the same "
+                "question as `/simulate/station`, but for a list of stations — "
+                "the configuration check before a rollout. Empty list = every "
+                "station that has a rule, plus a wildcard row.",
+    response_description="One entry per station with its rule and visible sources.",
+    responses=_docs(VALIDATION_422),
+)
+def simulate_stations(
+    body: StationsSimulateIn,
+    s: Session = _db_dep,
+):
+    from .upstream import SourceCfg
+
+    rows = s.scalars(
+        select(MwlSource).where(MwlSource.enabled.is_(True)).order_by(MwlSource.priority, MwlSource.id)
+    ).all()
+    cfgs = [
+        SourceCfg(id=r.id, name=r.name, aet=r.aet, host=r.host, port=r.port,
+                  calling_aet=r.calling_aet, charset=r.charset, timeout_s=r.timeout_s,
+                  priority=r.priority, tls=r.tls, tls_verify=r.tls_verify)
+        for r in rows
+    ]
+
+    wanted = [a.strip().upper() for a in body.station_aets if a.strip()]
+    if not wanted:
+        # every station that has a rule, plus the wildcard fallback
+        rules = s.scalars(select(StationRule).order_by(StationRule.station_aet)).all()
+        wanted = [r.station_aet for r in rules] or ["*"]
+
+    return {
+        "stations": [station_rules.preview(aet, cfgs) for aet in wanted],
+        "source_count": len(cfgs),
+    }
 
 
 @router.post(

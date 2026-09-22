@@ -575,7 +575,10 @@ def test_deleting_a_target_removes_dependent_configuration(client):
     assert client.get("/api/v1/transforms").json() == []
 
 
-def test_health_config_endpoint_reports_findings(client):
+def test_health_config_endpoint_reports_findings(client, tmp_path):
+    # a properly configured stack: spool directory writable, so the only finding
+    # left is the empty AET allowlist (info)
+    settings_service.set_value("spool_dir", str(tmp_path / "spool"))
     # nothing configured → the missing default target is an error
     body = client.get("/api/v1/health/config").json()
     codes = {f["code"] for f in body["findings"]}

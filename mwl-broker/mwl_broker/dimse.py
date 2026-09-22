@@ -42,6 +42,7 @@ S_SUCCESS = 0x0000
 S_PENDING = 0xFF00
 S_OUT_OF_RESOURCES = 0xA700
 S_CANNOT_UNDERSTAND = 0xC000
+S_NOT_FOUND = 0x0112
 
 
 class BrokerSCP:
@@ -74,6 +75,7 @@ class BrokerSCP:
             (evt.EVT_C_STORE, self.handle_store),
             (evt.EVT_N_CREATE, self.handle_mpps_create),
             (evt.EVT_N_SET, self.handle_mpps_update),
+            (evt.EVT_N_GET, self.handle_mpps_get),
         ]
         self.server = self.ae.start_server(
             ("0.0.0.0", self.settings.dicom_port),
@@ -346,6 +348,20 @@ class BrokerSCP:
             log.warning("MPPS update failed: %s", exc)
             return S_CANNOT_UNDERSTAND, None
         return S_SUCCESS, None
+
+    def handle_mpps_get(self, event):
+        """N-GET: a modality reads back its performed procedure step.
+
+        Some modalities verify what the broker stored (status, identifiers)
+        before they continue — without N-GET they cannot.
+        """
+        if not mpps.enabled():
+            return S_CANNOT_UNDERSTAND, None
+        sop_uid = str(getattr(event.request, "RequestedSOPInstanceUID", "") or "")
+        step = mpps.get_step_by_uid(sop_uid)
+        if step is None:
+            return S_NOT_FOUND, None
+        return S_SUCCESS, mpps.to_dataset(step)
 
     def _record_seen_items(self, merged: list[tuple[Dataset, SourceCfg]]) -> None:
         if not merged:

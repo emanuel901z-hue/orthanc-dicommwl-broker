@@ -28,8 +28,8 @@ UPS-RS-Subset). Dieses Dokument plant, was danach sinnvoll ist — getrennt nach
 | F3 | **UPS-RS vervollständigen**: Subscriptions/WebSocket-Events, vollständiger Attributsatz, Suche über Upstream | Für Clients, die den Standard voll ausreizen; heute bewusst als Grenze dokumentiert | groß |
 | F4 | **Voraufnahmen-Prefetch** (relevante Voruntersuchungen auf Anforderung ziehen) | Radiologen brauchen Voraufnahmen am Befundplatz; heute Aufgabe von PACS/VNA | groß (eigenes Werkzeug) |
 | F5 | **Tag-Morphing über Felder hinaus**: Sequenz-Operationen, Private Tags, Encoding-Transkodierung | Für Häuser mit exotischen Empfängern | mittel |
-| F6 | **MPPS N-GET** (Status zurücklesen) und MPPS-Statistik je Modalität | Betreiber fragen „welche Modalität meldet nicht?" | klein |
-| F7 | **Arbeitslisten-Vorschau für mehrere Stationen gleichzeitig** (Matrix „welche Konsole sieht was") | Konfigurationsprüfung vor dem Rollout | klein |
+| F6 | ~~MPPS N-GET (Status zurücklesen) und MPPS-Statistik je Modalität~~ — **erledigt**: N-GET über echte Assoziation geprüft, `by_modality` in `/mpps/stats` + in der Karte | — | ✅ |
+| F7 | ~~Arbeitslisten-Vorschau für mehrere Stationen gleichzeitig~~ — **erledigt**: `POST /simulate/stations` + Matrix-Karte (sichtbare/verborgene Quellen je Station, Warnung bei leerer Liste) | — | ✅ |
 
 ## 3. Betriebliche Kandidaten
 
@@ -40,7 +40,7 @@ UPS-RS-Subset). Dieses Dokument plant, was danach sinnvoll ist — getrennt nach
 | B3 | ~~Betriebshandbuch/Runbook~~ — **erledigt**: [`runbook.md`](runbook.md) („was tun, wenn …“ mit echten Befehlen, Eskalationsgrenzen, Update-Ablauf) | — | ✅ |
 | B4 | ~~Monitoring-Vorlage~~ — **erledigt**: `deploy/monitoring/prometheus-rules.yml` (17 Regeln) + `grafana-dashboard.json` (14 Panels), durch `test_monitoring_config.py` an die echten Metriknamen gebunden | — | ✅ |
 | B5 | **Lasttest** (100+ Modalitäten, 20 000 Spool-Einträge, 100 000 Cache-Einträge) mit dokumentierten Grenzwerten | Belegt die Dimensionierung für die Beschaffung | mittel |
-| B6 | **Selbstüberwachung**: Broker prüft seine eigene DB/Spool-Platte und meldet es über die Alarmierung | „Platte voll" fällt heute erst beim Schreiben auf | klein |
+| B6 | ~~Selbstüberwachung~~ — **erledigt**: Health-Findings `spool_disk_low`/`spool_disk_tight`/`spool_dir_unusable`/`db_slow` + Alarmregel | — | ✅ |
 
 ## 4. Beschaffung und Compliance
 
@@ -54,7 +54,7 @@ UPS-RS-Subset). Dieses Dokument plant, was danach sinnvoll ist — getrennt nach
 ## 5. Empfohlene Reihenfolge
 
 1. ~~**B2 + B3 + B4** (klein, sofort nutzbar: Backup, Runbook, Alarme)~~ — **erledigt**.
-2. **F6 + F7 + B6** (klein): schnell sichtbarer Nutzen für Betreiber — als Nächstes.
+2. ~~**F6 + F7 + B6** (klein): schnell sichtbarer Nutzen für Betreiber~~ — **erledigt**.
 3. **F1 (MRN-Merge)** — die größte verbleibende funktionale Lücke gegenüber
    kommerziellen Produkten.
 4. **C2 + C3** — Vorbereitung der Beschaffung, auf den vorhandenen Tests.
