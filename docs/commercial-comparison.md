@@ -99,7 +99,7 @@ Verifikation (`./ci-local.sh`) und einem Commit — ohne Regression.
 |---|---|---|
 | 1 | **MPPS SCP + Status-Rückmeldung** — N-CREATE/N-SET annehmen, Schritt speichern, Status als HL7 an das RIS zurückmelden (MLLP oder Webhook), API + UI + Tests | ✅ **erledigt** |
 | 2 | **Feldweiser Merge + Mapping-Vorlagen** — je DICOM-Feld die Quelle bestimmen; HL7→DICOM-Mapping sichtbar und änderbar | ✅ **erledigt** |
-| 3 | **DICOM Conformance Statement + IHE-Aussage** — Dokumente plus ein Test, der Dokument und Code zusammenhält | ⏳ geplant |
+| 3 | **DICOM Conformance Statement + IHE-Aussage** — Dokumente plus ein Test, der Dokument und Code zusammenhält | ✅ **erledigt** |
 | 4 | **Statistik/Reporting** — Kennzahlen je Quelle/Modalität/Station und Tagesreihe, API + UI | ⏳ geplant |
 | 5 | **UPS-RS** — DICOMweb-Worklist (Suche, Abruf, Anlegen, Statuswechsel) auf derselben Aggregation | ⏳ geplant |
 
@@ -136,12 +136,18 @@ C-FIND-Antwort**, inaktive Zuordnung, fehlendes Feld, Validierung),
 `MergeRulesCard.test.tsx` (6), `Hl7MappingCard.test.tsx` (6), Migrationen
 `0009_merge_rules`/`0010_hl7_field_map`/`0011_local_extra`.
 
-### Sprint 3 — Conformance Statement und IHE-Aussage (⏳ geplant)
+### Sprint 3 — Conformance Statement und IHE-Aussage (✅ erledigt)
 
 `docs/dicom-conformance-statement.md` (SOP-Klassen, Rollen, Transfer-Syntaxen,
 Zeichensätze, Ports, Timeouts, Grenzen, TLS) und `docs/ihe-profile-statement.md`
 (SWF/PIR-Bezug, abgedeckt vs. nicht abgedeckt). Ein Test prüft das Dokument
 gegen den Code (SOP-Klassen aus `dimse.py`, AETs und Ports aus den Settings).
+
+**Nachweis:** `tests/test_conformance_docs.py` (9 Tests: SOP-Klassen, Transfer-
+Syntaxen inkl. Keyword, Storage-Anzahl, AET/Ports/Grenzwerte gegen die Settings,
+Spool-Verhalten, „nicht unterstützt"-Liste gegen die Handler, MPPS-Schalter,
+IHE-Profile). Der Test hat sofort zwei echte Abweichungen gefunden (Anzahl der
+Storage-Klassen 117 → 120, Transfer-Syntaxen ohne Keyword).
 
 ### Sprint 4 — Statistik und Reporting (⏳ geplant)
 

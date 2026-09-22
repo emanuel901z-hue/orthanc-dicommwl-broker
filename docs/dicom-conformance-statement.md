@@ -1,0 +1,181 @@
+# DICOM Conformance Statement — MWL Broker
+
+Software: `mwl-broker` (dieser Repository-Stand), Version siehe
+`mwl-broker/pyproject.toml` · Bibliothek: pynetdicom 3.0.4 / pydicom
+Stand: 22.09.2026
+
+Dieses Dokument beschreibt, welche DICOM-Dienste der Broker anbietet und nutzt.
+Es ist die Grundlage für jede Ausschreibung und für die Abnahme mit den
+Modalitäten-Herstellern. Die Angaben sind **aus dem Code geprüft** —
+`tests/test_conformance_docs.py` hält Dokument und Implementierung zusammen.
+
+## 1. Rollen im Überblick
+
+| Dienst | Rolle | Wann |
+|---|---|---|
+| Modality Worklist C-FIND | **SCP** (Server) | immer — die Modalitäten fragen hier |
+| Verification (C-ECHO) | **SCP** | immer |
+| Storage (C-STORE) | **SCP** | immer — Bilder für das Store-Routing |
+| Modality Performed Procedure Step (MPPS) | **SCP** (N-CREATE, N-SET) | wenn `mpps_enabled` (Standard: an) |
+| Modality Worklist C-FIND | **SCU** (Client) | zu jeder konfigurierten Upstream-Quelle |
+| Verification (C-ECHO) | **SCU** | Überwachung der Quellen/Ziele, „C-ECHO jetzt" |
+| Storage (C-STORE) | **SCU** | Weiterleitung an die konfigurierten PACS-Ziele |
+
+Der Broker ist **kein** Archiv: er speichert keine Bilder dauerhaft (nur den
+Sendepuffer bis zur Zustellung).
+
+## 2. Application Entities und Netzwerk
+
+| Parameter | Wert (Standard) | Einstellung |
+|---|---|---|
+| AET des Brokers | `MWLBROKER` | `BROKER_AET` / `broker_aet` |
+| Port (Klartext) | `11113` | `BROKER_DICOM_PORT` / `dicom_port` |
+| Port (TLS, optional) | `2762` | `tls_inbound_port`, nur bei `tls_inbound_enabled` |
+| Maximale Assoziationen | `20` | `max_associations` |
+| Antwort-AET (SCU) | konfigurierbar je Quelle (`calling_aet`) | Quelle/Ziel |
+| Erlaubte Calling-AETs | leer = alle | `allowed_calling_aets` (empfohlen: einschränken) |
+
+Der Broker bietet **keinen** „Requested Application Entity"-Filter an: die
+Prüfung erfolgt über die **Calling**-AET (`allowed_calling_aets`). Ist die Liste
+leer, wird jede Calling-AET akzeptiert (Werkseinstellung, im Health-Panel als
+Hinweis gemeldet).
+
+Transport: TCP/IP v4. TLS optional und pro Richtung getrennt (siehe §6).
+
+## 3. Presentation Contexts
+
+Angeboten (SCP) werden die Transfer-Syntaxen, die pynetdicom für die
+registrierten Kontexte vorschlägt:
+
+| Transfer Syntax | UID | Keyword (pynetdicom) |
+|---|---|---|
+| Implicit VR Little Endian | 1.2.840.10008.1.2 | `ImplicitVRLittleEndian` |
+| Explicit VR Little Endian | 1.2.840.10008.1.2.1 | `ExplicitVRLittleEndian` |
+| Explicit VR Big Endian | 1.2.840.10008.1.2.2 | `ExplicitVRBigEndian` |
+| Deflated Explicit VR Little Endian | 1.2.840.10008.1.2.1.99 | `DeflatedExplicitVRLittleEndian` |
+
+Angefragt (SCU) wird **Implicit VR Little Endian** für C-FIND und C-ECHO; für
+C-STORE wird die Transfer-Syntax des empfangenen Objekts beibehalten (keine
+Transkodierung — der Broker ändert keine Pixel).
+
+### SOP-Klassen
+
+| Dienst | SOP-Klasse | UID |
+|---|---|---|
+| MWL C-FIND (SCP/SCU) | Modality Worklist Information Model – FIND | 1.2.840.10008.5.1.4.31 |
+| Verification (SCP/SCU) | Verification SOP Class | 1.2.840.10008.1.1 |
+| Storage (SCP/SCU) | Storage Service Class — **120** SOP-Klassen | siehe Anhang A |
+| MPPS (SCP, N-CREATE/N-SET) | Modality Performed Procedure Step | 1.2.840.10008.3.1.2.3.3 |
+
+**Anhang A — Storage-SOP-Klassen:** Der Broker akzeptiert alle Storage-Klassen,
+die pynetdicom auflistet (120 Klassen: CT, MR, US, CR/DX, NM, PT, XA, SR, PR,
+SEG, RT-*, Waveforms, Secondary Capture, Encapsulated PDF/CDA, …). Eine
+vollständige Liste liefert
+`python3 -c "from pynetdicom import StoragePresentationContexts; print(sorted({c.abstract_syntax.name for c in StoragePresentationContexts}))"`.
+
+## 4. C-FIND (Modality Worklist) — Verhalten
+
+**Anfrage (SCP):** Der Broker nimmt den Identifier an und wertet die üblichen
+Matching-Schlüssel aus (AccessionNumber, PatientID, StudyInstanceUID,
+Modality, ScheduledStationAETitle, SPS-Datum/-Zeit, RequestedProcedureID,
+ScheduledProcedureStepID). Nicht unterstützte Schlüssel werden ignoriert
+(kein Fehler).
+
+**Antwortaufbau:** Fan-out an alle aktiven Quellen (parallel, Timeout je Quelle
+`upstream_timeout_s`, Standard 10 s) → Merge nach Priorität → Dedupe über
+`(PatientID, AccessionNumber, ScheduledProcedureStepID)` → Feldregeln
+(`merge_rules`) → Stationsregeln (Prioritäts-Override und Sichtbarkeitsfilter)
+→ Ausblenden fertiger MPPS-Schritte.
+
+**Status-Codes:** `0xFF00` je Antwort, `0x0000` am Ende, `0xA700` bei nicht
+erlaubter Calling-AET, `0xC000` bei unverständlicher Anfrage.
+
+**Verhalten bei Störungen:** Eine tote Quelle verzögert die Antwort nicht
+(Timeout je Quelle, parallele Abfrage). Ein offener Circuit Breaker
+(`breaker_fail_threshold` = 3 Fehler, `breaker_open_seconds` = 60 s) überspringt
+die Quelle ganz. Ist ein Cache-Snapshot vorhanden (`cache_enabled`), wird er
+geliefert (max. `cache_stale_max_s` = 120 s nach der letzten erfolgreichen
+Abfrage) und der Eintrag im Protokoll als „stale" markiert.
+
+**Antwortumfang:** Der Broker streamt Antworten (kein vollständiger Puffer im
+Speicher), begrenzt aber den Cache je Quelle auf `cache_max_items` = 5000
+Einträge.
+
+## 5. C-STORE (Store-Routing) — Verhalten
+
+Eingehende Objekte werden anhand der Worklist-Herkunft geroutet
+(`seen_items`: Accession → Quelle → Regel → Ziel). Ohne Treffer gilt das
+Standardziel; ohne Standardziel wird das Objekt **abgewiesen** (kein stilles
+Verwerfen). Optional werden Modify-Regeln (Tag-Änderungen) angewendet.
+
+Kann ein Ziel nicht erreicht werden, wird das Objekt gepuffert
+(`spool_enabled`, Standard an): maximal `spool_max_items` = 20 000 Objekte bzw.
+`spool_max_bytes` = 10 GiB, danach **Abweisung** (nie stilles Verwerfen),
+`spool_max_attempts` = 10 Versuche mit exponentiellem Backoff
+(`spool_backoff_s` = 60 s Basis). Bei `strict_store_status` (Standard an) wird
+der Zustellfehler der Modalität als DIMSE-Fehler gemeldet; bei
+`accept_when_queued` (Standard an) gilt ein sicher gepuffertes Objekt als
+angenommen.
+
+## 6. Sicherheit (TLS, mTLS)
+
+| Richtung | Einstellungen | Standard |
+|---|---|---|
+| Eingehend (Modalitäten → Broker) | `tls_inbound_enabled`, `tls_inbound_port`, Zertifikat/Schlüssel/CA, `tls_inbound_client_auth` (`none`/`optional`/`required`) | **aus** (Klartext-Port bleibt parallel nutzbar) |
+| Ausgehend (Broker → RIS/PACS) | je Knoten `tls`, `tls_verify`, global `tls_outbound_ca_file`, optionales Client-Zertifikat | `tls` aus, `tls_verify` an |
+
+Die Zertifikatsprüfung erfolgt über den Server-Namen (hostname checking); ein
+Abschalten von `tls_verify` wird im Health-Panel als Warnung geführt. Private
+Schlüssel werden nie über die API ausgegeben und mit Modus 0600 abgelegt.
+
+## 7. Zeichensätze
+
+Je Quelle konfigurierbar (`charset`, Standard `ISO_IR 100` = Latin-1). Der Broker
+setzt `SpecificCharacterSet` in den Antworten und übernimmt den Zeichensatz der
+Quelle; UTF-8 (`ISO_IR 192`) wird unterstützt, wenn die Quelle ihn verwendet.
+
+## 8. MPPS (Modality Performed Procedure Step)
+
+Angeboten, wenn `mpps_enabled` (Standard an):
+
+* **N-CREATE** → Schritt mit Status `IN PROGRESS`, Speicherung der Identifier
+  (Accession, PatientID, SPS-ID, Station, Modalität, Study-UID) und Zeitstempel.
+* **N-SET** → `COMPLETED` oder `DISCONTINUED`.
+* **N-GET/N-ACTION** werden **nicht** unterstützt (die Modalität liest den
+  Schritt nicht zurück; der Broker ist kein MPPS-Manager).
+* Rückmeldung an das RIS: HL7 `ORU^R01` (Z01/Z02/Z03) über MLLP
+  (`mpps_forward_port`, Standard 2575) oder HTTP-Webhook, asynchron, mit
+  Wiederholungsmöglichkeit über die API.
+* Fertige Schritte verschwinden aus der Worklist (`mpps_hide_completed`).
+
+## 9. Nicht unterstützt (bewusste Grenzen)
+
+| Dienst | Status | Begründung |
+|---|---|---|
+| UPS / UPS-RS (Unified Procedure Step, DICOMweb) | **nicht** (geplant) | Moderne Alternative zur MWL; die aktuelle Versorgung nutzt MWL |
+| C-MOVE / C-GET (Query/Retrieve) | nicht | Der Broker verteilt Bilder per C-STORE, nicht per Retrieve |
+| Storage Commitment (N-ACTION) | nicht | Aufgabe des Archivs/PACS |
+| Basic Study Content Notification | nicht | Aufgabe des PACS |
+| N-EVENT-REPORT / N-ACTION allgemein | nicht | keine Empfänger-Rolle implementiert |
+| General Purpose Worklist | nicht | 2011 zurückgezogen |
+| Print Management | nicht | kein Druckdienst |
+| Transkodierung / Pixel-Manipulation | nicht | Der Broker ändert keine Bilddaten |
+| De-Identifikation (PS3.15) | nicht | gehört in einen Router mit Pseudonym-Verwaltung |
+| Prefetch von Voraufnahmen | nicht | Aufgabe von PACS/VNA |
+
+## 10. Grenzen und Betriebswerte
+
+| Größe | Wert | Einstellung |
+|---|---|---|
+| Antwort-Timeout je Quelle | 10 s | `upstream_timeout_s` |
+| C-ECHO-Intervall (Überwachung) | 30 s | `echo_interval_s` |
+| Circuit Breaker | 3 Fehler / 60 s | `breaker_fail_threshold`, `breaker_open_seconds` |
+| Cache je Quelle | 5000 Einträge, 120 s stale | `cache_max_items`, `cache_stale_max_s` |
+| Spool | 20 000 Objekte / 10 GiB / 10 Versuche | `spool_max_items`, `spool_max_bytes`, `spool_max_attempts` |
+| Assoziationen | 20 gleichzeitig | `max_associations` |
+| HL7 MLLP (eingehend) | 2575 | `hl7_mllp_port` |
+| ATNA (Syslog/TLS) | 6514 | `atna_syslog_port` |
+
+## 11. Konformität zu den IHE-Profilen
+
+Siehe [`ihe-profile-statement.md`](ihe-profile-statement.md).

@@ -134,6 +134,11 @@ und eine PR-Vorlage) liegen fertig in
 
 ## API-Dokumentation
 
+Für Ausschreibungen und die Abnahme mit Modalitäten-Herstellern:
+[DICOM Conformance Statement](docs/dicom-conformance-statement.md) und
+[IHE-Profil-Aussage](docs/ihe-profile-statement.md) — beide durch einen Test an
+den Code gebunden.
+
 Der Vergleich mit kommerziellen MWL-Brokern (Funktionslücken, priorisierte
 Sprints) steht in [`docs/commercial-comparison.md`](docs/commercial-comparison.md).
 
