@@ -72,6 +72,7 @@ from .schemas import (
     SettingUpdateIn,
     SourceIn,
     SourceOut,
+    StatsOut,
     StatusOut,
     StoreLogOut,
     TargetIn,
@@ -96,7 +97,7 @@ from .schemas import (
     Hl7FieldMapOut,
 )
 from . import (atna, audit, breaker, cache, config_io, health_checks, hl7, hl7_mapping,
-               merge_rules, mpps,
+               merge_rules, mpps, stats,
                local_worklist, metrics, notify, rbac, retention, settings_service,
                simulate, spool, station_rules, tls, transforms)
 from .models import (BrokerSetting, ConfigAudit, Hl7Message, LocalWorklistItem,
@@ -2016,6 +2017,24 @@ def health_config(s: Session = _db_dep):
 
     findings = health_checks.config_findings(s, get_settings())
     return {"findings": findings, "summary": health_checks.summary(findings)}
+
+
+@router.get(
+    "/stats/overview", response_model=StatsOut, tags=["monitoring"],
+    summary="Reporting overview",
+    description="How busy the broker was and where it hurt: queries, answers, "
+                "forwarded instances, failures, MPPS and spool state — broken down "
+                "by source, modality or station, plus a daily series. Everything is "
+                "derived from the existing logs and stays PHI-free.",
+    response_description="Totals, breakdown and daily series for the period.",
+    responses=_docs(VALIDATION_422),
+)
+def stats_overview(
+    days: int = Query(default=7, ge=1, le=366, description="Length of the period in days."),
+    group_by: str = Query(default="source", pattern="^(source|modality|station)$",
+                          description="Breakdown dimension: source, modality or station."),
+):
+    return stats.overview(days=days, group_by=group_by)
 
 
 @router.get(

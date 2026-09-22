@@ -1,6 +1,7 @@
 """DB engine/session factory — lazy so tests can override DATABASE_URL
 via BROKER_DATABASE_URL before first use."""
 import logging
+import os
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, select, text
@@ -19,7 +20,19 @@ def get_engine():
     global _engine
     if _engine is None:
         url = get_settings().database_url
-        _engine = create_engine(url, pool_pre_ping=True)
+        # A hospital stack runs several background workers (echo loop, spool,
+        # retention, ATNA, MPPS forwarding) next to the DIMSE handlers and the
+        # API. The default pool (5 + 10 overflow) runs out under load and then
+        # answers 500 on a plain read — size it explicitly.
+        pool_args: dict = {"pool_pre_ping": True}
+        if ":memory:" not in url:
+            pool_args.update(
+                pool_size=int(os.getenv("BROKER_DB_POOL_SIZE", "10")),
+                max_overflow=int(os.getenv("BROKER_DB_MAX_OVERFLOW", "20")),
+                pool_timeout=int(os.getenv("BROKER_DB_POOL_TIMEOUT", "15")),
+                pool_recycle=1800,
+            )
+        _engine = create_engine(url, **pool_args)
         if url.startswith("sqlite"):
             # SQLite disables FK enforcement by default; production runs on
             # Postgres, so tests must fail the same way when a delete would
@@ -85,6 +98,23 @@ def upgrade_schema(engine=None) -> None:
                      BASELINE_REVISION)
             command.stamp(cfg, BASELINE_REVISION)
         command.upgrade(cfg, "head")
+
+    # Fail fast when the image and its migrations do not match.
+    #
+    # Without this check the app starts happily on an old schema and then answers
+    # 500 on every endpoint that touches the new column — a hospital notices that
+    # at the modality, hours later. Better to refuse to start with a clear line.
+    from alembic.script import ScriptDirectory
+
+    head = ScriptDirectory.from_config(cfg).get_current_head()
+    with engine.connect() as conn:
+        at = MigrationContext.configure(conn).get_current_revision()
+    if at != head:
+        raise RuntimeError(
+            f"database schema is at revision {at or 'unknown'}, but this build needs "
+            f"{head} — the container image and its migrations do not match. "
+            "Rebuild the image (./build.sh mwl-broker) or restore a matching database.",
+        )
 
 
 def init_db() -> None:

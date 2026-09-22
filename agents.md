@@ -279,6 +279,12 @@ Token rotieren = nur die Store-Datei neu schreiben:
 - **PHI**: `PatientName` niemals in Logs/Metriken/DB-Logs. Erlaubt für
   Matching: AccessionNumber, SPS-ID, StudyInstanceUID. PatientID nur in
   `seen_items` mit Retention.
+- **DB-Pool bewusst dimensionieren.** Der Stack hat mehrere Hintergrund-Worker
+  (Echo-Loop, Spool, Retention, ATNA, MPPS-Zustellung) neben DIMSE-Handlern und
+  API. Der SQLAlchemy-Standard (5 + 10 Overflow) lief unter Last voll und
+  antwortete dann 500 auf einfache Lesezugriffe — deshalb
+  `BROKER_DB_POOL_SIZE` (Default 10), `BROKER_DB_MAX_OVERFLOW` (20),
+  `BROKER_DB_POOL_TIMEOUT` (15 s) und `pool_recycle` (30 min).
 - **DIMSE-Threads**: pynetdicom-Handler laufen in eigenen Threads — kein
   asyncio dort; DB-Zugriff über normale SQLAlchemy-Sessions (pro Aufruf
   öffnen/schließen). FastAPI-Endpunkte sind sync `def` (Threadpool).

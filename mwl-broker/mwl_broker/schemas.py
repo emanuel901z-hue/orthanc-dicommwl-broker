@@ -1183,3 +1183,56 @@ class Hl7FieldMapOut(BaseModel):
     target_tag: str = Field(description="DICOM keyword that is filled.")
     enabled: bool = Field(description="Mapping active?")
     created_at: datetime = Field(description="When the mapping was created.")
+
+
+class StatsTotals(BaseModel):
+    """Totals for the period."""
+
+    days: int = Field(description="Length of the period in days.")
+    from_: str = Field(alias="from", description="Start of the period (ISO).")
+    to: str = Field(description="End of the period (ISO).")
+    queries: int = Field(description="Worklist queries received.")
+    answers: int = Field(description="Worklist entries delivered in total.")
+    queries_failed: int = Field(description="Queries where no source answered.")
+    queries_from_cache: int = Field(description="Queries served (partly) from the cache.")
+    avg_duration_ms: int = Field(description="Average query duration.")
+    stores: int = Field(description="Instances received.")
+    stores_forwarded: int = Field(description="Instances forwarded successfully.")
+    stores_failed: int = Field(description="Instances that could not be forwarded.")
+    stores_unrouted: int = Field(description="Instances without a matching rule or default target.")
+    mpps_steps: int = Field(description="Performed procedure steps received.")
+    mpps_completed: int = Field(description="Steps that finished.")
+    mpps_pending_forward: int = Field(description="Finished steps not reported to the RIS yet.")
+    spool_open: int = Field(description="Instances still waiting in the spool.")
+    spool_dead: int = Field(description="Instances that gave up.")
+
+    model_config = {"populate_by_name": True}
+
+
+class StatsGroup(BaseModel):
+    """One row of the breakdown (per source, modality or station)."""
+
+    name: str = Field(description="Source, modality or station.")
+    queries: int = Field(description="Queries this group took part in.")
+    answers: int = Field(description="Entries this group contributed.")
+    queries_failed: int = Field(description="Times this group could not be reached.")
+    stores: int = Field(description="Instances that came from this source.")
+    stores_failed: int = Field(description="Forwarding failures for this source.")
+
+
+class StatsDay(BaseModel):
+    """One day of the series."""
+
+    day: str = Field(description="Date (ISO).")
+    queries: int = Field(description="Queries that day.")
+    stores: int = Field(description="Instances that day.")
+    mpps: int = Field(description="Performed steps that day.")
+
+
+class StatsOut(BaseModel):
+    """Reporting view: totals, breakdown and daily series."""
+
+    totals: StatsTotals = Field(description="Totals for the period.")
+    groups: list[StatsGroup] = Field(description="Breakdown by the requested dimension.")
+    series: list[StatsDay] = Field(description="Per-day series (gap-free, oldest first).")
+    group_by: str = Field(description="Dimension that was used: source | modality | station.")

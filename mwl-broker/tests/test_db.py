@@ -1,5 +1,6 @@
 """Schema initialisation and the Alembic migration path."""
 import pytest
+import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
 from mwl_broker import db
@@ -142,3 +143,82 @@ def test_spool_settings_ranges(key, value):
     from mwl_broker import settings_service
 
     assert settings_service.validate_value(key, value), f"{key}={value} should be rejected"
+
+
+def test_startup_refuses_an_outdated_schema(client, monkeypatch):
+    """A build whose migrations do not match the database must not start silently.
+
+    Regression guard: an image without the newest revision used to start and then
+    answer 500 on every endpoint touching the new column. The check compares the
+    database revision with the revision the *code* carries — simulated here by
+    pretending the code is one revision ahead.
+    """
+    from alembic.script import ScriptDirectory
+
+    from mwl_broker import db
+    from mwl_broker.db import get_engine
+
+    engine = get_engine()
+    monkeypatch.setattr(ScriptDirectory, "get_current_head",
+                        lambda self: "9999_not_in_this_build")
+
+    with pytest.raises(RuntimeError) as exc:
+        db.upgrade_schema(engine)
+    assert "do not match" in str(exc.value)
+    assert "9999_not_in_this_build" in str(exc.value)
+
+    # with the real head the upgrade passes again (idempotent)
+    monkeypatch.undo()
+    db.upgrade_schema(engine)
+
+
+def test_migrations_cover_every_model_column(tmp_path, monkeypatch):
+    """The migrated schema must match the models — column by column.
+
+    Regression guard for the real bug found on 2026-09-22: `extra_attributes` was
+    added to the model but its migration was never created, so a fresh Postgres
+    instance answered 500 on every endpoint that touched the column while all
+    tests passed (they build their schema with `create_all`, which hides exactly
+    this mistake).
+
+    This test builds a database **only** from the migrations and then compares it
+    with the models.
+    """
+    from alembic import command
+
+    from mwl_broker import db
+
+    url = f"sqlite:///{tmp_path}/migrated.db"
+    monkeypatch.setenv("BROKER_DATABASE_URL", url)
+    db.reset_for_tests()
+
+    cfg = db._alembic_config()
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+
+    # inspect the freshly migrated database explicitly — the settings cache still
+    # points at the test database, which would hide the very mistake we look for
+    engine = sa.create_engine(url)
+    inspector = sa.inspect(engine)
+    migrated_tables = set(inspector.get_table_names())
+
+    # A brand-new *table* is created by `Base.metadata.create_all` at startup, so
+    # it may legitimately be absent from the migrations. What must never happen is
+    # a *column* on an existing table without a revision — exactly the bug above.
+    problems: list[str] = []
+    checked = 0
+    for table_name, table in Base.metadata.tables.items():
+        if table_name not in migrated_tables:
+            continue
+        checked += 1
+        migrated_columns = {col["name"] for col in inspector.get_columns(table_name)}
+        for column in table.columns:
+            if column.name not in migrated_columns:
+                problems.append(f"{table_name}.{column.name} has no migration")
+
+    db.reset_for_tests()
+    # the baseline revision only *stamps* an existing schema (by design), so the
+    # comparison covers the tables the later revisions create — that is where a
+    # forgotten column appears
+    assert checked >= 5, f"only {checked} tables were comparable: {sorted(migrated_tables)}"
+    assert not problems, "migrations do not match the models:\n  " + "\n  ".join(problems)

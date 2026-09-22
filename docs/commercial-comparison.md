@@ -100,7 +100,7 @@ Verifikation (`./ci-local.sh`) und einem Commit — ohne Regression.
 | 1 | **MPPS SCP + Status-Rückmeldung** — N-CREATE/N-SET annehmen, Schritt speichern, Status als HL7 an das RIS zurückmelden (MLLP oder Webhook), API + UI + Tests | ✅ **erledigt** |
 | 2 | **Feldweiser Merge + Mapping-Vorlagen** — je DICOM-Feld die Quelle bestimmen; HL7→DICOM-Mapping sichtbar und änderbar | ✅ **erledigt** |
 | 3 | **DICOM Conformance Statement + IHE-Aussage** — Dokumente plus ein Test, der Dokument und Code zusammenhält | ✅ **erledigt** |
-| 4 | **Statistik/Reporting** — Kennzahlen je Quelle/Modalität/Station und Tagesreihe, API + UI | ⏳ geplant |
+| 4 | **Statistik/Reporting** — Kennzahlen je Quelle/Modalität/Station und Tagesreihe, API + UI | ✅ **erledigt** |
 | 5 | **UPS-RS** — DICOMweb-Worklist (Suche, Abruf, Anlegen, Statuswechsel) auf derselben Aggregation | ⏳ geplant |
 
 ### Sprint 1 — MPPS SCP und Status-Rückmeldung (✅ erledigt)
@@ -149,11 +149,16 @@ Spool-Verhalten, „nicht unterstützt"-Liste gegen die Handler, MPPS-Schalter,
 IHE-Profile). Der Test hat sofort zwei echte Abweichungen gefunden (Anzahl der
 Storage-Klassen 117 → 120, Transfer-Syntaxen ohne Keyword).
 
-### Sprint 4 — Statistik und Reporting (⏳ geplant)
+### Sprint 4 — Statistik und Reporting (✅ erledigt)
 
 `GET /api/v1/stats/overview` liefert Kennzahlen je Quelle, Modalität und Station
 (Abfragen, Antworten, Bilder, Fehler, Spool, Dead Letters, mittlere Dauer) für
 einen Zeitraum, plus eine Tagesreihe; die Oberfläche zeigt Balken und Tabelle.
+
+**Nachweis:** `tests/test_stats.py` (8: Summen, Aufschlüsselung nach Quelle/
+Modalität/Station, lückenfreie Tagesreihe, Zeitraumwahl und Grenzen, Spool-
+Zustand, **PHI-Freiheit** — Patientennamen und Zugangsnummern tauchen nicht auf,
+leerer Zeitraum), `StatsCard.test.tsx` (4).
 
 ### Sprint 5 — UPS-RS (DICOMweb-Worklist) (⏳ geplant)
 

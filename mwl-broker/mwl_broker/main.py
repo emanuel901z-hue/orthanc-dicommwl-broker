@@ -175,6 +175,22 @@ def create_app() -> FastAPI:
             )
         return await call_next(request)
 
+    # Unhandled errors must be diagnosable: FastAPI logs a traceback without the
+    # request, which makes a 500 on a page impossible to attribute in a hospital
+    # deployment. Log path + method + a correlation id before re-raising.
+    @app.exception_handler(Exception)
+    async def unhandled_error(request, exc):
+        correlation = request.headers.get("X-Request-Id", "")[:64]
+        log.exception("unhandled error on %s %s (request-id %s)",
+                      request.method, request.url.path, correlation or "-")
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {"detail": "Internal error — see the broker log (request-id "
+                       f"{correlation or '-'})."},
+            status_code=500,
+        )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],  # dev convenience; tighten behind the reverse proxy
