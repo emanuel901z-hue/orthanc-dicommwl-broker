@@ -40,6 +40,14 @@ Prüfung erfolgt über die **Calling**-AET (`allowed_calling_aets`). Ist die Lis
 leer, wird jede Calling-AET akzeptiert (Werkseinstellung, im Health-Panel als
 Hinweis gemeldet).
 
+**Hochverfügbarkeit ändert diesen Abschnitt nicht.** Auch mit zwei Instanzen
+gibt es **einen** AET und **einen** Port, den die Modalitäten ansprechen; welche
+Instanz dahinter antwortet, entscheidet die Netzwerkebene (schwebende IP,
+TCP-Load-Balancer) — siehe [`ha.md`](ha.md). Beide Instanzen sind funktional
+identisch, teilen Konfiguration und Datenbank und stellen Spool-Einträge genau
+einmal zu (Claim + Lease); die Zustellsemantik ist **at-least-once**, nicht
+exactly-once.
+
 **Oberhalb von `max_associations` wird abgewiesen, nicht gepuffert** — das ist
 gemessen (siehe [`loadtest.md`](loadtest.md) §3.2): bei mehr gleichzeitigen
 Verbindungen als dem Limit antwortet der Broker mit einer

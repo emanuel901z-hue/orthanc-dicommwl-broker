@@ -132,6 +132,12 @@ npm run test && npm run lint
 npx tsc --noEmit -p tsconfig.app.json
 npx vitest run --coverage    # Broker-UI-Coverage (aktuell 98,9 %)
 
+# Hochverfügbarkeit (zweite Instanz auf gemeinsamer DB + Spool-Volume)
+docker compose --profile ha up -d            # broker-a + broker-b
+./deploy/ha-smoke.sh                         # Live-Nachweis: keine Doppelzustellung
+./deploy/ha-smoke.sh --keep                  # danach stehen lassen (--down räumt ab)
+curl -s http://127.0.0.1:18081/api/v1/status | python3 -c "import json,sys; print(json.load(sys.stdin)['instances'])"
+
 # Deep-UI-Audit gegen den laufenden Stack (DOM-Checks + CRUD vs. REST-API,
 # Desktop 1400x900 + Mobile 375x812, Screenshots in e2e/stack/shots/)
 node e2e/stack/verify-ui.cjs
@@ -317,6 +323,25 @@ Token rotieren = nur die Store-Datei neu schreiben:
 - **PHI**: `PatientName` niemals in Logs/Metriken/DB-Logs. Erlaubt für
   Matching: AccessionNumber, SPS-ID, StudyInstanceUID. PatientID nur in
   `seen_items` mit Retention.
+- **Der Spool wird beansprucht, nie einfach gelesen.** `spool.due_items()` sagt
+  nur, was fällig *wäre* — der Worker ruft `claim_items` (atomar,
+  `FOR UPDATE SKIP LOCKED` + Lease aus `spool_lease_s`). Ohne Claim würden zwei
+  Instanzen dieselbe Zeile ziehen und dasselbe Bild zweimal senden. Nach **jedem**
+  Ausgang (Erfolg/Fehler/Dead Letter) den Claim freigeben, sonst bleibt der
+  Eintrag bis zum Lease-Ablauf liegen. Die Zustellsemantik ist bewusst
+  **at-least-once**: ein Absturz zwischen Senden und Zurückschreiben darf ein
+  Duplikat erzeugen, nie ein verlorenes Bild. Siehe `docs/ha.md`.
+- **`forward()` prüft den Besitz gegen den *Aufrufer*, nicht gegen den Prozess.**
+  Wer mit `instance_id="broker-a"` beansprucht hat, muss mit derselben ID
+  weiterreichen (`run_once` tut das) — sonst hält die Instanz ihren eigenen
+  Eintrag für fremd und stellt nichts zu.
+- **Die Instanzidentität ist Konfiguration, nicht Zufall.** `BROKER_INSTANCE_ID`
+  je Instanz setzen; ohne sie wird `hostname:pid` benutzt, und nach einem
+  Neustart ist das ein *anderer* Name (alte Zeile bleibt als „weg" stehen).
+- **Die Broker-Umgebung steht einmal** (`x-broker-environment` in
+  `docker-compose.yml`) und wird von beiden Instanzen geerbt. Änderungen dort
+  gelten für beide — das ist gewollt; neue Einstellungen also dort pflegen, nicht
+  in der zweiten Instanz.
 - **Zeilen, die zwei DIMSE-Threads gleichzeitig anlegen können, per Upsert
   schreiben.** `source_breaker` (Primärschlüssel = Quelle) und
   `worklist_cache` (Unique über Quelle + Dedupe-Schlüssel) wurden per

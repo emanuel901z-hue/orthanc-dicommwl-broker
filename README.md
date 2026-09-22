@@ -80,6 +80,7 @@ die Defaults auf freien Ports:
 | Mock-RIS A / B (demo) | 18114 / 18115 | |
 | Peer-PACS (demo) | 18043 / 14243 | |
 | OHIF Viewer | 18083 | optional (`--profile viewer`), nur `127.0.0.1` — OE3 nutzt `/ohif/` über den Proxy |
+| Broker B (HA) | 18091 / 11123 / 2763 | optional (`--profile ha`), nur `127.0.0.1` — zweite Instanz auf gemeinsamer DB und gemeinsamem Spool-Volume |
 
 ### OHIF-Viewer (optional)
 
@@ -101,6 +102,25 @@ docker compose --profile viewer up -d --build ohif
 Die Viewer-Config liegt in `deploy/ohif-config.js` (ins Image gemountet,
 änderbar ohne Rebuild). Ohne das Profil startet der Stack unverändert —
 `/ohif/` liefert dann nur einen Fehler.
+
+### Hochverfügbarkeit (optional)
+
+Ein einzelner Broker ist ein Single Point of Failure für alle Modalitäten.
+`docker compose --profile ha up -d` startet eine **zweite Instanz**, die sich
+Datenbank und Spool-Volume mit der ersten teilt:
+
+```bash
+docker compose --profile ha up -d
+curl -s http://127.0.0.1:18081/api/v1/status | python3 -m json.tool   # "instances"
+./deploy/ha-smoke.sh          # Live-Nachweis: keine Doppelzustellung
+```
+
+Beide Instanzen dürfen gleichzeitig arbeiten — ein Bild wird trotzdem genau
+**einmal** zugestellt (atomarer Spool-Claim mit Lease, Migration 0014). Was der
+Broker **nicht** kann: seine Adresse verschieben. Die Modalitäten erreichen die
+aktive Instanz über eine schwebende IP oder einen TCP-Load-Balancer
+(Health-Check: `/healthz/ready`). Details, Grenzen und das Runbook-Kapitel:
+[`docs/ha.md`](docs/ha.md).
 
 ### Smoke-Tests
 
@@ -156,7 +176,7 @@ fehlenden Zeile scheitert. Zwei Berührungspunkte sind umgesetzt:
 Der Vergleich mit kommerziellen MWL-Brokern (Funktionslücken, priorisierte
 Sprints) steht in [`docs/commercial-comparison.md`](docs/commercial-comparison.md).
 
-Die Test-Abdeckung (pytest, vitest, Playwright, Chrome-headless-DOM-Audit (142 Checks) und
+Die Test-Abdeckung (pytest, vitest, Playwright, Chrome-headless-DOM-Audit (146 Checks) und
 der Screenshot-Walk über alle Views) ist in
 [`docs/test-coverage-audit.md`](docs/test-coverage-audit.md) dokumentiert.
 
@@ -174,14 +194,14 @@ Parametern und Fehlerantworten (der Vertrag wird per Test erzwungen).
 UI-Härtung aus der DAU-Gap-Analyse, die MFA-Testumgebung und die i18n-Aufräumung.
 Die OpenAPI-Dokumentation ist vollständig (78 Operationen, jede mit Beschreibung,
 Parametern und Fehlerantworten). Aktuelle Zahlen:
-555 Backend-Tests (96 %), 583 Frontend-Tests, 55 Browser-E2E-Tests, 142 Checks
+571 Backend-Tests (96 %), 590 Frontend-Tests, 55 Browser-E2E-Tests, 146 Checks
 im Deep-Audit — alles in `./ci-local.sh` verdrahtet.
 
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 555 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/Nebenläufigkeit)
-cd orthanc-explorer-3-usable && npm run test      # 583 Tests
+cd mwl-broker && python -m pytest tests -q        # 571 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/ADT/Hochverfügbarkeit/Nebenläufigkeit)
+cd orthanc-explorer-3-usable && npm run test      # 590 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):

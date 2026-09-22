@@ -77,12 +77,13 @@ verdrahtet und prüfen Verhalten, nicht Implementierung.
 
 | Ebene | Umfang | Was sie belegt |
 |---|---|---|
-| `pytest` (Backend) | 555 Tests | DIMSE-Verhalten über echte Assoziationen (C-FIND, C-STORE, C-ECHO, MPPS N-CREATE/N-SET/**N-GET**), MLLP über echte Sockets, TLS/mTLS, RBAC, Aufbewahrung, Aggregation/Merge, Patienten-Zusammenführung, Reporting, UPS-RS, Auftragskontext (MADO-Korrelation), ADT-Ereignisse (A08/A24/A40/A47) über REST und MLLP, Nebenläufigkeit (Breaker/Cache unter parallelen Abfragen), Schema-Migrationen |
-| `vitest` (Frontend) | 583 Tests | jede Broker-Seite und -Karte, Fehlerpfade, Berechtigungslogik, IID-Einstiegspunkt (RAD-106) |
-| `verify-ui.cjs` | 142 Checks | jede Seite in Desktop und Mobil: keine Konsolen-/Netzwerkfehler, genau ein `<h1>`, kein Overflow, erwartete Inhalte |
+| `pytest` (Backend) | 571 Tests | DIMSE-Verhalten über echte Assoziationen (C-FIND, C-STORE, C-ECHO, MPPS N-CREATE/N-SET/**N-GET**), MLLP über echte Sockets, TLS/mTLS, RBAC, Aufbewahrung, Aggregation/Merge, Patienten-Zusammenführung, Reporting, UPS-RS, Auftragskontext (MADO-Korrelation), ADT-Ereignisse (A08/A24/A40/A47) über REST und MLLP, Nebenläufigkeit (Breaker/Cache unter parallelen Abfragen), Hochverfügbarkeit (Spool-Claim, Instanz-Heartbeat), Schema-Migrationen |
+| `vitest` (Frontend) | 590 Tests | jede Broker-Seite und -Karte, Fehlerpfade, Berechtigungslogik, IID-Einstiegspunkt (RAD-106) |
+| `verify-ui.cjs` | 146 Checks | jede Seite in Desktop und Mobil: keine Konsolen-/Netzwerkfehler, genau ein `<h1>`, kein Overflow, erwartete Inhalte |
 | `verify-screens.cjs` | 225 Checks + 52 Bilder | jede Ansicht und jeder Dialog, inkl. Rohschlüssel-Erkennung |
 | Playwright | 55 Tests | echte Bedienabläufe gegen den laufenden Stack (Konfiguration, MFA-Reise, Audit/Rollback, Spool) |
 | `backup-roundtrip-test.sh` | 1 Ablauf | Sicherung → Daten zerstören → Wiederherstellung → Daten wieder da |
+| `deploy/ha-smoke.sh` | 9 Prüfungen | zwei Instanzen auf gemeinsamer DB/Volume: jedes Bild genau **einmal** zugestellt ([`ha.md`](ha.md)) |
 | `ci-local.sh` | alle Stages | dass nichts davon kaputt ist, bevor gepusht wird |
 
 **Ablauf für eine Abnahme** (Vorschlag, ohne Zertifizierungsanspruch):
@@ -127,3 +128,19 @@ Nicht durchgeführt und für eine belastbare Aussage nötig:
   laufendem Stack.
 - **Datenschutz-Folgenabschätzung** durch den Betreiber (der Broker ist
   Verarbeitung im Auftrag, nicht Verantwortlicher).
+
+## 7. Bekannte Grenzen der Hochverfügbarkeit
+
+Seit B1 dürfen zwei Broker-Instanzen dieselbe Datenbank und dasselbe
+Spool-Volume teilen ([`ha.md`](ha.md)). Was das **nicht** leistet:
+
+- **At-least-once, nicht exactly-once:** stirbt eine Instanz zwischen dem
+  erfolgreichen Senden und dem Zurückschreiben, wird der Eintrag nach Ablauf der
+  Lease erneut zugestellt — das PACS kann dasselbe Bild zweimal bekommen. Ein
+  Duplikat ist heilbar, ein verlorenes Bild nicht; der Kompromiss ist bewusst.
+- **Kein Fencing:** eine eingefrorene, aber lebende Instanz gibt ihre Lease erst
+  nach Ablauf frei.
+- **Datenbank und Spool-Volume bleiben Single Points of Failure.** Die
+  Verfügbarkeit des Brokers ist nicht die Verfügbarkeit seiner Datenhaltung.
+- **Der Endpunkt wird nicht verschoben:** die Modalitäten erreichen die aktive
+  Instanz über VIP oder Load Balancer — das ist Netzwerk-/Deployment-Aufgabe.

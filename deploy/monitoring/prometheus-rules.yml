@@ -19,6 +19,24 @@ groups:
           description: "Kein Scrape seit 2 Minuten — die Modalitäten bekommen keine Arbeitslisten."
           runbook: "docs/runbook.md#5-der-broker-antwortet-nicht--500er"
 
+      # Hochverfügbarkeit: der Prozess läuft, aber niemand meldet sich mehr.
+      # Das heißt: der Herzschlag-Thread steht oder die Datenbank ist nicht
+      # beschreibbar — beides merkt man sonst erst, wenn eine Instanz ausfällt
+      # und keine zweite übernimmt.
+      - alert: MWLBrokerHeartbeatStale
+        expr: mwl_instances_active == 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Kein Broker-Herzschlag sichtbar"
+          description: "Keine Instanz hat sich innerhalb des Timeouts gemeldet. Läuft der Broker noch? Ist die Datenbank beschreibbar? (docs/ha.md)"
+          runbook: "docs/runbook.md#6b-eine-instanz-ist-weg--umschalten"
+
+      # Mehrere Instanzen bekommen bewusst **keinen** Alarm: in einer
+      # HA-Installation wäre das ein Dauer-Alarm, und Alarmmüdigkeit ist teurer
+      # als die fehlende Zeile. Die Health-Prüfung meldet es als Befund
+      # (`ha_multiple_instances`, in der UI sichtbar), siehe docs/ha.md §5.
+
       - alert: MWLSourceDown
         expr: mwl_echo_up == 0
         for: 5m

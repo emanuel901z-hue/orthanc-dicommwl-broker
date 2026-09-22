@@ -110,6 +110,12 @@ class Settings(BaseSettings):
     spool_backoff_s: int = 60           # base for the exponential retry backoff
     spool_retention_s: int = 86400      # how long a sent entry stays as a duplicate guard
     spool_poll_s: int = 10              # retry worker interval
+    spool_lease_s: int = 300            # HA: how long a claim is held before takeover
+
+    # High availability (several instances on one database) — see docs/ha.md
+    instance_id: str = ""               # empty = hostname:pid (set it per instance)
+    ha_heartbeat_s: int = 10            # how often this instance says "I am here"
+    ha_instance_timeout_s: int = 60     # after this, an instance counts as gone
 
     # Circuit breaker per upstream source (C-FIND fan-out)
     breaker_fail_threshold: int = 3   # consecutive failures before opening

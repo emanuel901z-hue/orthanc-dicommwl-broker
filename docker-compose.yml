@@ -3,6 +3,34 @@
 # Demo services (mock RIS sources, second PACS) live in
 # docker-compose.demo.yml — enable with:
 #   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d
+#
+# High availability: `mwl-broker-b` (profile `ha`) is a second instance that
+# shares database and spool volume with the first one. Both inherit the same
+# environment from the anchor below — that is deliberate: the two instances must
+# be configured identically, they only differ in identity and host ports.
+#   docker compose --profile ha up -d
+# See docs/ha.md.
+x-broker-environment: &broker-environment
+  BROKER_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/mwl
+  BROKER_AET: ${BROKER_AET}
+  BROKER_DICOM_PORT: "11113"
+  BROKER_ECHO_INTERVAL_S: ${BROKER_ECHO_INTERVAL_S}
+  BROKER_UPSTREAM_TIMEOUT_S: ${BROKER_UPSTREAM_TIMEOUT_S}
+  BROKER_ALLOWED_CALLING_AETS: ${BROKER_ALLOWED_CALLING_AETS}
+  BROKER_STRICT_STORE_STATUS: ${BROKER_STRICT_STORE_STATUS}
+  BROKER_SEEN_ITEM_TTL_DAYS: ${BROKER_SEEN_ITEM_TTL_DAYS}
+  BROKER_SEED_CONFIG_JSON: ${BROKER_SEED_CONFIG_JSON}
+  BROKER_SPOOL_DIR: ${BROKER_SPOOL_DIR:-/var/lib/mwl-broker/spool}
+  BROKER_SPOOL_MAX_ITEMS: ${BROKER_SPOOL_MAX_ITEMS:-20000}
+  BROKER_SPOOL_MAX_BYTES: ${BROKER_SPOOL_MAX_BYTES:-10737418240}
+  BROKER_SPOOL_MAX_ATTEMPTS: ${BROKER_SPOOL_MAX_ATTEMPTS:-10}
+  BROKER_SPOOL_BACKOFF_S: ${BROKER_SPOOL_BACKOFF_S:-60}
+  BROKER_SPOOL_RETENTION_S: ${BROKER_SPOOL_RETENTION_S:-86400}
+  BROKER_SPOOL_POLL_S: ${BROKER_SPOOL_POLL_S:-10}
+  BROKER_SPOOL_LEASE_S: ${BROKER_SPOOL_LEASE_S:-300}
+  BROKER_CACHE_STALE_MAX_S: ${BROKER_CACHE_STALE_MAX_S:-120}
+  BROKER_HA_HEARTBEAT_S: ${BROKER_HA_HEARTBEAT_S:-10}
+  BROKER_HA_INSTANCE_TIMEOUT_S: ${BROKER_HA_INSTANCE_TIMEOUT_S:-60}
 services:
 
   # ── Shared Postgres ────────────────────────────────────────────────────────
@@ -72,29 +100,53 @@ services:
       # DICOM TLS listener (off by default; the port is simply unused then)
       - "${BROKER_TLS_PORT:-2762}:2762"
     environment:
-      BROKER_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/mwl
-      BROKER_AET: ${BROKER_AET}
-      BROKER_DICOM_PORT: "11113"
-      BROKER_ECHO_INTERVAL_S: ${BROKER_ECHO_INTERVAL_S}
-      BROKER_UPSTREAM_TIMEOUT_S: ${BROKER_UPSTREAM_TIMEOUT_S}
-      BROKER_ALLOWED_CALLING_AETS: ${BROKER_ALLOWED_CALLING_AETS}
-      BROKER_STRICT_STORE_STATUS: ${BROKER_STRICT_STORE_STATUS}
-      BROKER_SEEN_ITEM_TTL_DAYS: ${BROKER_SEEN_ITEM_TTL_DAYS}
-      BROKER_SEED_CONFIG_JSON: ${BROKER_SEED_CONFIG_JSON}
-      BROKER_SPOOL_DIR: ${BROKER_SPOOL_DIR:-/var/lib/mwl-broker/spool}
-      BROKER_SPOOL_MAX_ITEMS: ${BROKER_SPOOL_MAX_ITEMS:-20000}
-      BROKER_SPOOL_MAX_BYTES: ${BROKER_SPOOL_MAX_BYTES:-10737418240}
-      BROKER_SPOOL_MAX_ATTEMPTS: ${BROKER_SPOOL_MAX_ATTEMPTS:-10}
-      BROKER_SPOOL_BACKOFF_S: ${BROKER_SPOOL_BACKOFF_S:-60}
-      BROKER_SPOOL_RETENTION_S: ${BROKER_SPOOL_RETENTION_S:-86400}
-      BROKER_SPOOL_POLL_S: ${BROKER_SPOOL_POLL_S:-10}
-      BROKER_CACHE_STALE_MAX_S: ${BROKER_CACHE_STALE_MAX_S:-120}
+      <<: *broker-environment
+      BROKER_INSTANCE_ID: ${BROKER_INSTANCE_ID:-broker-a}
     volumes:
       # store and forward: undeliverable instances survive a PACS outage and a
       # container restart — keep this on real storage with enough headroom
       - mwl-spool:/var/lib/mwl-broker/spool
     extra_hosts:
       # lets the broker reach services on the host (e.g. a webhook receiver)
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      orthanc:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ── Second broker instance (high availability) ─────────────────────────────
+  # Started with `docker compose --profile ha up -d`. It shares the database and
+  # the spool volume with the first instance; the spool claim (migration 0014)
+  # makes sure an instance is delivered once, not twice. It does **not** move the
+  # DICOM endpoint — pointing the modalities at the active instance is a
+  # deployment decision (floating IP, TCP load balancer), see docs/ha.md.
+  mwl-broker-b:
+    profiles: ["ha"]
+    build: ./mwl-broker
+    restart: unless-stopped
+    ports:
+      - "${BROKER_B_API_BIND:-127.0.0.1}:${BROKER_B_API_PORT:-18091}:8081"
+      - "${BROKER_B_DICOM_PORT:-11123}:11113"
+      - "${BROKER_B_TLS_PORT:-2763}:2762"
+    environment:
+      <<: *broker-environment
+      BROKER_INSTANCE_ID: ${BROKER_B_INSTANCE_ID:-broker-b}
+    volumes:
+      # the SAME volume as the first instance — that is the point
+      - mwl-spool:/var/lib/mwl-broker/spool
+    extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       postgres:

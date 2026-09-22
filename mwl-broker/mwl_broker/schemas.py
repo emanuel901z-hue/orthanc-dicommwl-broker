@@ -793,6 +793,10 @@ class SpoolStatsOut(BaseModel):
     failed: int = Field(description="Instances whose last attempt failed (retry scheduled).")
     dead: int = Field(description="Instances that gave up — they need operator attention.")
     sent: int = Field(description="Delivered instances still kept as a duplicate guard.")
+    claimed: int = Field(
+        default=0,
+        description="Instances another instance is forwarding right now (high availability).",
+    )
     open: int = Field(description="queued + failed (the actual backlog).")
     bytes: int = Field(description="Bytes held on disk by queued/failed/dead instances.")
     oldest_age_s: int | None = Field(
@@ -985,10 +989,31 @@ class EchoResult(BaseModel):
     )
 
 
+class InstanceOut(BaseModel):
+    """One broker instance that has ever written a heartbeat (HA)."""
+
+    instance_id: str = Field(description="Name of the instance (BROKER_INSTANCE_ID).")
+    started_at: datetime = Field(description="When it first said hello.")
+    last_seen: datetime = Field(description="Last heartbeat.")
+    age_s: int | None = Field(description="Seconds since the last heartbeat (null = never).")
+    active: bool = Field(description="Seen within the heartbeat timeout — it is running.")
+    current: bool = Field(description="True for the instance that answered this request.")
+    version: str = Field(description="Broker version that instance runs.")
+    hostname: str = Field(description="Host it runs on.")
+    pid: int = Field(description="Process ID on that host.")
+
+
 class StatusOut(BaseModel):
     """Aggregated broker status snapshot for dashboards."""
 
     version: str = Field(description="Broker version that is running (which build).")
+    instance_id: str = Field(description="Name of the instance that answered this request.")
+    instances: list[InstanceOut] = Field(
+        description="All known broker instances, newest activity first — "
+                    "more than one active instance means a high-availability "
+                    "deployment (see docs/ha.md).",
+    )
+    instances_active: int = Field(description="Instances seen within the heartbeat timeout.")
     started_at: str = Field(description="ISO timestamp the process started.")
     uptime_s: int = Field(description="Seconds since the process started.")
     scp_listening: bool = Field(description="Whether the DICOM SCP is listening.")

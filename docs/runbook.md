@@ -163,6 +163,35 @@ Prüfen, ob die Sicherheits-Header ankommen:
 curl -sI http://127.0.0.1:18082/oe3/ | grep -i x-content-type-options
 ```
 
+## 6b. „Eine Instanz ist weg / umschalten"
+
+Betrifft nur Installationen mit dem Profil `ha` (zwei Broker-Instanzen, siehe
+[`ha.md`](ha.md)). Symptom: In der Karte **Broker-Instanzen** steht eine Zeile auf
+„weg", oder der Alarm `MWLBrokerHeartbeatStale` feuert.
+
+```bash
+docker compose --profile ha ps                       # läuft die zweite Instanz?
+docker compose --profile ha logs mwl-broker-b | tail -30
+curl -s http://127.0.0.1:18081/api/v1/status | python3 -c "
+import json,sys
+for i in json.load(sys.stdin)['instances']:
+    print(i['instance_id'], 'aktiv' if i['active'] else 'WEG', f\"vor {i['age_s']}s\")"
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18081/healthz/ready   # 200 = kann dienen
+```
+
+| Symptom | Ursache | Maßnahme |
+|---|---|---|
+| Eine Instanz „weg", die andere läuft | Container abgestürzt/neu gestartet | `docker compose --profile ha up -d mwl-broker-b`; der Spool-Claim hat ihre Arbeit nach Ablauf der Lease (`spool_lease_s`) übernommen — **nichts geht verloren**, es kann ein Bild doppelt zugestellt werden (at-least-once) |
+| Beide „weg", Broker antwortet trotzdem | Herzschlag-Thread steht, Datenbank nicht beschreibbar | `docker compose logs mwl-broker \| grep heartbeat`; Datenbank prüfen (`/healthz`) |
+| Nach einem Neustart zwei Zeilen für dieselbe Instanz | `BROKER_INSTANCE_ID` nicht gesetzt → `hostname:pid` ist nach dem Neustart ein anderer Name | In `.env` je Instanz einen **stabilen** Namen setzen; alte Zeilen verschwinden nach `ha_instance_timeout_s` aus „aktiv", endgültig per `forget_stale` (24 h) |
+| Beide aktiv, aber Bilder landen als Dead Letter | **Spool-Volume nicht gemeinsam** | Beide Dienste müssen dasselbe Volume mounten (`mwl-spool`) — siehe `docs/ha.md` §2 |
+| Modalitäten bekommen „association rejected" nach dem Umschalten | Sie zeigen noch auf die alte Instanz | VIP/LB prüfen; `/healthz/ready` als Health-Check konfigurieren |
+
+**Umschalten ist kein Befehl im Broker.** Die Modalitäten erreichen die aktive
+Instanz über die schwebende IP oder den Load Balancer (`docs/ha.md` §4) — der
+Broker kann seine eigene Adresse nicht bewegen. Was er beiträgt: beide Instanzen
+dürfen gleichzeitig arbeiten, ohne ein Bild doppelt zuzustellen.
+
 ## 7. Update auf eine neue Version
 
 ```bash

@@ -250,7 +250,8 @@ def test_run_once_forwards_everything_that_is_due(monkeypatch):
 
     result = spool.run_once()
 
-    assert result == {"attempted": 3, "sent": 3, "failed": 0, "dead": 0}
+    assert result == {"attempted": 3, "sent": 3, "failed": 0, "dead": 0,
+                      "skipped": 0}
     assert spool.stats()["sent"] == 3
     assert spool.stats()["open"] == 0
 

@@ -293,7 +293,8 @@ def scenario_cstore(args) -> dict:
 
     before = api_get(f"{args.api}/api/v1/spool/stats")
     print(f"   spool before: {before['queued']} queued, {before['dead']} dead, "
-          f"budget {before['max_items']} items / {before['max_bytes']} bytes")
+          f"budget {before['capacity']['max_items']} items / "
+          f"{before['capacity']['max_bytes']} bytes")
 
     stop = threading.Event()
     probes = Report("rest during cstore")

@@ -164,4 +164,6 @@ Ehrlich benannt, damit die Zahlen nicht mehr versprechen als sie zeigen:
   Schreibzeit echter Bilder sind nicht enthalten.
 - **Keine Dauerlast** (Minuten bis Stunden) — gemessen wurden Bursts. Für
   Speicher-/Verbindungs-Leaks bräuchte es einen Soak-Test.
-- **Kein HA-Szenario** — dazu fehlt erst das Design (siehe `next-steps.md` §3).
+- **Kein HA-Szenario im Lasttest** — die Nebenläufigkeit zweier Instanzen
+  prüft `deploy/ha-smoke.sh` (Claim, keine Doppelzustellung), aber nicht unter
+  Last. Siehe [`ha.md`](ha.md).

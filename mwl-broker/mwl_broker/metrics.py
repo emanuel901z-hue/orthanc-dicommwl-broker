@@ -73,6 +73,14 @@ SPOOL_FORWARDED = Counter(
 SPOOL_DEAD = Counter(
     "mwl_spool_dead_total", "Instances that gave up (dead letter)", ["target"]
 )
+SPOOL_CLAIMED = Counter(
+    "mwl_spool_claimed_total",
+    "Spool entries this instance claimed before forwarding (HA: one claim per entry)",
+    ["instance"],
+)
+INSTANCES_ACTIVE = Gauge(
+    "mwl_instances_active", "Broker instances seen within the heartbeat timeout"
+)
 CACHE_ENTRIES = Gauge(
     "mwl_cache_entries", "Cached worklist items per source", ["source"]
 )

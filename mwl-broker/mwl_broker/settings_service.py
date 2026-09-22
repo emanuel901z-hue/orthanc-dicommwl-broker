@@ -231,6 +231,26 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "Interval of the spool retry worker in seconds.",
     ),
+    "spool_lease_s": (
+        "int",
+        "How long one instance may hold a claimed spool entry before another may "
+        "take it over. Must exceed the store timeout of the targets.",
+    ),
+    "instance_id": (
+        "str",
+        "Name of this broker instance. Set it when several instances share one "
+        "database (high availability) — the spool claim and the instance list "
+        "use it. Empty = hostname and process id.",
+    ),
+    "ha_heartbeat_s": (
+        "int",
+        "How often this instance writes its heartbeat (seconds).",
+    ),
+    "ha_instance_timeout_s": (
+        "int",
+        "An instance counts as 'gone' when it has not been seen for this long "
+        "(seconds) — three heartbeats is a good value.",
+    ),
     "mpps_enabled": (
         "bool",
         "Accept MPPS (performed procedure step) from the modalities. Without it "
@@ -321,6 +341,9 @@ _INT_RANGES: dict[str, tuple[int, int]] = {
     "spool_backoff_s": (5, 86400),
     "spool_retention_s": (0, 2592000),
     "spool_poll_s": (1, 3600),
+    "spool_lease_s": (30, 86400),
+    "ha_heartbeat_s": (1, 300),
+    "ha_instance_timeout_s": (10, 3600),
     "cache_stale_max_s": (0, 86400),
     "cache_max_items": (1, 100000),
     "breaker_fail_threshold": (1, 100),

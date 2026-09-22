@@ -32,7 +32,7 @@ from pydicom.uid import ExplicitVRLittleEndian
 from pydicom.errors import InvalidDicomError
 from pydicom.filereader import dcmread
 from pydicom.filewriter import dcmwrite
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from . import cstore, metrics, notify, settings_service
 from .db import session_factory
@@ -44,6 +44,8 @@ STATUS_QUEUED = "queued"
 STATUS_SENT = "sent"
 STATUS_FAILED = "failed"
 STATUS_DEAD = "dead"
+# Not a stored status: `forward` returns it when another instance holds the lease.
+STATUS_CLAIMED = "claimed"
 
 OPEN_STATUSES = (STATUS_QUEUED, STATUS_FAILED)
 # Every status that occupies space in the spool budget.
@@ -285,7 +287,12 @@ def is_duplicate(sop_uid: str) -> bool:
 
 
 def due_items(limit: int = 20) -> list[int]:
-    """IDs of spooled instances that should be attempted now."""
+    """IDs of spooled instances that should be attempted now — **without claiming**.
+
+    Diagnostic and test helper: it says what *would* be due. The worker uses
+    `claim_items`, because only a claim makes sure a second instance does not
+    pick the same entry (see `docs/ha.md`).
+    """
     now = _now()
     with session_factory()() as s:
         rows = s.scalars(
@@ -298,21 +305,108 @@ def due_items(limit: int = 20) -> list[int]:
         return list(rows)
 
 
+def lease_seconds() -> int:
+    return settings_service.get_int("spool_lease_s")
+
+
+def claim_items(limit: int = 20, instance_id: str = "",
+                lease_s: int | None = None) -> list[int]:
+    """Take up to `limit` due entries for this instance — atomically.
+
+    `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING id`: the
+    sub-select locks the rows it picked, `SKIP LOCKED` sends a second instance to
+    the *next* rows instead of making it wait. Without this, two instances on one
+    database would both pick the same entry and deliver the same image twice —
+    the reason `spool.due_items` is no longer what the worker calls.
+
+    SQLite has no `FOR UPDATE`, but it serialises writers anyway, so the same
+    statement is safe there (the tests run on SQLite).
+
+    An expired lease is claimable again: that is how a crashed instance's work
+    returns to the pool (at-least-once, never silently lost).
+    """
+    from . import instances
+
+    me = instance_id or instances.instance_id()
+    now = _now()
+    until = now + timedelta(seconds=lease_s or lease_seconds())
+    with session_factory()() as s:
+        subquery = (
+            select(StoreSpool.id)
+            .where(StoreSpool.status.in_(OPEN_STATUSES))
+            .where((StoreSpool.next_attempt_at.is_(None)) | (StoreSpool.next_attempt_at <= now))
+            .where((StoreSpool.lease_until.is_(None)) | (StoreSpool.lease_until <= now))
+            .order_by(StoreSpool.created_at, StoreSpool.id)
+            .limit(limit)
+        )
+        if s.get_bind().dialect.name != "sqlite":
+            subquery = subquery.with_for_update(skip_locked=True)
+        stmt = (
+            update(StoreSpool)
+            .where(StoreSpool.id.in_(subquery))
+            .values(claimed_by=me, lease_until=until)
+            .returning(StoreSpool.id)
+        )
+        claimed = list(s.execute(stmt).scalars().all())
+        s.commit()
+    if claimed:
+        metrics.SPOOL_CLAIMED.labels(instance=me).inc(len(claimed))
+    return claimed
+
+
+def _release(row: StoreSpool) -> None:
+    """Give the entry back to the pool (called on every outcome)."""
+    row.claimed_by = ""
+    row.lease_until = None
+
+
+def _claim_of(row: StoreSpool, instance_id: str = "") -> str:
+    """`''` when this entry is free (or the caller owns it), else the owner.
+
+    `instance_id` must be the one the caller claimed with — comparing against the
+    *process* identity here was a bug: a worker that claimed as "broker-a" then
+    saw its own entry as somebody else's and delivered nothing.
+    """
+    if not row.claimed_by:
+        return ""
+    lease = row.lease_until
+    if lease is not None and lease.tzinfo is None:
+        lease = lease.replace(tzinfo=timezone.utc)
+    if lease is None or lease <= _now():
+        return ""                      # expired: the owner is gone, take it over
+    from . import instances
+
+    me = instance_id or instances.instance_id()
+    return "" if row.claimed_by == me else row.claimed_by
+
+
 def _backoff(attempts: int) -> datetime:
     delay = min(backoff_s() * (2 ** max(0, attempts - 1)), 3600)
     return _now() + timedelta(seconds=delay)
 
 
-def forward(item_id: int) -> str:
-    """Try to forward one spooled instance. Returns the resulting status."""
+def forward(item_id: int, instance_id: str = "") -> str:
+    """Try to forward one spooled instance. Returns the resulting status.
+
+    `instance_id` is the identity this caller claimed with (`run_once` passes its
+    own); empty means "the process identity".
+    """
     with session_factory()() as s:
         row = s.get(StoreSpool, item_id)
         if row is None:
             return "missing"
+        owner = _claim_of(row, instance_id)
+        if owner:
+            # Another instance is working on it (the operator's "retry" and a
+            # second instance both end up here) — leave it alone.
+            log.info("spool: entry %s is claimed by %s — not touching it",
+                     item_id, owner)
+            return STATUS_CLAIMED
         target = cstore.resolve_target(s, row.target_id)
         if target is None:
             row.status = STATUS_DEAD
             row.last_error = "target is missing or disabled"
+            _release(row)
             s.commit()
             metrics.SPOOL_DEAD.labels(target=row.target_name or "none").inc()
             log.error("spool: %s → dead letter (target gone)", row.sop_instance_uid)
@@ -327,6 +421,7 @@ def forward(item_id: int) -> str:
         except FileNotFoundError as exc:
             row.status = STATUS_DEAD
             row.last_error = str(exc)[:512]
+            _release(row)
             s.commit()
             metrics.SPOOL_DEAD.labels(target=target.name).inc()
             log.error("spool: %s → dead letter (%s)", row.sop_instance_uid, exc)
@@ -342,6 +437,7 @@ def forward(item_id: int) -> str:
         except Exception as exc:
             row.attempts += 1
             row.last_error = str(exc)[:512]
+            _release(row)
             if row.attempts >= max_attempts():
                 row.status = STATUS_DEAD
                 metrics.SPOOL_DEAD.labels(target=target.name).inc()
@@ -366,6 +462,7 @@ def forward(item_id: int) -> str:
         row.status = STATUS_SENT
         row.sent_at = _now()
         row.last_error = ""
+        _release(row)
         path = row.payload_path
         row.payload_path = ""
         row.payload_bytes = 0
@@ -379,13 +476,20 @@ def forward(item_id: int) -> str:
     return STATUS_SENT
 
 
-def run_once(limit: int = 20) -> dict:
-    """Process all instances that are due (used by the worker and by tests)."""
+def run_once(limit: int = 20, instance_id: str = "") -> dict:
+    """Claim what is due and forward it (the worker and the tests use this).
+
+    The claim is what makes a second instance safe: without it two instances on
+    one database would deliver the same instance twice (see `docs/ha.md`).
+    """
     if not enabled():
         return {"attempted": 0, "sent": 0, "failed": 0, "dead": 0, "disabled": 1}
-    result = {"attempted": 0, "sent": 0, "failed": 0, "dead": 0}
-    for item_id in due_items(limit):
-        outcome = forward(item_id)
+    result = {"attempted": 0, "sent": 0, "failed": 0, "dead": 0, "skipped": 0}
+    for item_id in claim_items(limit, instance_id=instance_id):
+        outcome = forward(item_id, instance_id=instance_id)
+        if outcome == STATUS_CLAIMED:
+            result["skipped"] += 1
+            continue
         result["attempted"] += 1
         if outcome == STATUS_SENT:
             result["sent"] += 1
@@ -440,6 +544,8 @@ def retry(item_id: int) -> bool:
         row.status = STATUS_QUEUED
         row.next_attempt_at = _now()
         row.attempts = 0
+        # the operator's retry must not be blocked by a stale lease
+        _release(row)
         s.commit()
     log.info("spool: entry %s re-queued by the operator", item_id)
     return True
@@ -455,6 +561,7 @@ def retry_all() -> int:
             row.status = STATUS_QUEUED
             row.attempts = 0
             row.next_attempt_at = _now()
+            _release(row)
         s.commit()
         count = len(rows)
     if count:
@@ -512,6 +619,14 @@ def stats() -> dict:
         oldest = s.scalar(
             select(func.min(StoreSpool.created_at)).where(StoreSpool.status.in_(HELD_STATUSES))
         )
+        # entries another instance is working on right now (live lease)
+        claimed = s.scalar(
+            select(func.count(StoreSpool.id))
+            .where(StoreSpool.status.in_(OPEN_STATUSES))
+            .where(StoreSpool.claimed_by != "")
+            .where(StoreSpool.lease_until.is_not(None))
+            .where(StoreSpool.lease_until > _now())
+        )
     oldest = _as_aware(oldest)
     cap = capacity()
     return {
@@ -519,6 +634,7 @@ def stats() -> dict:
         "failed": counts.get(STATUS_FAILED, 0),
         "dead": counts.get(STATUS_DEAD, 0),
         "sent": counts.get(STATUS_SENT, 0),
+        "claimed": int(claimed or 0),
         "open": counts.get(STATUS_QUEUED, 0) + counts.get(STATUS_FAILED, 0),
         "bytes": sum(sizes.get(status, 0) for status in HELD_STATUSES),
         "oldest_age_s": int((now - oldest).total_seconds()) if oldest is not None else None,

@@ -262,6 +262,12 @@ class StoreSpool(Base):
     `target_id` is a plain integer (no FK): an instance must never be dropped
     because somebody deleted a target — a missing target turns the entry into a
     dead letter, which the operator sees and can retry or discard.
+
+    `claimed_by`/`lease_until` are the high-availability guard: with a second
+    broker instance on the same database, a worker **claims** an entry for a
+    bounded lease before forwarding it, so two instances cannot deliver the same
+    instance twice. An expired lease means the claiming instance died — the entry
+    becomes available again (at-least-once, never silently lost).
     """
 
     __tablename__ = "store_spool"
@@ -281,9 +287,37 @@ class StoreSpool(Base):
     next_attempt_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    # which broker instance holds this entry, and until when (empty/None = free)
+    claimed_by: Mapped[str] = mapped_column(String(64), default="", index=True)
+    lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     last_error: Mapped[str] = mapped_column(String(512), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BrokerInstance(Base):
+    """One running broker process — the heartbeat that makes HA visible.
+
+    Several instances may share the database and the spool volume (see
+    `docs/ha.md`). Each writes its own row; the operator sees in the UI which
+    instances are alive, and the health checks warn when a second one is active
+    while the deployment may not be prepared for it (spool volume not shared,
+    modalities not behind a VIP).
+
+    Rows are not patient data: instance name, version, host, pid, timestamps.
+    """
+
+    __tablename__ = "broker_instance"
+
+    instance_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow,
+                                                index=True)
+    version: Mapped[str] = mapped_column(String(32), default="")
+    hostname: Mapped[str] = mapped_column(String(128), default="")
+    pid: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class ConfigAudit(Base):

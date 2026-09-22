@@ -8,9 +8,12 @@ UPS-RS-Subset). Dieses Dokument plant, was danach sinnvoll ist — getrennt nach
 Begründung.
 
 > **Die billigen Punkte sind weg.** Was hier noch steht, ist entweder **groß**
-> (B1, F3, F4) oder **organisatorisch** (C1, C4, E1). Die nächste Stufe beginnt
-> deshalb nicht mit dem größten Vorhaben, sondern mit dem, das die meisten
-> anderen freischaltet — und B1 ist keine Compose-Änderung (siehe §3).## 1. Wo wir stehen (kurz)
+> (F3, F4) oder **organisatorisch** (C1, C4, E1). Betriebsseitig ist der Broker
+> mit B5 (Lasttest) und B1 (Hochverfügbarkeit) dort angekommen, wo er für ein
+> Haus mit 100+ Modalitäten sein muss — offen bleibt, was außerhalb des Codes
+> liegt: VIP/Load Balancer, Postgres-Failover und der Interop-Nachweis (E1).
+
+## 1. Wo wir stehen (kurz)
 
 | Fähigkeit | Stand |
 |---|---|
@@ -25,6 +28,7 @@ Begründung.
 | **Auftragskontext** (`GET /orders/context`) | vorhanden — Korrelationsdienst für einen MADO-Manifest-Erzeuger |
 | **MADO** (Manifest-basierter Zugriff) | **bewusst kein Akteur** — Content-Access ist PACS/VNA-Aufgabe; Einordnung und Berührungspunkte in der [IHE-Aussage §6](ihe-profile-statement.md#6-mado-manifest-based-access-to-dicom-objects--einordnung) |
 | Werkzeuge: Vorschau, C-FIND-Test, Trockenläufe, Health, Bootstrap, Tests aller Ebenen | vorhanden |
+| **Hochverfügbarkeit** | zweite Instanz (Profil `ha`) auf gemeinsamer DB und gemeinsamem Spool-Volume, atomarer Spool-Claim, Instanz-Heartbeat in UI + Health-Prüfung ([`ha.md`](ha.md)) |
 | **Nachweise** | Conformance Statement und IHE-Aussage sind per Test an den Code gebunden, die Suiten dienen als Abnahmegrundlage, der **Lasttest** ist gefahren ([`loadtest.md`](loadtest.md)) — **der Interop-Nachweis mit Fremdsystemen fehlt** (E1) |
 
 ## 2. Funktionale Kandidaten
@@ -46,37 +50,36 @@ Begründung.
 
 | # | Vorhaben | Warum | Aufwand |
 |---|---|---|---|
-| B1 | **Hochverfügbarkeit**: zweite Instanz + gemeinsame DB/Spool-Volume, Health-basiertes Umschalten, Runbook | Ein einzelner Broker ist ein Single Point of Failure für alle Modalitäten. **Vorbedingung siehe unten** — erst das Design, dann die zweite Instanz | groß |
+| B1 | ~~Hochverfügbarkeit~~ — **erledigt**: [`ha.md`](ha.md). Zweite Instanz auf gemeinsamer DB und gemeinsamem Spool-Volume (Compose-Profil `ha`), **atomarer Spool-Claim** (`FOR UPDATE SKIP LOCKED` + Lease), Instanz-Heartbeat mit Sichtbarkeit in UI und Health-Prüfung, Alarmregeln, Runbook-Kapitel, `deploy/ha-smoke.sh` als Live-Nachweis (24 Bilder, 12 + 12 zugestellt, **keine Doppellung**). Offen bleibt die Deployment-Seite: VIP/Load Balancer und Postgres-Failover liegen außerhalb des Brokers | — | ✅ |
 | B2 | ~~Backup-Automatik~~ — **erledigt**: `deploy/backup.sh` (beide Datenbanken, Spool, `.env`, Prüfungen) + `deploy/backup-roundtrip-test.sh` (sichern → zerstören → wiederherstellen → prüfen), läuft bei jedem `./test-stack.sh` | — | ✅ |
 | B3 | ~~Betriebshandbuch/Runbook~~ — **erledigt**: [`runbook.md`](runbook.md) („was tun, wenn …“ mit echten Befehlen, Eskalationsgrenzen, Update-Ablauf) | — | ✅ |
-| B4 | ~~Monitoring-Vorlage~~ — **erledigt**: `deploy/monitoring/prometheus-rules.yml` (17 Regeln) + `grafana-dashboard.json` (14 Panels), durch `test_monitoring_config.py` an die echten Metriknamen gebunden | — | ✅ |
+| B4 | ~~Monitoring-Vorlage~~ — **erledigt**: `deploy/monitoring/prometheus-rules.yml` (18 Regeln) + `grafana-dashboard.json` (14 Panels), durch `test_monitoring_config.py` an die echten Metriknamen gebunden | — | ✅ |
 | B5 | ~~Lasttest~~ — **erledigt**: [`loadtest.md`](loadtest.md) — Harness (`scripts/loadtest.py`), Messwerte, Grenzen. **Zwei echte Nebenläufigkeitsfehler gefunden und behoben** (Breaker-Zeile und Cache-Snapshot kollidierten unter parallelen Abfragen; eine Arbeitslisten-Abfrage kam als DIMSE-Fehler zurück), das Assoziationslimit als harte Grenze belegt. Offen: Wiederholung auf der Zielhardware und ein Soak-Test | — | ✅ |
 | B6 | ~~Selbstüberwachung~~ — **erledigt**: Health-Findings `spool_disk_low`/`spool_disk_tight`/`spool_dir_unusable`/`db_slow` + Alarmregel | — | ✅ |
 
-### B1 — Vorbedingung: erst das Design, dann die zweite Instanz
+### B1 — was die Vorbedingung war, und was daraus wurde
 
-„Zweite Instanz + gemeinsame DB" klingt nach einem Compose-Eintrag. Im Code
-geprüft ist es keiner:
+„Zweite Instanz + gemeinsame DB" klang nach einem Compose-Eintrag, war aber
+keiner. Die drei Punkte, die im Code geprüft wurden, sind jetzt abgearbeitet:
 
-- **Der Spool hat kein Claiming.** `spool.due_items()` wählt nur nach Status und
-  Fälligkeit (`next_attempt_at`) — ohne Lease, ohne `FOR UPDATE SKIP LOCKED`.
-  Zwei Instanzen auf derselben DB ziehen dieselbe Zeile und senden **beide** an
-  das PACS. `spool.is_duplicate` schützt am *Eingang* (die Modalität wiederholt
-  den C-STORE), nicht bei der Zustellung. Ohne Claiming erzeugt HA genau die
-  Duplikate, die der Spool verhindern soll.
-- **Geteilter und lokaler Zustand gemischt.** `source_breaker` liegt in der DB
-  (teilbar, gut), `echo.ECHO_STATUS` ist ein Modul-Dict im Prozess — zwei
-  Instanzen melden unterschiedliche Health für dieselben Quellen.
-- **Der Endpunkt gehört zum Vertrag.** AET `MWLBROKER` und Port stehen im
-  [Conformance Statement](dicom-conformance-statement.md). Wie die Modalitäten
-  die aktive Instanz finden (schwebende IP, zweite AET, Load-Balancer), ist eine
-  Deployment-Entscheidung — und muss dokumentiert sein, sonst stimmt das
-  Statement nicht mehr.
+- **Der Spool hatte kein Claiming.** `spool.due_items()` wählte nur nach Status
+  und Fälligkeit — zwei Instanzen hätten dieselbe Zeile gezogen und dasselbe Bild
+  zweimal gesendet. Jetzt gibt es `spool.claim_items` (atomar,
+  `FOR UPDATE SKIP LOCKED` + Lease), der Worker benutzt es, und
+  `deploy/ha-smoke.sh` belegt es am laufenden System.
+- **Geteilter und lokaler Zustand waren gemischt.** `source_breaker` und der neue
+  Instanz-Heartbeat liegen in der Datenbank; `echo.ECHO_STATUS` bleibt bewusst
+  pro Instanz (jede prüft ihre eigenen Verbindungen) — beides steht in
+  [`ha.md`](ha.md) §2, damit niemand raten muss.
+- **Der Endpunkt gehört zum Vertrag.** AET und Port stehen im
+  [Conformance Statement](dicom-conformance-statement.md); wie die Modalitäten
+  die aktive Instanz finden (schwebende IP, TCP-Load-Balancer, zweiter AET), ist
+  in [`ha.md`](ha.md) §4 dokumentiert — und `/healthz/ready` ist genau der
+  Health-Check dafür.
 
-Reihenfolge deshalb: (1) Zustell-Claim (Lease-Spalte + Alembic-Revision),
-(2) entscheiden, welcher Zustand geteilt wird und welcher bewusst pro Instanz
-bleibt, (3) Endpunkt-Strategie + Runbook-Ergänzung, (4) erst dann die zweite
-Instanz und das Health-basierte Umschalten.
+**Was außerhalb bleibt:** VIP/Load Balancer einrichten, Postgres-Failover, ein
+Lasttest *mit* zwei Instanzen. Der Broker kann seine eigene Adresse nicht
+bewegen — das ist Netzwerk- und Deployment-Aufgabe.
 
 ## 4. Nachweise
 
@@ -113,8 +116,9 @@ Matching-Feinheiten auffallen, die kein Mock nachbildet.
 7. **E1 (Interop-Nachweis)** — der einzige Weg, aus dem Statement einen Beweis
    zu machen. Beantwortet außerdem die im Lasttest offen gebliebene Frage, wo die
    ~90 ms pro C-FIND-Runde herkommen (eigener Client oder Gegenstelle).
-8. **B1 (Hochverfügbarkeit)** — mit dem Design-Vorlauf aus §3; erst danach die
-   zweite Instanz.
+8. ~~**B1 (Hochverfügbarkeit)**~~ — **erledigt**: Design-Vorlauf aus §3 umgesetzt
+   (Claim + geteilter Zustand + Endpunkt-Dokumentation), nachgewiesen mit
+   `deploy/ha-smoke.sh`.
 9. ~~**F2a (ADT `A08`/`A24`/`A47`)**~~ — **erledigt**: die PIR-Lücke ist
     geschlossen, Verknüpfung und Zusammenführung sind sauber getrennt.
 10. **C4 (SLA/Schulungsunterlagen)** — organisatorisch, aber Eintrittskarte für

@@ -22,6 +22,7 @@ from . import mllp
 from . import rbac
 from . import rbac
 from .echo import echo_loop
+from .instances import worker as instances_worker
 from .spool import worker as spool_worker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -43,6 +44,10 @@ async def lifespan(app: FastAPI):
     echo_thread = None
     spool_thread = None
     mllp_thread = None
+    # High availability: say "I am here" so an operator sees who is running and
+    # a second instance cannot deliver the same spool entry twice (docs/ha.md).
+    instances_thread = threading.Thread(target=instances_worker, args=(stop,), daemon=True)
+    instances_thread.start()
     if settings.start_dicom:
         scp = BrokerSCP(settings)
         scp.start()
@@ -70,6 +75,7 @@ async def lifespan(app: FastAPI):
             echo_thread.join(timeout=2)
         if spool_thread is not None:
             spool_thread.join(timeout=2)
+        instances_thread.join(timeout=2)
         if mllp_thread is not None:
             mllp_thread.join(timeout=2)
         if scp is not None:

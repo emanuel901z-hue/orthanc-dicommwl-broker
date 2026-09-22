@@ -102,6 +102,7 @@ from .schemas import (
     Hl7AdtOut,
 )
 from . import (adt, atna, audit, breaker, cache, config_io, health_checks, hl7, hl7_mapping,
+               instances,
                merge_rules, merges, mpps, orders, stats, ups,
                local_worklist, metrics, notify, rbac, retention, settings_service,
                simulate, spool, station_rules, tls, transforms)
@@ -2357,8 +2358,12 @@ def status(s: Session = _db_dep):
     from . import __version__
 
     return {
-        # which build is this? (the operator asked exactly that)
+        # which build is this, and which instance is answering? (the operator
+        # asks exactly that, and in an HA deployment it matters)
         "version": __version__,
+        "instance_id": instances.instance_id(),
+        "instances": instances.known(),
+        "instances_active": instances.active_count(),
         "started_at": _STARTED_AT.isoformat(),
         "uptime_s": int((datetime.now(timezone.utc) - _STARTED_AT).total_seconds()),
         "scp_listening": _scp.listening if _scp is not None else False,

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from . import breaker, echo, metrics, settings_service, spool, tls
+from . import breaker, echo, instances, metrics, settings_service, spool, tls
 from .models import (MwlSource, PacsTarget, QueryLog, RoutingRule, StationRule,
                      TransformRule)
 
@@ -345,6 +345,31 @@ def config_findings(session, settings) -> list[dict]:
             "'hl7_store_raw' off when the troubleshooting is done (retention "
             "still applies).",
         ))
+
+    # High availability: a second instance is not an error — but it is only safe
+    # when both share the spool volume and the modalities reach the active one
+    # (docs/ha.md). The broker cannot see the volume or the VIP, so it says what
+    # it does know and leaves the judgement to the operator.
+    alive = [row for row in instances.known() if row["active"]]
+    if len(alive) > 1:
+        findings.append(_finding(
+            "ha_multiple_instances", "info",
+            f"{len(alive)} broker instances are running. That is the point of high "
+            "availability — but only if they share the spool volume and the "
+            "modalities reach the active instance (VIP/load balancer). See docs/ha.md.",
+            details={"instances": [row["instance_id"] for row in alive],
+                     "active": len(alive)},
+        ))
+    for row in instances.known():
+        if not row["active"] and not row["current"]:
+            findings.append(_finding(
+                "ha_instance_gone", "warning",
+                f"Instance '{row['instance_id']}' has not been seen for "
+                f"{row['age_s']} s — if that was the active one, check whether the "
+                "standby took over (docs/ha.md).",
+                entity={"instance_id": row["instance_id"]},
+                details={"instance_id": row["instance_id"], "age_s": row["age_s"]},
+            ))
 
     # sort once more: checks added later (self-monitoring, PHI switches) must not
     # break the promise that the caller gets findings worst-first
