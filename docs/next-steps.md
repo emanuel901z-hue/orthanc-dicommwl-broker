@@ -23,7 +23,7 @@ UPS-RS-Subset). Dieses Dokument plant, was danach sinnvoll ist — getrennt nach
 
 | # | Vorhaben | Warum | Aufwand |
 |---|---|---|---|
-| F1 | **MRN-Merge / Identifier-Reconciliation** (IHE PIR vollständig) | Häuser mit mehreren Patienten-IDs pro Person bekommen sonst doppelte Einträge; kommerzielle Produkte haben das | mittel–groß |
+| F1 | ~~MRN-Merge / Identifier-Reconciliation~~ — **erledigt**: `ADT^A40` und manueller Eintrag, rücknehmbar, wirkt auf Arbeitsliste **und** Routing-Herkunft (Kette zyklensicher). Offen: A24/A47-Links und PIX/PDQ | — | ✅ |
 | F2 | **Weitere Datenquellen**: HL7 `ADT` (Patientenänderungen/Merge), `OMG`, GDT/BDT, strukturierte Textdateien | Praxisumgebungen ohne HL7-Schnittstelle (GDT) und Häuser, die ADT nicht weiterleiten | mittel (je Quelle klein) |
 | F3 | **UPS-RS vervollständigen**: Subscriptions/WebSocket-Events, vollständiger Attributsatz, Suche über Upstream | Für Clients, die den Standard voll ausreizen; heute bewusst als Grenze dokumentiert | groß |
 | F4 | **Voraufnahmen-Prefetch** (relevante Voruntersuchungen auf Anforderung ziehen) | Radiologen brauchen Voraufnahmen am Befundplatz; heute Aufgabe von PACS/VNA | groß (eigenes Werkzeug) |
@@ -55,8 +55,7 @@ UPS-RS-Subset). Dieses Dokument plant, was danach sinnvoll ist — getrennt nach
 
 1. ~~**B2 + B3 + B4** (klein, sofort nutzbar: Backup, Runbook, Alarme)~~ — **erledigt**.
 2. ~~**F6 + F7 + B6** (klein): schnell sichtbarer Nutzen für Betreiber~~ — **erledigt**.
-3. **F1 (MRN-Merge)** — die größte verbleibende funktionale Lücke gegenüber
-   kommerziellen Produkten.
+3. ~~**F1 (MRN-Merge)** — die größte verbleibende funktionale Lücke~~ — **erledigt**.
 4. **C2 + C3** — Vorbereitung der Beschaffung, auf den vorhandenen Tests.
 5. **B1 (Hochverfügbarkeit)**, dann **F2**, **F5**.
 6. **F3/F4** nur, wenn ein konkreter Kunde sie verlangt.

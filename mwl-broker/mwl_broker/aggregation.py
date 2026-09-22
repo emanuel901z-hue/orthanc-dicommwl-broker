@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pydicom.dataset import Dataset
 from sqlalchemy import select
 
-from . import breaker, cache, local_worklist, merge_rules, metrics, mpps, station_rules
+from . import breaker, cache, local_worklist, merge_rules, merges, metrics, mpps, station_rules
 from .db import session_factory
 from .models import MwlSource
 from .upstream import SourceCfg, merge_answers, query_source
@@ -242,6 +242,14 @@ def collect(
     if hidden:
         log.info("C-FIND for station %s: %d answer(s) hidden by rule '%s'",
                  station or "(any)", hidden, (rule or {}).get("name"))
+
+    # IHE PIR: an image acquired under an old patient ID belongs to the current
+    # one — the modality must see the resolved ID
+    patient_ids = [str(ds.get("PatientID", "") or "") for ds in (item for item, _ in merged)]
+    mapping = merges.resolve_many([pid for pid in patient_ids if pid])
+    rewritten = merges.rewrite_datasets([ds for ds, _src in merged], mapping)
+    if rewritten:
+        log.info("patient merge: %d worklist item(s) served under the current ID", rewritten)
 
     result.collected = collected
     result.merged = merged

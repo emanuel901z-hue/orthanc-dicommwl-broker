@@ -1247,3 +1247,39 @@ class StatsOut(BaseModel):
     groups: list[StatsGroup] = Field(description="Breakdown by the requested dimension.")
     series: list[StatsDay] = Field(description="Per-day series (gap-free, oldest first).")
     group_by: str = Field(description="Dimension that was used: source | modality | station.")
+
+
+class PatientMergeIn(BaseModel):
+    """Merge two patient identifiers (IHE PIR)."""
+
+    old_patient_id: str = Field(description="The identifier that is no longer current.",
+                                examples=["ALT-4711"])
+    new_patient_id: str = Field(description="The identifier that survives.",
+                                examples=["12345"])
+    reason: str = Field(default="", description="Why the merge happened (kept in the audit trail).")
+
+
+class PatientMergeOut(BaseModel):
+    """A stored identifier merge."""
+
+    id: int = Field(description="Row ID.")
+    ts: datetime = Field(description="When the merge was recorded.")
+    old_patient_id: str = Field(description="Identifier that is no longer current.")
+    new_patient_id: str = Field(description="Identifier that survives.")
+    reason: str = Field(description="Why the merge happened.")
+    actor: str = Field(description="Who recorded it.")
+    origin: str = Field(description="manual | adt")
+    active: bool = Field(description="Whether the merge is in effect.")
+
+
+class Hl7AdtOut(BaseModel):
+    """Result of an ADT message."""
+
+    dry_run: bool = Field(description="True when nothing was written.")
+    event: str = Field(description="ADT event, e.g. A40.")
+    control_id: str = Field(description="MSH-10.")
+    old_patient_id: str = Field(description="MRG-1 (the previous identifier).")
+    new_patient_id: str = Field(description="PID-3 (the surviving identifier).")
+    action: str = Field(description="merged | not-applicable.")
+    merge_id: int | None = Field(default=None, description="The created merge, if any.")
+    warnings: list[str] = Field(default_factory=list, description="What could not be applied.")

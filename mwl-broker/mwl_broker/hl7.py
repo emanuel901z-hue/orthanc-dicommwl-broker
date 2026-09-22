@@ -155,3 +155,43 @@ def build_ack(control_id: str, ok: bool = True, error: str = "") -> str:
 
 def now_hl7() -> str:
     return datetime.now().strftime("%Y%m%d%H%M%S")
+
+
+def parse_adt(text: str) -> dict:
+    """Parse an ADT message — only what a merge needs.
+
+    `A40` (patient merge) carries the old identifier in `MRG-1` and the surviving
+    one in `PID-3`. Other ADT events are recognised but not acted upon.
+    """
+    segments = _segments(text)
+    by_name: dict[str, list[list[str]]] = {}
+    for segment in segments:
+        by_name.setdefault(segment[0].upper(), []).append(segment)
+
+    warnings: list[str] = []
+    msh = by_name.get("MSH", [[]])[0]
+    pid = by_name.get("PID", [[]])[0]
+    mrg = by_name.get("MRG", [[]])[0]
+
+    message_type = _field(msh, 9, msh=True)
+    control_id = _field(msh, 10, msh=True)
+    if not control_id:
+        warnings.append("MSH-10 (message control ID) is missing")
+
+    event = message_type.split("^")[1] if "^" in message_type else ""
+    # PID-3 is "id^^^authority^type"; the id is the first component
+    new_patient_id = _component(_field(pid, 3), 0)
+    old_patient_id = _component(_field(mrg, 1), 0)
+    if event == "A40":
+        if not old_patient_id:
+            warnings.append("A40 without MRG-1 (the previous patient ID)")
+        if not new_patient_id:
+            warnings.append("A40 without PID-3 (the surviving patient ID)")
+    return {
+        "message_type": message_type or "ADT^A40",
+        "event": event,
+        "control_id": control_id,
+        "old_patient_id": old_patient_id,
+        "new_patient_id": new_patient_id,
+        "warnings": warnings,
+    }

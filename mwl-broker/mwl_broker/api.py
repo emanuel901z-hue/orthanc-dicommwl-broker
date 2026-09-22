@@ -96,9 +96,12 @@ from .schemas import (
     MergeRuleOut,
     Hl7FieldMapIn,
     Hl7FieldMapOut,
+    PatientMergeIn,
+    PatientMergeOut,
+    Hl7AdtOut,
 )
 from . import (atna, audit, breaker, cache, config_io, health_checks, hl7, hl7_mapping,
-               merge_rules, mpps, stats, ups,
+               merge_rules, merges, mpps, stats, ups,
                local_worklist, metrics, notify, rbac, retention, settings_service,
                simulate, spool, station_rules, tls, transforms)
 from .models import (BrokerSetting, ConfigAudit, Hl7Message, LocalWorklistItem,
@@ -1195,6 +1198,135 @@ def forward_pending_mpps(request: Request, s: Session = _db_dep):
     audit.record(s, _actor(request), "mpps.forward_pending", "mpps_step", None,
                  None, result, _correlation(request))
     s.commit()
+    return result
+
+
+@router.get(
+    "/merges", response_model=list[PatientMergeOut], tags=["local"],
+    summary="Patient identifier merges (IHE PIR)",
+    description="Which old patient ID now belongs to which current one. Announced "
+                "by the RIS as ADT A40 or entered by an operator; the worklist "
+                "answer and the routing provenance both use the resolved ID.",
+    response_description="All active merges, newest first.",
+)
+def list_patient_merges(
+    active_only: bool = Query(default=True, description="Only merges that are in effect."),
+):
+    return merges.list_merges(active_only=active_only)
+
+
+@router.post(
+    "/merges", response_model=PatientMergeOut, status_code=201, tags=["local"],
+    summary="Merge two patient identifiers",
+    description="Records that `old_patient_id` is now `new_patient_id`. Local "
+                "entries and the routing provenance are updated, so images "
+                "acquired under the old ID are still routed by their worklist "
+                "entry. Reversible (`DELETE`).",
+    response_description="The stored merge.",
+    responses=_docs(VALIDATION_422, READ_ONLY_403),
+)
+def create_patient_merge(
+    request: Request,
+    body: Annotated[PatientMergeIn, Body(description="Old and current patient ID.")],
+    s: Session = _db_dep,
+):
+    try:
+        row = merges.merge(body.old_patient_id, body.new_patient_id,
+                           reason=body.reason, actor=_actor(request), origin="manual")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    audit.record(s, _actor(request), "patient.merge", "patient_merge", row["id"],
+                 {"patient_id": row["old_patient_id"]},
+                 {"patient_id": row["new_patient_id"], "reason": row["reason"]},
+                 _correlation(request))
+    s.commit()
+    return row
+
+
+@router.delete(
+    "/merges/{merge_id}", status_code=204, tags=["local"],
+    summary="Undo a patient identifier merge",
+    description="Takes the merge out of effect; the entry stays for the audit trail.",
+    response_description="The merge is no longer applied.",
+    responses=_docs(READ_ONLY_403, NOT_FOUND_404),
+)
+def delete_patient_merge(
+    request: Request,
+    merge_id: Annotated[int, Path(description="ID of the merge.")],
+    s: Session = _db_dep,
+):
+    if not merges.unmerge(merge_id):
+        raise HTTPException(404, "not found")
+    audit.record(s, _actor(request), "patient.unmerge", "patient_merge", merge_id,
+                 None, {"active": False}, _correlation(request))
+    s.commit()
+
+
+@router.get(
+    "/merges/resolve/{patient_id}", tags=["local"],
+    summary="Resolve a patient identifier",
+    description="Follows the merge chain to the current ID — useful to check "
+                "which identifier a modality should send.",
+    response_description="The resolved identifier and the chain that led to it.",
+    responses={404: {"description": "No patient ID given."}},
+)
+def resolve_patient_merge(
+    patient_id: Annotated[str, Path(description="Patient ID as the modality knows it.")],
+):
+    resolved = merges.resolve(patient_id)
+    if not resolved:
+        raise HTTPException(404, "no patient ID given")
+    return {"patient_id": patient_id, "resolved": resolved, "merged": resolved != patient_id}
+
+
+@router.post(
+    "/hl7/adt", response_model=Hl7AdtOut, tags=["local"],
+    summary="Accept an HL7 ADT message (patient merge)",
+    description="Reads an ADT^A40 (patient merge) and records the identifier merge. "
+                "`dry_run=true` only reports what would happen. Other ADT events "
+                "are recognised and reported, but not acted upon.",
+    response_description="What the message contained and what was done.",
+    responses=_docs(VALIDATION_422, READ_ONLY_403),
+)
+def apply_hl7_adt(
+    request: Request,
+    body: Annotated[str, Body(media_type="text/plain",
+                              description="The raw HL7 ADT message.")],
+    dry_run: bool = Query(default=True, description="Only parse and report; write nothing."),
+    s: Session = _db_dep,
+):
+    parsed = hl7.parse_adt(body)
+    result = {
+        "dry_run": dry_run,
+        "event": parsed["event"],
+        "control_id": parsed["control_id"],
+        "old_patient_id": parsed["old_patient_id"],
+        "new_patient_id": parsed["new_patient_id"],
+        "action": "not-applicable",
+        "warnings": parsed["warnings"],
+    }
+    if parsed["event"] != "A40":
+        result["warnings"] = parsed["warnings"] + [
+            f"{parsed['event'] or 'unknown'} is not a merge event (only A40 is applied)"]
+        return result
+    if parsed["warnings"]:
+        raise HTTPException(422, parsed["warnings"])
+    result["action"] = "merged"
+    if dry_run:
+        return result
+
+    try:
+        row = merges.merge(parsed["old_patient_id"], parsed["new_patient_id"],
+                           reason=f"ADT A40 {parsed['control_id']}",
+                           actor=_actor(request), origin="adt")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    audit.record(s, _actor(request), "patient.merge", "patient_merge", row["id"],
+                 {"patient_id": row["old_patient_id"]},
+                 {"patient_id": row["new_patient_id"], "origin": "adt"},
+                 _correlation(request))
+    s.commit()
+    result["merge_id"] = row["id"]
     return result
 
 

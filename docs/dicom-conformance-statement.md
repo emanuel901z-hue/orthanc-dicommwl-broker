@@ -181,6 +181,26 @@ Der Broker bietet einen **pragmatischen Teil** von PS3.18 §11 an:
 vollständige UPS-Attributsatz, Suche über Upstream-Quellen (die werden weiterhin
 per C-FIND mit dem Identifier der Modalität abgefragt).
 
+## 9b. Patient identifier reconciliation (IHE PIR)
+
+Der Broker führt Patienten-IDs zusammen — der Fall „Notfallaufnahme, später
+zusammengeführt" oder „zwei Systeme, zwei MRN":
+
+| Weg | Aufruf | Wirkung |
+|---|---|---|
+| Vom RIS angesagt | `POST /api/v1/hl7/adt` mit `ADT^A40` (`MRG-1` = alte ID, `PID-3` = neue ID) | Zusammenführung wird gespeichert und angewandt |
+| Manuell | `POST /api/v1/merges` | dasselbe, für Häuser ohne ADT-Weitergabe |
+| Rücknehmen | `DELETE /api/v1/merges/{id}` | außer Kraft, Eintrag bleibt für das Änderungsprotokoll |
+| Prüfen | `GET /api/v1/merges/resolve/{id}` | folgt der Kette (A→B→C), zyklensicher |
+
+Die Zusammenführung wirkt an **zwei** Stellen: die C-FIND-Antwort trägt die
+aktuelle ID, und die Routing-Herkunft (`seen_items`) wird mitgezogen — ein Bild,
+das unter der alten ID aufgenommen wurde, wird weiterhin nach seinem
+Arbeitslisten-Eintrag geroutet.
+
+**Nicht enthalten:** die IHE-Link/Unlink-Events `A24`/`A47`, PIX-/PDQ-Abfragen
+und eine automatische Auflösung aus dem PACS.
+
 ## 10. Grenzen und Betriebswerte
 
 | Größe | Wert | Einstellung |

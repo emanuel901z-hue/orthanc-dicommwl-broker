@@ -440,3 +440,23 @@ class Hl7FieldMap(Base):
     target_tag: Mapped[str] = mapped_column(String(64), default="")  # DICOM keyword
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class PatientMerge(Base):
+    """`old_patient_id` is now `new_patient_id` (IHE Patient Information Reconciliation).
+
+    Announced by the RIS as HL7 ADT A40 or entered by an operator. The worklist
+    answer and the routing provenance both use the resolved ID, so a merge
+    changes what the modality sees *and* where images are routed.
+    """
+
+    __tablename__ = "patient_merge"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    old_patient_id: Mapped[str] = mapped_column(String(64), index=True)
+    new_patient_id: Mapped[str] = mapped_column(String(64), index=True)
+    reason: Mapped[str] = mapped_column(String(256), default="")
+    actor: Mapped[str] = mapped_column(String(64), default="api")
+    origin: Mapped[str] = mapped_column(String(16), default="manual")   # manual | adt
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
