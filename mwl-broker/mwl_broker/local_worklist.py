@@ -239,7 +239,21 @@ def log_hl7(transport: str, parsed: dict, action: str, error: str = "",
 def upsert_from_hl7(parsed: dict, *, transport: str = "http",
                     default_station_aet: str = "", default_modality: str = "",
                     raw: str = "") -> dict:
-    """Apply one parsed ORM message. Returns {action, accession, item_id}."""
+    """Apply one parsed order message. Returns {action, accession, item_id}.
+
+    The message type is checked first: an `ORU^R01` (a report) carries OBR
+    segments too, and applying it would create a worklist entry that nobody
+    ordered. `hl7.describe_message_type` says why in plain words.
+    """
+    from . import hl7
+
+    message_type = parsed.get("message_type", "")
+    if not hl7.is_order_message(message_type):
+        reason = hl7.describe_message_type(message_type)
+        log_hl7(transport, parsed, "rejected", reason, raw=raw)
+        return {"action": "rejected", "accession": parsed.get("accession", ""),
+                "item_id": None, "error": reason}
+
     accession = parsed.get("accession", "")
     sps_id = parsed.get("sps_id") or "1"
     if not accession:

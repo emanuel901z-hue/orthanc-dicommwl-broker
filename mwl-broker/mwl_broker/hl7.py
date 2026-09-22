@@ -1,4 +1,4 @@
-"""Minimal HL7 v2 ORM^O01 reader for worklist orders.
+"""Minimal HL7 v2 reader for worklist orders (`ORM^O01`, `OMG^O19`).
 
 Only what a modality worklist needs is parsed — and the mapping is deliberately
 visible in one place, because every site maps its Z-segments differently:
@@ -19,6 +19,11 @@ visible in one place, because every site maps its Z-segments differently:
 
 `warnings` lists everything the parser could not map, so the UI can show the
 operator what is missing instead of silently creating a half-empty item.
+
+**Which messages are orders is checked explicitly** (`is_order_message`): the
+parser reads ORC/OBR/PID, and an `ORU^R01` — a *result* message — carries OBR
+segments too. Without the check a RIS that broadcasts reports would quietly fill
+the worklist.
 """
 import logging
 from datetime import datetime
@@ -28,6 +33,40 @@ log = logging.getLogger("mwl_broker.hl7")
 CANCEL_CODES = {"CA", "OC"}
 CHANGE_CODES = {"XO", "SC", "SN", "RE"}
 NEW_CODES = {"NW", "NA", "OR"}
+
+# The order messages this broker applies. `ORM^O01` is the classic radiology
+# order, `OMG^O19` the general clinical order — same ORC/OBR layout, so the same
+# code path; both are named in the IHE statement and the conformance statement.
+ORDER_MESSAGE_TYPES = ("ORM^O01", "OMG^O19")
+# The matching *responses* come from the filler and are not orders.
+ORDER_RESPONSE_TYPES = ("ORM^O02", "OMG^O20")
+
+
+def is_order_message(message_type: str) -> bool:
+    """Is this message type an order the broker may turn into a worklist entry?"""
+    return (message_type or "").strip().upper() in ORDER_MESSAGE_TYPES
+
+
+def describe_message_type(message_type: str) -> str:
+    """Why a message is not applied — one plain sentence, or `''` when it is.
+
+    The wording matters: the operator sees this in the HL7 panel and in the
+    ACK/error text, and "not an order" is the difference between a report that
+    was ignored and a worklist entry that should not exist.
+    """
+    message = (message_type or "").strip().upper()
+    if message in ORDER_MESSAGE_TYPES:
+        return ""
+    if message in ORDER_RESPONSE_TYPES:
+        return f"{message} is an order response (from the filler), not an order"
+    if message.startswith("ADT^"):
+        return (f"{message} is a patient event — it belongs on the ADT path "
+                "(POST /api/v1/hl7/adt)")
+    if message.startswith("ORU^"):
+        return (f"{message} is a result/report message, not an order — it must "
+                "not create a worklist entry")
+    return (f"{message or 'unknown'} is not an order message (accepted: "
+            f"{', '.join(ORDER_MESSAGE_TYPES)})")
 
 
 def _segments(text: str) -> list[list[str]]:
@@ -135,6 +174,10 @@ def parse(text: str) -> dict:
         "study_uid": _field(zds, 1),
         "station_aet": _field(zds, 2) or _field(zdb, 4),
         "sps_id": _field(obr, 1) or _field(orc, 2) or "1",
+        # is this message an order at all? A report (ORU) has OBR segments too,
+        # so the answer cannot be "it parsed fine"
+        "supported": is_order_message(message_type),
+        "reject_reason": describe_message_type(message_type),
         "warnings": warnings,
     }
 

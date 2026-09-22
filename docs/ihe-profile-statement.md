@@ -37,7 +37,7 @@ wir zusagen.
 |---|---|---|
 | **Scheduled Workflow (SWF)** — „Modality Worklist Provided" (DICOM MWL C-FIND) | **ja** | Kernfunktion: Aggregation mehrerer Auftraggeber, Merge, Dedupe, Stationsregeln |
 | **SWF** — „Modality Performed Procedure Step" (MPPS, N-CREATE/N-SET) | **ja** | seit Sprint 1; Rückmeldung als HL7 `ORU^R01` (Z01/Z02/Z03) |
-| **SWF** — „Procedure Scheduled / Updated" (HL7 `ORM^O01`) | **ja** | REST und MLLP; auch `CA` (Stornierung) |
+| **SWF** — „Procedure Scheduled / Updated" (HL7 `ORM^O01`, `OMG^O19`) | **ja** | REST und MLLP; auch `CA` (Stornierung). `OMG^O19` (General Clinical Order) trägt dasselbe ORC/OBR-Layout und läuft über denselben Pfad; **alles andere wird abgelehnt** — eine `ORU^R01` (Befund) trägt ebenfalls OBR-Segmente und darf nie ein Arbeitslisten-Eintrag werden |
 | **Patient Information Reconciliation (PIR)** | **ja** | Identifier werden übernommen, je Fall zusammengeführt (Dedupe über PatientID+Accession+SPS) und **zusammengeführt**: `ADT^A40` oder manuell eintragen; Arbeitsliste **und** Routing-Herkunft folgen der aktuellen ID, rücknehmbar. Ebenso `ADT^A24` (**Verknüpfung** — beide IDs bleiben gültig, es wird nichts umgeschrieben) und `ADT^A47` (Verknüpfung zurücknehmen), dazu `ADT^A08` (Patientendaten aktualisieren). Nicht enthalten: PIX/PDQ-Abfragen |
 | **Consistent Presentation of Images / Evidence Documents** | **nein** | Der Broker ist kein Archiv/Viewer |
 | **Retrieve Information for Display / XDS-I** | **nein** | keine Dokumenten-/Bildabfrage |
@@ -52,9 +52,10 @@ wir zusagen.
 | Transaktion | Auslöser | Antwort des Brokers |
 |---|---|---|
 | **Query Modality Worklist** (C-FIND) | Modalität fragt an | zusammengeführte Arbeitsliste aller Quellen (siehe Conformance Statement §4) |
-| **Procedure Scheduled** (HL7 `ORM^O01` mit `NW`) | RIS/KIS sendet Auftrag | lokaler Eintrag wird angelegt/aktualisiert |
+| **Procedure Scheduled** (HL7 `ORM^O01`/`OMG^O19` mit `NW`) | RIS/KIS sendet Auftrag | lokaler Eintrag wird angelegt/aktualisiert |
 | **Procedure Updated** (`ORC-1 = XO/SC`) | RIS/KIS ändert den Auftrag | lokaler Eintrag wird aktualisiert |
 | **Procedure Cancelled** (`ORC-1 = CA`) | RIS/KIS storniert | Eintrag wird entfernt/ungültig |
+| **Nicht-Aufträge** (`ORU^R01`, `ORM^O02`, …) | RIS/PACS sendet etwas anderes | abgelehnt mit Begründung (HTTP 422 bzw. MLLP-NAK) und im Nachrichtenprotokoll sichtbar — ein Befund darf keinen Auftrag erzeugen |
 | **Performed Procedure Step Started** (MPPS N-CREATE) | Modalität beginnt | Schritt `IN PROGRESS` gespeichert |
 | **Performed Procedure Step Completed/Discontinued** (MPPS N-SET) | Modalität beendet | Schritt `COMPLETED`/`DISCONTINUED`, HL7-Rückmeldung an das RIS, Ausblenden aus der Worklist |
 | **Audit Record** (ATNA) | jede Abfrage/jeder Store | Audit-Nachricht an die Audit-Gegenstelle (optional) |

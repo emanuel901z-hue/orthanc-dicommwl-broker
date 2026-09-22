@@ -268,6 +268,15 @@ Token rotieren = nur die Store-Datei neu schreiben:
   Server-Namen, sonst verweigert Python die Hostnamen-Prüfung.
 - **Private Schlüssel nie über die API ausgeben** (nur Zertifikate); erzeugte
   Schlüssel mit 0600 schreiben.
+- **Nur Auftragstypen werden angewandt — der Typ wird geprüft, nicht geraten.**
+  `hl7.parse()` liest ORC/OBR/PID und würde auch eine `ORU^R01` (Befund)
+  „verstehen": `order_control` fällt auf `NW` zurück, die Accession kommt aus
+  OBR-3, und ohne Warnung entstünde ein Arbeitslisten-Eintrag für einen Befund.
+  Deshalb gilt `hl7.is_order_message` (`ORM^O01`, `OMG^O19`) an **einer** Stelle
+  (`local_worklist.upsert_from_hl7`, damit REST und MLLP gleich reagieren), und
+  `hl7.describe_message_type` liefert die Begründung im Klartext. Neue
+  Nachrichtentypen gehören in `ORDER_MESSAGE_TYPES` — nicht in eine zweite
+  Prüfung irgendwo sonst.
 - **HL7-Feldindizes sind HL7-Feldnummern.** MSH ist die Ausnahme: MSH-1 *ist*
   das Trennzeichen, deshalb `_field(seg, n, msh=True)` (Index n−1). Alle anderen
   Segmente sind 1-basiert.

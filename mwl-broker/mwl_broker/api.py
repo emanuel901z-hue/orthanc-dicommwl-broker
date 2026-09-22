@@ -1417,9 +1417,12 @@ def get_hl7_message(
     summary="Apply a stored HL7 message again",
     description="Parses the stored raw message again and applies it — for a message "
                 "that failed because of a temporary problem (intake disabled, "
-                "database busy). Requires `hl7_store_raw`; without the raw text the "
-                "broker answers 409 and the sender has to resend. `dry_run=true` "
-                "reports what would happen without writing.",
+                "database busy). The message type decides the path, exactly as on "
+                "the wire: an order (`ORM^O01`/`OMG^O19`) goes to the worklist, a "
+                "patient event (`ADT^A08`/`A24`/`A40`/`A47`) to the PIR path; "
+                "anything else is refused with a reason. Requires `hl7_store_raw`; "
+                "without the raw text the broker answers 409 and the sender has to "
+                "resend. `dry_run=true` reports what would happen without writing.",
     response_description="What the replay did (or would do).",
     responses={404: {"description": "No message with this ID."},
                409: {"description": "The raw message was not stored (hl7_store_raw is off)."}},
@@ -1439,7 +1442,19 @@ def reprocess_hl7_message(
             "The raw message was not stored (setting hl7_store_raw is off) — "
             "the sender has to resend it.",
         )
+    # Same routing as on the wire (mllp.handle_message): the stored message may
+    # be a patient event just as well as an order.
+    if hl7.peek_type(row.raw).upper().startswith("ADT"):
+        result = adt.apply(row.raw, actor=_actor(request),
+                           transport=f"replay:{row.transport}", dry_run=dry_run)
+        if result["action"] == "rejected":
+            raise HTTPException(422, result["warnings"])
+        return {"dry_run": dry_run, "action": result["action"],
+                "item_id": result["record_id"], "error": ""}
+
     parsed = hl7.parse(row.raw)
+    if not parsed["supported"]:
+        raise HTTPException(422, [parsed["reject_reason"]])
     if not parsed["accession"]:
         raise HTTPException(422, parsed["warnings"] or ["no accession number"])
     action = "cancelled" if hl7.is_cancel(parsed) else "created-or-updated"
@@ -1462,26 +1477,41 @@ def reprocess_hl7_message(
 
 @router.post(
     "/hl7/orm", response_model=Hl7ParseOut, tags=["local"],
-    summary="Apply an HL7 ORM order",
-    description="Parses an ORM^O01 message and creates, updates or cancels a "
-                "local worklist item. With `dry_run=true` the response only shows "
-                "what the parser understood and what would happen — the check "
-                "before wiring up a RIS interface.",
+    summary="Apply an HL7 order (ORM^O01 or OMG^O19)",
+    description="Parses an order message and creates, updates or cancels a local "
+                "worklist item. Accepted are `ORM^O01` (the classic radiology "
+                "order) and `OMG^O19` (the general clinical order — same ORC/OBR "
+                "layout). Anything else is refused with a reason: an `ORU^R01` "
+                "(result) also carries OBR segments and must never become a "
+                "worklist entry, and an `ORM^O02`/`OMG^O20` is an order "
+                "*response* from the filler. With `dry_run=true` the response only "
+                "shows what the parser understood and what would happen — the "
+                "check before wiring up a RIS interface.",
     response_description="The parsed fields, the planned/applied action and any warnings.",
     responses={
-        422: {"description": "The message could not be parsed or carries no accession number."},
+        422: {"description": "The message is not an order (ORU, ADT, order "
+                             "response …), could not be parsed, or carries no "
+                             "accession number."},
     },
 )
 def apply_hl7_orm(
     request: Request,
     body: Annotated[str, Body(media_type="text/plain",
-                              description="The raw HL7 v2 message (ORM^O01).")],
+                              description="The raw HL7 v2 message (ORM^O01 or OMG^O19).")],
     dry_run: bool = Query(default=True, description="Only parse and report; write nothing."),
     s: Session = _db_dep,
 ):
     if not settings_service.get_bool("hl7_enabled"):
         raise HTTPException(422, ["HL7 intake is disabled (setting hl7_enabled)"])
     parsed = hl7.parse(body)
+    if not parsed["supported"]:
+        # Leave a trace when we really refuse it (a dry run writes nothing): an
+        # operator has to be able to see that the RIS sends us reports. The MLLP
+        # path logs this in `upsert_from_hl7`; here we are the only one who knows.
+        if not dry_run:
+            local_worklist.log_hl7("http", parsed, "rejected", parsed["reject_reason"],
+                                   raw=body)
+        raise HTTPException(422, [parsed["reject_reason"]])
     if not parsed["accession"]:
         raise HTTPException(422, parsed["warnings"] or ["no accession number"])
     # local conventions: extra fields the hospital configured

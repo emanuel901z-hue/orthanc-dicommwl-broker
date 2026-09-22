@@ -77,7 +77,7 @@ verdrahtet und prüfen Verhalten, nicht Implementierung.
 
 | Ebene | Umfang | Was sie belegt |
 |---|---|---|
-| `pytest` (Backend) | 571 Tests | DIMSE-Verhalten über echte Assoziationen (C-FIND, C-STORE, C-ECHO, MPPS N-CREATE/N-SET/**N-GET**), MLLP über echte Sockets, TLS/mTLS, RBAC, Aufbewahrung, Aggregation/Merge, Patienten-Zusammenführung, Reporting, UPS-RS, Auftragskontext (MADO-Korrelation), ADT-Ereignisse (A08/A24/A40/A47) über REST und MLLP, Nebenläufigkeit (Breaker/Cache unter parallelen Abfragen), Hochverfügbarkeit (Spool-Claim, Instanz-Heartbeat), Schema-Migrationen |
+| `pytest` (Backend) | 585 Tests | DIMSE-Verhalten über echte Assoziationen (C-FIND, C-STORE, C-ECHO, MPPS N-CREATE/N-SET/**N-GET**), MLLP über echte Sockets, TLS/mTLS, RBAC, Aufbewahrung, Aggregation/Merge, Patienten-Zusammenführung, Reporting, UPS-RS, Auftragskontext (MADO-Korrelation), ADT-Ereignisse (A08/A24/A40/A47) und Aufträge (ORM^O01/OMG^O19) über REST und MLLP, Ablehnung von Nicht-Aufträgen (ORU^R01), Nebenläufigkeit (Breaker/Cache unter parallelen Abfragen), Hochverfügbarkeit (Spool-Claim, Instanz-Heartbeat), Schema-Migrationen |
 | `vitest` (Frontend) | 590 Tests | jede Broker-Seite und -Karte, Fehlerpfade, Berechtigungslogik, IID-Einstiegspunkt (RAD-106) |
 | `verify-ui.cjs` | 146 Checks | jede Seite in Desktop und Mobil: keine Konsolen-/Netzwerkfehler, genau ein `<h1>`, kein Overflow, erwartete Inhalte |
 | `verify-screens.cjs` | 225 Checks + 52 Bilder | jede Ansicht und jeder Dialog, inkl. Rohschlüssel-Erkennung |
