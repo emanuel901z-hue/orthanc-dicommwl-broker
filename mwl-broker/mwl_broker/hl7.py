@@ -157,11 +157,25 @@ def now_hl7() -> str:
     return datetime.now().strftime("%Y%m%d%H%M%S")
 
 
-def parse_adt(text: str) -> dict:
-    """Parse an ADT message — only what a merge needs.
+def peek_type(text: str) -> str:
+    """MSH-9 of a message without parsing the rest — MLLP needs to route by it."""
+    for segment in _segments(text):
+        if segment and segment[0].upper() == "MSH":
+            return _field(segment, 9, msh=True)
+    return ""
 
-    `A40` (patient merge) carries the old identifier in `MRG-1` and the surviving
-    one in `PID-3`. Other ADT events are recognised but not acted upon.
+
+def parse_adt(text: str) -> dict:
+    """Parse an ADT message — what patient-identifier and demographic events need.
+
+    | Event | Meaning                              | Segments used |
+    |-------|--------------------------------------|---------------|
+    | `A08` | patient information update            | PID-3, PID-5, PID-7, PID-8 |
+    | `A24` | link two patient records (both stay)  | MRG-1, PID-3 |
+    | `A40` | merge (the old identifier is retired) | MRG-1, PID-3 |
+    | `A47` | unlink                                | MRG-1, PID-3 |
+
+    Every other ADT event is recognised and reported but not acted upon.
     """
     segments = _segments(text)
     by_name: dict[str, list[list[str]]] = {}
@@ -182,16 +196,32 @@ def parse_adt(text: str) -> dict:
     # PID-3 is "id^^^authority^type"; the id is the first component
     new_patient_id = _component(_field(pid, 3), 0)
     old_patient_id = _component(_field(mrg, 1), 0)
-    if event == "A40":
+    # PID-5 is "Last^First^Middle^Suffix^Prefix" — the same component order the
+    # modality shows, so it passes through unchanged (trailing empty components
+    # included, exactly like the ORM path above)
+    patient_name = _field(pid, 5)
+    birth_date = _format_date(_field(pid, 7))
+    sex = _field(pid, 8).strip()[:4]
+
+    if event in ("A24", "A40", "A47"):
         if not old_patient_id:
-            warnings.append("A40 without MRG-1 (the previous patient ID)")
+            warnings.append(f"{event} without MRG-1 (the previous patient ID)")
+        if event != "A47" and not new_patient_id:
+            warnings.append(f"{event} without PID-3 (the surviving patient ID)")
+    elif event == "A08":
         if not new_patient_id:
-            warnings.append("A40 without PID-3 (the surviving patient ID)")
+            warnings.append("A08 without PID-3 (the patient ID)")
+        if not (patient_name or birth_date or sex):
+            warnings.append("A08 carries no PID-5/PID-7/PID-8 to update")
+
     return {
         "message_type": message_type or "ADT^A40",
         "event": event,
         "control_id": control_id,
         "old_patient_id": old_patient_id,
         "new_patient_id": new_patient_id,
+        "patient_name": patient_name,
+        "birth_date": birth_date,
+        "sex": sex,
         "warnings": warnings,
     }

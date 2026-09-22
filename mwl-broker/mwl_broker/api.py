@@ -101,7 +101,7 @@ from .schemas import (
     PatientMergeOut,
     Hl7AdtOut,
 )
-from . import (atna, audit, breaker, cache, config_io, health_checks, hl7, hl7_mapping,
+from . import (adt, atna, audit, breaker, cache, config_io, health_checks, hl7, hl7_mapping,
                merge_rules, merges, mpps, orders, stats, ups,
                local_worklist, metrics, notify, rbac, retention, settings_service,
                simulate, spool, station_rules, tls, transforms)
@@ -1218,27 +1218,34 @@ def list_patient_merges(
 
 @router.post(
     "/merges", response_model=PatientMergeOut, status_code=201, tags=["local"],
-    summary="Merge two patient identifiers",
-    description="Records that `old_patient_id` is now `new_patient_id`. Local "
-                "entries and the routing provenance are updated, so images "
-                "acquired under the old ID are still routed by their worklist "
-                "entry. Reversible (`DELETE`).",
-    response_description="The stored merge.",
+    summary="Merge or link two patient identifiers",
+    description="Records the relation between two identifiers. `kind=merge` "
+                "(default, ADT A40): the old ID is retired — local entries and the "
+                "routing provenance move to the new one, and the worklist answer "
+                "follows it. `kind=link` (ADT A24): both records are the same "
+                "person but both identifiers stay valid — nothing is moved and no "
+                "answer is rewritten. Reversible (`DELETE`).",
+    response_description="The stored merge or link.",
     responses=_docs(VALIDATION_422, READ_ONLY_403),
 )
 def create_patient_merge(
     request: Request,
-    body: Annotated[PatientMergeIn, Body(description="Old and current patient ID.")],
+    body: Annotated[PatientMergeIn, Body(description="Old and current patient ID, plus the kind.")],
     s: Session = _db_dep,
 ):
     try:
-        row = merges.merge(body.old_patient_id, body.new_patient_id,
-                           reason=body.reason, actor=_actor(request), origin="manual")
+        if body.kind == "link":
+            row = merges.link(body.old_patient_id, body.new_patient_id,
+                              reason=body.reason, actor=_actor(request), origin="manual")
+        else:
+            row = merges.merge(body.old_patient_id, body.new_patient_id,
+                               reason=body.reason, actor=_actor(request), origin="manual")
     except ValueError as exc:
         raise HTTPException(422, str(exc))
-    audit.record(s, _actor(request), "patient.merge", "patient_merge", row["id"],
+    audit.record(s, _actor(request), f"patient.{row['kind']}", "patient_merge", row["id"],
                  {"patient_id": row["old_patient_id"]},
-                 {"patient_id": row["new_patient_id"], "reason": row["reason"]},
+                 {"patient_id": row["new_patient_id"], "reason": row["reason"],
+                  "kind": row["kind"]},
                  _correlation(request))
     s.commit()
     return row
@@ -1246,9 +1253,9 @@ def create_patient_merge(
 
 @router.delete(
     "/merges/{merge_id}", status_code=204, tags=["local"],
-    summary="Undo a patient identifier merge",
-    description="Takes the merge out of effect; the entry stays for the audit trail.",
-    response_description="The merge is no longer applied.",
+    summary="Undo a patient identifier merge or link",
+    description="Takes the relation out of effect; the entry stays for the audit trail.",
+    response_description="The merge or link is no longer applied.",
     responses=_docs(READ_ONLY_403, NOT_FOUND_404),
 )
 def delete_patient_merge(
@@ -1282,10 +1289,16 @@ def resolve_patient_merge(
 
 @router.post(
     "/hl7/adt", response_model=Hl7AdtOut, tags=["local"],
-    summary="Accept an HL7 ADT message (patient merge)",
-    description="Reads an ADT^A40 (patient merge) and records the identifier merge. "
-                "`dry_run=true` only reports what would happen. Other ADT events "
-                "are recognised and reported, but not acted upon.",
+    summary="Accept an HL7 ADT message (patient events)",
+    description="Reads an ADT message and applies what the broker can act on: "
+                "`A08` (patient information update — rewrites the demographics of "
+                "the broker's own worklist entries), `A24` (link: the two records "
+                "are the same person, both identifiers stay valid), `A40` (merge: "
+                "the old identifier is retired and the worklist answer follows it) "
+                "and `A47` (unlink). Any other ADT event is recognised and "
+                "reported, not applied. A message that cannot be applied is "
+                "rejected as a whole (422) instead of being applied halfway. "
+                "`dry_run=true` only reports what would happen.",
     response_description="What the message contained and what was done.",
     responses=_docs(VALIDATION_422, READ_ONLY_403),
 )
@@ -1296,38 +1309,17 @@ def apply_hl7_adt(
     dry_run: bool = Query(default=True, description="Only parse and report; write nothing."),
     s: Session = _db_dep,
 ):
-    parsed = hl7.parse_adt(body)
-    result = {
-        "dry_run": dry_run,
-        "event": parsed["event"],
-        "control_id": parsed["control_id"],
-        "old_patient_id": parsed["old_patient_id"],
-        "new_patient_id": parsed["new_patient_id"],
-        "action": "not-applicable",
-        "warnings": parsed["warnings"],
-    }
-    if parsed["event"] != "A40":
-        result["warnings"] = parsed["warnings"] + [
-            f"{parsed['event'] or 'unknown'} is not a merge event (only A40 is applied)"]
-        return result
-    if parsed["warnings"]:
-        raise HTTPException(422, parsed["warnings"])
-    result["action"] = "merged"
-    if dry_run:
-        return result
-
-    try:
-        row = merges.merge(parsed["old_patient_id"], parsed["new_patient_id"],
-                           reason=f"ADT A40 {parsed['control_id']}",
-                           actor=_actor(request), origin="adt")
-    except ValueError as exc:
-        raise HTTPException(422, str(exc))
-    audit.record(s, _actor(request), "patient.merge", "patient_merge", row["id"],
-                 {"patient_id": row["old_patient_id"]},
-                 {"patient_id": row["new_patient_id"], "origin": "adt"},
-                 _correlation(request))
-    s.commit()
-    result["merge_id"] = row["id"]
+    result = adt.apply(body, actor=_actor(request), transport="http", dry_run=dry_run)
+    if result["action"] == "rejected":
+        raise HTTPException(422, result["warnings"])
+    if not dry_run and result["action"] != adt.ACTION_NA:
+        audit.record(s, _actor(request), f"patient.{result['action']}", "patient_merge",
+                     result["record_id"],
+                     {"patient_id": result["old_patient_id"] or result["new_patient_id"]},
+                     {"event": result["event"], "origin": "adt",
+                      "updated_items": result["updated_items"]},
+                     _correlation(request))
+        s.commit()
     return result
 
 

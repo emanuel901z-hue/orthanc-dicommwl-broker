@@ -297,6 +297,23 @@ Token rotieren = nur die Store-Datei neu schreiben:
   Response-Description ≠ Default, alle Path-/Query-Params, Schema-Felder) —
   `test_openapi_documents_all_endpoints` erzwingt das.
 
+- **ADT: Merge entzieht die ID, Link nicht.** `A40` (Zusammenführen) entzieht die
+  alte ID und zieht Daten um; `A24` (Verknüpfen) sagt nur „dieselbe Person", beide
+  IDs bleiben gültig. Deshalb schreibt **nur** ein Merge die C-FIND-Antwort um
+  (`merges.answer_mapping`) — `merges.resolve` folgt beiden, `answer_mapping` nur
+  Merges. Ein `A40` **nach** einem `A24` für dasselbe Paar stuft zur
+  Zusammenführung hoch (sonst bliebe die alte ID für immer stehen), und ein `A47`
+  hebt **nie** eine Zusammenführung auf. Alle vier Ereignisse (`A08`/`A24`/`A40`/
+  `A47`) leben in `adt.py` — REST und MLLP rufen dieselbe Funktion
+  (`mllp.handle_message` routet über `hl7.peek_type`), sonst verhalten sich die
+  Transporte unterschiedlich.
+- **`A08` ändert nur die eigenen Einträge** (`local_worklist_item`) und nur die
+  Felder, die die Nachricht wirklich trägt — ein Namens-Update darf kein
+  Geburtsdatum leeren. Eine *zusammengeführte* ID wird vorher aufgelöst, eine
+  *verknüpfte* nicht (beide sind gültig und können eigene Einträge haben).
+  Zwischengespeicherte Snapshots werden bewusst **nicht** umgeschrieben: der
+  Cache ist eine Upstream-Kopie mit kurzem Stale-Fenster, und die Nachricht kam
+  von genau diesem Upstream.
 - **PHI**: `PatientName` niemals in Logs/Metriken/DB-Logs. Erlaubt für
   Matching: AccessionNumber, SPS-ID, StudyInstanceUID. PatientID nur in
   `seen_items` mit Retention.

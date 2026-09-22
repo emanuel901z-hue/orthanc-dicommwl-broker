@@ -445,9 +445,15 @@ class Hl7FieldMap(Base):
 class PatientMerge(Base):
     """`old_patient_id` is now `new_patient_id` (IHE Patient Information Reconciliation).
 
-    Announced by the RIS as HL7 ADT A40 or entered by an operator. The worklist
-    answer and the routing provenance both use the resolved ID, so a merge
-    changes what the modality sees *and* where images are routed.
+    Announced by the RIS as HL7 ADT (`A40` merge, `A24` link) or entered by an
+    operator. The worklist answer and the routing provenance both use the
+    resolved ID, so a merge changes what the modality sees *and* where images are
+    routed.
+
+    `kind` separates the two: a **merge** (`A40`) retires the old identifier, so
+    the worklist answer is rewritten to the current ID. A **link** (`A24`) only
+    records that the two records are the same person — both identifiers stay
+    valid, and an answer that came back under the old ID is served unchanged.
     """
 
     __tablename__ = "patient_merge"
@@ -459,4 +465,5 @@ class PatientMerge(Base):
     reason: Mapped[str] = mapped_column(String(256), default="")
     actor: Mapped[str] = mapped_column(String(64), default="api")
     origin: Mapped[str] = mapped_column(String(16), default="manual")   # manual | adt
+    kind: Mapped[str] = mapped_column(String(16), default="merge", index=True)  # merge | link
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)

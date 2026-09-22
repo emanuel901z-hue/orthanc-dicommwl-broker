@@ -194,20 +194,27 @@ per C-FIND mit dem Identifier der Modalität abgefragt).
 Der Broker führt Patienten-IDs zusammen — der Fall „Notfallaufnahme, später
 zusammengeführt" oder „zwei Systeme, zwei MRN":
 
-| Weg | Aufruf | Wirkung |
+| Ereignis | Bedeutung | Wirkung im Broker |
 |---|---|---|
-| Vom RIS angesagt | `POST /api/v1/hl7/adt` mit `ADT^A40` (`MRG-1` = alte ID, `PID-3` = neue ID) | Zusammenführung wird gespeichert und angewandt |
-| Manuell | `POST /api/v1/merges` | dasselbe, für Häuser ohne ADT-Weitergabe |
-| Rücknehmen | `DELETE /api/v1/merges/{id}` | außer Kraft, Eintrag bleibt für das Änderungsprotokoll |
-| Prüfen | `GET /api/v1/merges/resolve/{id}` | folgt der Kette (A→B→C), zyklensicher |
+| `ADT^A40` | **Zusammenführen** — die alte ID entfällt | wird gespeichert und angewandt: lokale Einträge und Routing-Herkunft ziehen um, die C-FIND-Antwort trägt die aktuelle ID |
+| `ADT^A24` | **Verknüpfen** — beide IDs bleiben gültig | wird gespeichert; `resolve` folgt der Verknüpfung, aber **nichts wird umgeschrieben** und keine Daten ziehen um |
+| `ADT^A47` | Verknüpfung zurücknehmen | deaktiviert die Verknüpfung; eine Zusammenführung wird **nie** durch ein A47 aufgehoben |
+| `ADT^A08` | Patientendaten aktualisiert | schreibt die Demografie der **eigenen** Arbeitslisten-Einträge um (nur die Felder, die die Nachricht trägt); eine zusammengeführte ID wird vorher aufgelöst |
 
-Die Zusammenführung wirkt an **zwei** Stellen: die C-FIND-Antwort trägt die
-aktuelle ID, und die Routing-Herkunft (`seen_items`) wird mitgezogen — ein Bild,
-das unter der alten ID aufgenommen wurde, wird weiterhin nach seinem
-Arbeitslisten-Eintrag geroutet.
+| Weg | Aufruf |
+|---|---|
+| Über REST | `POST /api/v1/hl7/adt` (mit `dry_run=true` zuerst) |
+| Über MLLP | derselbe Parser auf dem MLLP-Port (`hl7_mllp_port`) — ein RIS sendet ADT dort, wo es auch die Aufträge sendet |
+| Manuell | `POST /api/v1/merges` mit `kind=merge` (Default) oder `kind=link` |
+| Rücknehmen | `DELETE /api/v1/merges/{id}` — außer Kraft, Eintrag bleibt für das Änderungsprotokoll |
+| Prüfen | `GET /api/v1/merges/resolve/{id}` — folgt der Kette (A→B→C), zyklensicher |
 
-**Nicht enthalten:** die IHE-Link/Unlink-Events `A24`/`A47`, PIX-/PDQ-Abfragen
-und eine automatische Auflösung aus dem PACS.
+Ein `A40` **nach** einem `A24` für dasselbe Paar stuft die Verknüpfung zur
+Zusammenführung hoch — sonst bliebe die alte ID für immer stehen.
+
+**Nicht enthalten:** PIX-/PDQ-Abfragen, die automatische Auflösung aus dem PACS
+und das Umschreiben zwischengespeicherter Snapshots (der Cache ist eine
+Upstream-Kopie mit kurzem Stale-Fenster; siehe `adt.py`).
 
 ## 9c. Auftragskontext (REST, für MADO-Manifest-Erzeuger)
 

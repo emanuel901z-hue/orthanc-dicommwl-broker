@@ -177,6 +177,41 @@ def purge_expired() -> int:
     return removed
 
 
+def update_demographics(patient_id: str, *, patient_name: str = "",
+                        birth_date: str = "", sex: str = "") -> int:
+    """Apply a demographics update (ADT A08) to the items of one patient.
+
+    Only the fields the message actually carries are overwritten — an A08 that
+    changes the name must not blank the birth date. Returns how many items
+    changed. The patient ID itself is never rewritten here: that is a merge
+    (`merges.merge`), and `adt` resolves a retired ID before calling.
+
+    PHI: this is the table that legitimately holds the name (the modality shows
+    it), so nothing is logged from here.
+    """
+    pid = (patient_id or "").strip()
+    if not pid:
+        return 0
+    changed = 0
+    with session_factory()() as s:
+        for item in s.scalars(
+            select(LocalWorklistItem).where(LocalWorklistItem.patient_id == pid)
+        ).all():
+            touched = False
+            for field, value in (("patient_name", patient_name),
+                                 ("birth_date", birth_date), ("sex", sex)):
+                if value and getattr(item, field) != value:
+                    setattr(item, field, value)
+                    touched = True
+            if touched:
+                changed += 1
+        if changed:
+            s.commit()
+    if changed:
+        log.info("ADT A08: demographics of %d local item(s) updated", changed)
+    return changed
+
+
 def log_hl7(transport: str, parsed: dict, action: str, error: str = "",
             raw: str = "") -> None:
     """Record an inbound message (both transports) for troubleshooting.

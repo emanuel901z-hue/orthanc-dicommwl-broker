@@ -219,7 +219,7 @@ def test_adt_a40_applies_the_merge(client):
     result = client.post("/api/v1/hl7/adt?dry_run=false", content=ADT_A40,
                          headers={"Content-Type": "text/plain"}).json()
 
-    assert result["merge_id"]
+    assert result["record_id"]
     assert merges.resolve("ALT-4711") == "12345"
     with session_factory()() as s:
         item = s.query(LocalWorklistItem).filter_by(accession="ACC-PIR-9").one()
@@ -237,15 +237,16 @@ def test_adt_with_a_missing_mrg_is_refused_with_plain_words(client):
     assert "MRG-1" in response.text
 
 
-def test_other_adt_events_are_reported_but_not_applied(client):
-    other = ("MSH|^~\\&|RIS|KH|MWLBROKER|KH|20260922120000||ADT^A08|MSG-3|P|2.4\r"
+def test_an_unhandled_adt_event_is_reported_but_not_applied(client):
+    """A03 (visit notification) is none of the broker's business."""
+    other = ("MSH|^~\\&|RIS|KH|MWLBROKER|KH|20260922120000||ADT^A03|MSG-3|P|2.4\r"
              "PID|1||99999^^^KH^MR||Muster^Max\r")
 
     result = client.post("/api/v1/hl7/adt?dry_run=false", content=other,
                          headers={"Content-Type": "text/plain"}).json()
 
     assert result["action"] == "not-applicable"
-    assert any("A08" in w for w in result["warnings"])
+    assert any("A03" in w for w in result["warnings"])
     assert client.get("/api/v1/merges").json() == []
 
 

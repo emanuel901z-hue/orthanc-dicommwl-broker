@@ -1,15 +1,16 @@
-"""MLLP listener for HL7 ORM orders.
+"""MLLP listener for HL7 ORM orders and ADT messages.
 
 Many RIS only speak MLLP (a TCP stream with `0x0B` … `0x1C 0x0D` framing), so
 the broker offers a listener next to the REST endpoint. It applies the same
-parser and upsert path, answers with an ACK/NAK and never touches the DICOM
-path — a slow or broken sender only occupies its own connection.
+parsers and the same write paths — orders go through `local_worklist`, patient
+events (`A08`/`A24`/`A40`/`A47`) through `adt` — answers with an ACK/NAK and never
+touches the DICOM path: a slow or broken sender only occupies its own connection.
 """
 import logging
 import socket
 import threading
 
-from . import hl7, local_worklist, metrics, settings_service
+from . import adt, hl7, local_worklist, metrics, settings_service
 
 log = logging.getLogger("mwl_broker.mllp")
 
@@ -42,6 +43,17 @@ def _read_frame(conn: socket.socket) -> str:
 
 def handle_message(text: str, transport: str = "mllp") -> tuple[bool, str, str]:
     """Parse and apply one message. Returns (ok, control_id, error)."""
+    message_type = hl7.peek_type(text)
+
+    # Patient events first: an RIS that sends ADT does it over the same link.
+    if message_type.upper().startswith("ADT"):
+        result = adt.apply(text, actor=f"{transport}:{message_type or 'ADT'}",
+                           transport=transport)
+        control_id = result["control_id"]
+        if result["action"] == "rejected":
+            return False, control_id, "; ".join(result["warnings"])[:200]
+        return True, control_id, ""
+
     parsed = hl7.parse(text)
     control_id = parsed.get("control_id", "")
 

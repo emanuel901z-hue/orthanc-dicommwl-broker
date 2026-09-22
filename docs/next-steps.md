@@ -32,8 +32,8 @@ Begründung.
 | # | Vorhaben | Warum | Aufwand |
 |---|---|---|---|
 | F1 | ~~MRN-Merge / Identifier-Reconciliation~~ — **erledigt**: `ADT^A40` und manueller Eintrag, rücknehmbar, wirkt auf Arbeitsliste **und** Routing-Herkunft (Kette zyklensicher). Offen: A24/A47-Links und PIX/PDQ | — | ✅ |
-| F2a | **ADT `A08`/`A24`/`A47`** (Patientendaten geändert, Link/Unlink) | `A08` ist das **häufigste** reale ADT-Event — heute ist nur `A40` abgedeckt. Ein Haus, das `A08` nicht weiterleitet, arbeitet mit veralteten Demografiedaten weiter; `A24`/`A47` schließen die in der [IHE-Aussage](ihe-profile-statement.md) benannte PIR-Lücke | klein (Erweiterung von `hl7.py`/`merges.py`) |
-| F2b | **Weitere Datenquellen ohne HL7**: GDT/BDT, strukturierte Textdateien, `OMG` | Praxen und Häuser ohne HL7-Schnittstelle (GDT ist der deutsche Sonderweg); `OMG` für Auftragsänderungen | mittel (je Quelle ein Adapter) |
+| F2a | ~~ADT `A08`/`A24`/`A47`~~ — **erledigt**: `A08` schreibt die Demografie der eigenen Arbeitslisten-Einträge um (nur die Felder, die die Nachricht trägt), `A24` speichert eine **Verknüpfung** (beide IDs bleiben gültig — es wird *nichts* umgeschrieben) und `A47` nimmt sie zurück. Beides über REST **und** MLLP; ein `A40` nach einem `A24` stuft zur Zusammenführung hoch. Offen: `OMG`, PIX/PDQ | — | ✅ |
+| F2b | **Weitere Datenquellen ohne HL7**: GDT/BDT, strukturierte Textdateien | Praxen und Häuser ohne HL7-Schnittstelle (GDT ist der deutsche Sonderweg) | mittel (je Quelle ein Adapter) |
 | F3 | **UPS-RS vervollständigen**: Subscriptions/WebSocket-Events, vollständiger Attributsatz, Suche über Upstream | Für Clients, die den Standard voll ausreizen; heute bewusst als Grenze dokumentiert | groß |
 | F4 | **Voraufnahmen-Prefetch** (relevante Voruntersuchungen auf Anforderung ziehen) | Radiologen brauchen Voraufnahmen am Befundplatz; heute Aufgabe von PACS/VNA | groß (eigenes Werkzeug) |
 | F5 | **Tag-Morphing über Felder hinaus**: Sequenz-Operationen, Private Tags, Encoding-Transkodierung | Für Häuser mit exotischen Empfängern. **Getrennt halten:** Private Tags und Sequenzen sind machbar; Transkodierung widerspricht dem heutigen Statement („der Broker ändert keine Pixel") und ist die Stelle, an der man Bilddaten beschädigen kann — nur mit eigener Entscheidung | mittel |
@@ -115,7 +115,8 @@ Matching-Feinheiten auffallen, die kein Mock nachbildet.
    ~90 ms pro C-FIND-Runde herkommen (eigener Client oder Gegenstelle).
 8. **B1 (Hochverfügbarkeit)** — mit dem Design-Vorlauf aus §3; erst danach die
    zweite Instanz.
-9. **F2a (ADT `A08`/`A24`/`A47`)** — klein, schließt die PIR-Lücke.
+9. ~~**F2a (ADT `A08`/`A24`/`A47`)**~~ — **erledigt**: die PIR-Lücke ist
+    geschlossen, Verknüpfung und Zusammenführung sind sauber getrennt.
 10. **C4 (SLA/Schulungsunterlagen)** — organisatorisch, aber Eintrittskarte für
     jede Ausschreibung.
 11. **F2b (GDT/BDT)**, **F5 (Tag-Morphing)** — nach Bedarf, je Haus.
