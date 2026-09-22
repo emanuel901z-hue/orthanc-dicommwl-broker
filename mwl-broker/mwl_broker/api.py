@@ -97,7 +97,7 @@ from .schemas import (
     Hl7FieldMapOut,
 )
 from . import (atna, audit, breaker, cache, config_io, health_checks, hl7, hl7_mapping,
-               merge_rules, mpps, stats,
+               merge_rules, mpps, stats, ups,
                local_worklist, metrics, notify, rbac, retention, settings_service,
                simulate, spool, station_rules, tls, transforms)
 from .models import (BrokerSetting, ConfigAudit, Hl7Message, LocalWorklistItem,
@@ -2017,6 +2017,98 @@ def health_config(s: Session = _db_dep):
 
     findings = health_checks.config_findings(s, get_settings())
     return {"findings": findings, "summary": health_checks.summary(findings)}
+
+
+# ── UPS-RS (DICOMweb worklist, pragmatic subset) ───────────────────────
+
+@router.get(
+    "/dicom-web/workitems", tags=["ups"],
+    summary="Search work items (UPS-RS)",
+    description="DICOMweb search over the work items the broker holds itself "
+                "(emergencies and unscheduled examinations). Query parameters are "
+                "DICOM keywords, e.g. `AccessionNumber` or `ScheduledStationAETitle`. "
+                "The response uses the DICOM JSON model. Subscriptions and event "
+                "reports are not implemented (see the conformance statement).",
+    response_description="Matching work items as a DICOM JSON array.",
+)
+def ups_search(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500, description="Maximum number of work items."),
+):
+    # the client sends DICOM keywords; the module works on the JSON tag keys
+    query = {ups.QUERY_KEYS[key]: value
+             for key, value in request.query_params.items() if key in ups.QUERY_KEYS}
+    return ups.search(query, limit=limit)
+
+
+@router.get(
+    "/dicom-web/workitems/{workitem_uid}", tags=["ups"],
+    summary="Retrieve one work item (UPS-RS)",
+    description="One work item by its UID, in the DICOM JSON model.",
+    response_description="The work item.",
+    responses={404: {"description": "No work item with this UID."}},
+)
+def ups_retrieve(
+    workitem_uid: Annotated[str, Path(description="Work item UID.")],
+):
+    item = ups.get_workitem(workitem_uid)
+    if item is None:
+        raise HTTPException(404, "not found")
+    return item
+
+
+@router.post(
+    "/dicom-web/workitems", status_code=201, tags=["ups"],
+    summary="Create a work item (UPS-RS)",
+    description="Creates a local work item from a DICOM JSON body — the REST "
+                "equivalent of a manually entered emergency. `AccessionNumber` is "
+                "required; the created work item is returned.",
+    response_description="The created work item.",
+    responses=_docs(VALIDATION_422, READ_ONLY_403),
+)
+def ups_create(
+    request: Request,
+    body: Annotated[dict, Body(description="Work item in the DICOM JSON model.")],
+    s: Session = _db_dep,
+):
+    try:
+        item = ups.create_workitem(body)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    audit.record(s, _actor(request), "ups.create", "local_item", None, None,
+                 {"accession": item.get("00080050", {}).get("Value", [""])[0]},
+                 _correlation(request))
+    s.commit()
+    return item
+
+
+@router.put(
+    "/dicom-web/workitems/{workitem_uid}/state", tags=["ups"],
+    summary="Change the state of a work item (UPS-RS)",
+    description="Sets the procedure step state (SCHEDULED, IN PROGRESS, COMPLETED, "
+                "CANCELED). COMPLETED and CANCELED take the work item out of the "
+                "worklist, like a finished MPPS step.",
+    response_description="The work item after the change.",
+    responses={404: {"description": "No work item with this UID."},
+               **_docs(VALIDATION_422, READ_ONLY_403)},
+)
+def ups_set_state(
+    request: Request,
+    workitem_uid: Annotated[str, Path(description="Work item UID.")],
+    body: Annotated[dict, Body(description="{\"state\": \"IN PROGRESS\"} or a DICOM JSON state value.")],
+    s: Session = _db_dep,
+):
+    state = str(body.get("state") or ups._read_value(body, "00404041") or "")
+    try:
+        item = ups.set_state(workitem_uid, state)
+    except LookupError:
+        raise HTTPException(404, "not found")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    audit.record(s, _actor(request), "ups.state", "local_item", None, None,
+                 {"state": state}, _correlation(request))
+    s.commit()
+    return item
 
 
 @router.get(

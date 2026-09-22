@@ -35,6 +35,7 @@ KIS   ─┘   MWL SCP + MPPS SCP   └─→ PACS Partner (C-STORE)
 | **Retrieve Information for Display / XDS-I** | **nein** | keine Dokumenten-/Bildabfrage |
 | **ATNA** (Audit Trail and Node Authentication) | **teilweise** | Audit-Nachrichten (RFC 3881/DICOM) können an eine Audit-Gegenstelle gesendet werden (`atna_enabled`); **Node Authentication** ist über DICOM-TLS mit Client-Zertifikaten möglich (`tls_inbound_client_auth`), ein Zertifikat-zu-AET-Mapping ist nicht implementiert |
 | **PDQ / PIX** (Patient Demographics/Identifier Query) | **nein** | Patientendaten kommen aus den Auftragsnachrichten bzw. der lokalen Worklist |
+| **Unified Procedure Step (UPS/UPS-RS)** | **teilweise** | REST-Worklist (Suche/Abruf/Anlegen/Statuswechsel) für lokale Aufträge; Subscriptions/Events fehlen (siehe Conformance Statement §9a) |
 
 ## 3. Transaktions-Details (Scheduled Workflow)
 

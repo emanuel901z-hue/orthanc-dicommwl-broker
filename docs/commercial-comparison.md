@@ -101,7 +101,7 @@ Verifikation (`./ci-local.sh`) und einem Commit — ohne Regression.
 | 2 | **Feldweiser Merge + Mapping-Vorlagen** — je DICOM-Feld die Quelle bestimmen; HL7→DICOM-Mapping sichtbar und änderbar | ✅ **erledigt** |
 | 3 | **DICOM Conformance Statement + IHE-Aussage** — Dokumente plus ein Test, der Dokument und Code zusammenhält | ✅ **erledigt** |
 | 4 | **Statistik/Reporting** — Kennzahlen je Quelle/Modalität/Station und Tagesreihe, API + UI | ✅ **erledigt** |
-| 5 | **UPS-RS** — DICOMweb-Worklist (Suche, Abruf, Anlegen, Statuswechsel) auf derselben Aggregation | ⏳ geplant |
+| 5 | **UPS-RS** — DICOMweb-Worklist (Suche, Abruf, Anlegen, Statuswechsel) auf derselben Aggregation | ✅ **erledigt (Subset)** |
 
 ### Sprint 1 — MPPS SCP und Status-Rückmeldung (✅ erledigt)
 
@@ -160,9 +160,20 @@ Modalität/Station, lückenfreie Tagesreihe, Zeitraumwahl und Grenzen, Spool-
 Zustand, **PHI-Freiheit** — Patientennamen und Zugangsnummern tauchen nicht auf,
 leerer Zeitraum), `StatsCard.test.tsx` (4).
 
-### Sprint 5 — UPS-RS (DICOMweb-Worklist) (⏳ geplant)
+### Sprint 5 — UPS-RS (DICOMweb-Worklist) (✅ erledigt, bewusst als Subset)
 
 `/dicom-web/workitems` mit **Suche**, **Abruf**, **Anlegen** und
 **Statuswechsel** — gemappt auf dieselbe Aggregation wie der DIMSE-Pfad.
 Subscriptions/WebSocket-Ereignisse bleiben bewusst außen vor und werden im
 Statement als Grenze genannt.
+
+**Nachweis:** `tests/test_ups_rs.py` (7: Anlegen/Abruf/Suche, erneutes Anlegen
+aktualisiert statt zu duplizieren, Statuswechsel nimmt den Eintrag aus der
+Arbeitsliste (geprüft über die echte Aggregation), Status in beiden
+Schreibweisen, Klartext-Validierung, per HL7-Mapping gefüllte Zusatzfelder
+erscheinen im Work Item, stabile UID).
+
+**Grenzen (im Conformance Statement dokumentiert):** keine Subscriptions/
+WebSocket-Ereignisse, kein vollständiger UPS-Attributsatz, Suche nur über die
+lokalen Work Items (Upstream-Quellen werden weiterhin per C-FIND mit dem
+Identifier der Modalität abgefragt).

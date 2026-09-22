@@ -152,7 +152,7 @@ Angeboten, wenn `mpps_enabled` (Standard an):
 
 | Dienst | Status | Begründung |
 |---|---|---|
-| UPS / UPS-RS (Unified Procedure Step, DICOMweb) | **nicht** (geplant) | Moderne Alternative zur MWL; die aktuelle Versorgung nutzt MWL |
+| UPS / UPS-RS (Unified Procedure Step, DICOMweb) | **teilweise** | REST-Worklist unter `/api/v1/dicom-web/workitems` (Suche, Abruf, Anlegen, Statuswechsel) — **ohne** Subscriptions/WebSocket-Ereignisse und ohne den vollständigen UPS-Attributsatz; die Suche umfasst die lokalen Work Items |
 | C-MOVE / C-GET (Query/Retrieve) | nicht | Der Broker verteilt Bilder per C-STORE, nicht per Retrieve |
 | Storage Commitment (N-ACTION) | nicht | Aufgabe des Archivs/PACS |
 | Basic Study Content Notification | nicht | Aufgabe des PACS |
@@ -162,6 +162,21 @@ Angeboten, wenn `mpps_enabled` (Standard an):
 | Transkodierung / Pixel-Manipulation | nicht | Der Broker ändert keine Bilddaten |
 | De-Identifikation (PS3.15) | nicht | gehört in einen Router mit Pseudonym-Verwaltung |
 | Prefetch von Voraufnahmen | nicht | Aufgabe von PACS/VNA |
+
+## 9a. UPS-RS (DICOMweb-Worklist)
+
+Der Broker bietet einen **pragmatischen Teil** von PS3.18 §11 an:
+
+| Transaktion | Pfad | Anmerkung |
+|---|---|---|
+| Search | `GET /api/v1/dicom-web/workitems?AccessionNumber=…` | DICOM-JSON-Antwort; Suchschlüssel: AccessionNumber, PatientID, PatientName, ScheduledStationAETitle, Modality, ScheduledProcedureStepStartDate, ScheduledProcedureStepID, StudyInstanceUID, ProcedureStepState |
+| Retrieve | `GET /api/v1/dicom-web/workitems/{uid}` | UID stabil je Work Item |
+| Create | `POST /api/v1/dicom-web/workitems` | legt einen lokalen Auftrag an (AccessionNumber Pflicht) |
+| Change state | `PUT /api/v1/dicom-web/workitems/{uid}/state` | SCHEDULED, IN PROGRESS, COMPLETED, CANCELED; COMPLETED/CANCELED nehmen den Eintrag aus der Arbeitsliste |
+
+**Nicht enthalten:** Subscriptions und Ereignisberichte (WebSocket), der
+vollständige UPS-Attributsatz, Suche über Upstream-Quellen (die werden weiterhin
+per C-FIND mit dem Identifier der Modalität abgefragt).
 
 ## 10. Grenzen und Betriebswerte
 

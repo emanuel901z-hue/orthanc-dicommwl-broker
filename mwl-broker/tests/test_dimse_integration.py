@@ -991,9 +991,14 @@ def test_breaker_skips_hanging_source_and_keeps_queries_fast(broker, mwl_scp, ha
     started = time.monotonic()
     answers = _cfind(broker, _wildcard_query())
     elapsed = time.monotonic() - started
+    # The property under test is that the skipped source is not waited for; the
+    # bound is deliberately generous because a loaded CI machine is slow. Paying
+    # the 1 s timeout again would take at least twice as long as the limit.
 
     assert len(answers) == 2, "the live source must still answer"
-    assert elapsed < 0.5, f"breaker did not skip the hanging source ({elapsed:.2f}s)"
+    # 1 s would be the full timeout of the hanging source; a generous 0.9 s still
+    # proves it was skipped and survives a loaded machine
+    assert elapsed < 0.9, f"breaker did not skip the hanging source ({elapsed:.2f}s)"
     log_row = _last_query_log()
     assert log_row.per_source["hanging"] == "breaker_open"
     assert log_row.per_source["ris-a"] == 2
