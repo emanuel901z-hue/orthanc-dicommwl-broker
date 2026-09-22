@@ -37,8 +37,8 @@ wir zusagen.
 |---|---|---|
 | **Scheduled Workflow (SWF)** — „Modality Worklist Provided" (DICOM MWL C-FIND) | **ja** | Kernfunktion: Aggregation mehrerer Auftraggeber, Merge, Dedupe, Stationsregeln |
 | **SWF** — „Modality Performed Procedure Step" (MPPS, N-CREATE/N-SET) | **ja** | seit Sprint 1; Rückmeldung als HL7 `ORU^R01` (Z01/Z02/Z03) |
-| **SWF** — „Procedure Scheduled / Updated" (HL7 `ORM^O01`, `OMG^O19`) | **ja** | REST und MLLP; auch `CA` (Stornierung). `OMG^O19` (General Clinical Order) trägt dasselbe ORC/OBR-Layout und läuft über denselben Pfad; **alles andere wird abgelehnt** — eine `ORU^R01` (Befund) trägt ebenfalls OBR-Segmente und darf nie ein Arbeitslisten-Eintrag werden |
-| **Patient Information Reconciliation (PIR)** | **ja** | Identifier werden übernommen, je Fall zusammengeführt (Dedupe über PatientID+Accession+SPS) und **zusammengeführt**: `ADT^A40` oder manuell eintragen; Arbeitsliste **und** Routing-Herkunft folgen der aktuellen ID, rücknehmbar. Ebenso `ADT^A24` (**Verknüpfung** — beide IDs bleiben gültig, es wird nichts umgeschrieben) und `ADT^A47` (Verknüpfung zurücknehmen), dazu `ADT^A08` (Patientendaten aktualisieren). Nicht enthalten: PIX/PDQ-Abfragen |
+| **SWF** — „Procedure Scheduled / Updated" (HL7 `ORM^O01`, `OMG^O19`, `OMI^O23`) | **ja** | REST und MLLP; auch `CA` (Stornierung). `OMG^O19` (General Clinical Order) und `OMI^O23` (Imaging Order — die moderne Radiologie-Auftragsnachricht) tragen dasselbe ORC/OBR-Layout und laufen über denselben Pfad; **alles andere wird abgelehnt** — eine `ORU^R01` (Befund) trägt ebenfalls OBR-Segmente und darf nie ein Arbeitslisten-Eintrag werden |
+| **Patient Information Reconciliation (PIR)** | **ja** | Identifier werden übernommen, je Fall zusammengeführt (Dedupe über PatientID+Accession+SPS) und **zusammengeführt**: `ADT^A40` oder manuell eintragen; Arbeitsliste **und** Routing-Herkunft folgen der aktuellen ID, rücknehmbar. Ebenso `ADT^A24` (**Verknüpfung** — beide IDs bleiben gültig, es wird nichts umgeschrieben) und `ADT^A47` (Verknüpfung zurücknehmen), dazu `ADT^A08` und `ADT^A31` (Patientendaten aktualisieren). Nicht enthalten: PIX/PDQ-Abfragen |
 | **Consistent Presentation of Images / Evidence Documents** | **nein** | Der Broker ist kein Archiv/Viewer |
 | **Retrieve Information for Display / XDS-I** | **nein** | keine Dokumenten-/Bildabfrage |
 | **ATNA** (Audit Trail and Node Authentication) | **teilweise** | Audit-Nachrichten (RFC 3881/DICOM) können an eine Audit-Gegenstelle gesendet werden (`atna_enabled`); **Node Authentication** ist über DICOM-TLS mit Client-Zertifikaten möglich (`tls_inbound_client_auth`), ein Zertifikat-zu-AET-Mapping ist nicht implementiert |
@@ -144,7 +144,14 @@ gegen Fremdsoftware geprüft (insgesamt 15 Prüfungen). Sieben dabei gefundene
 Fehler stehen in [`interop.md`](interop.md) §2; die Werkzeug-Übersicht in
 [`interop-tools.md`](interop-tools.md).
 
+Ergänzt wurde **TLS gegen einen fremden TLS-Stack** in beide Richtungen,
+inklusive **mTLS** (DCMTK's `storescp +tls` verlangt ein Client-Zertifikat).
+**Angenommen werden jetzt auch `OMI^O23` und `ADT^A31`** — beide Lücken aus den
+fremden Beispieldaten sind geschlossen (23 Prüfungen).
+
 **Offen (E1):** eine HL7-Profilvalidierung durch den Gazelle HL7 Validator, TLS
-gegen fremde Peers und der Einsatz gegen ein echtes Gerät bzw. ein fremdes RIS
-auf einem Connectathon oder Projectathon. Zwei Nachrichtentypen fehlen noch:
-`OMI^O23` (Imaging Order) und `ADT^A31`.
+mit Zertifikaten aus einer echten PKI (Gazelle Security Suite) und der Einsatz
+gegen ein echtes Gerät bzw. ein fremdes RIS auf einem Connectathon oder
+Projectathon. Auf der erreichbaren Windows-Workstation liegen dafür
+Hersteller-Werkzeuge bereit (`SendSCU.exe`, Carestream-/Philips-Clients), aber
+kein laufender Fremd-Server.

@@ -28,9 +28,11 @@ COMPOSE="docker compose --project-name mwl-interop --env-file .env.test -f docke
 
 API="${API:-http://127.0.0.1:19081}"
 BROKER_DICOM_PORT="${BROKER_DICOM_PORT:-11123}"
+BROKER_TLS_PORT="${BROKER_TLS_PORT:-19083}"    # unser TLS-Listener (Test-Stack)
 BROKER_AET="${BROKER_AET:-MWLBROKER}"
 WLM_PORT="${WLM_PORT:-11116}"        # fremdes RIS   (wlmscpfs)
 PACS_PORT="${PACS_PORT:-11117}"      # fremdes PACS  (dcmqrscp)
+PACS_TLS_PORT="${PACS_TLS_PORT:-11119}"  # fremder TLS-Server (storescp +tls)
 WLM_AET="${WLM_AET:-OFFIS}"          # DCMTK-Beispiel-Worklist läuft unter OFFIS
 PACS_AET="${PACS_AET:-DCMTK_PACS}"
 WORK="${WORK:-/tmp/mwl-interop}"
@@ -59,6 +61,7 @@ cleanup() {
   if [ "$KEEP" -eq 0 ]; then
     pkill -x wlmscpfs 2>/dev/null
     pkill -x dcmqrscp 2>/dev/null
+    pkill -x storescp 2>/dev/null
     docker rm -f interop-hl7rcv > /dev/null 2>&1
     echo "── tearing down interop stack (volumes included) ──"
     $COMPOSE down -v --remove-orphans > /dev/null 2>&1
@@ -79,18 +82,31 @@ api() {
   fi
 }
 
-# ── Vorprüfung: die Fremdsoftware muss da sein ────────────────────────────
-echo "── Fremdsoftware prüfen (DCMTK) ──"
+# ── Vorprüfung: die Fremdsoftware muss da sein — und wirklich DCMTK sein ──
+# Achtung: `~/.local/bin` enthält **Python-Wrapper** mit denselben Namen
+# (pynetdicom-CLI-Apps: findscu, storescu, echoscu, storescp) und liegt vor
+# `/usr/bin` im PATH. Wer `findscu` aufruft, prüft dann unsere eigene
+# Bibliothek statt Fremdsoftware — deshalb absolute Pfade und ein Nachweis.
+DCMTK_BIN="${DCMTK_BIN:-/usr/bin}"
+echo "── Fremdsoftware prüfen (DCMTK in $DCMTK_BIN) ──"
 missing=()
 for tool in wlmscpfs dcmqrscp findscu storescu echoscu dump2dcm dcmdump; do
-  command -v "$tool" > /dev/null 2>&1 || missing+=("$tool")
+  [ -x "$DCMTK_BIN/$tool" ] || missing+=("$tool")
 done
 if [ ${#missing[@]} -gt 0 ]; then
-  echo "DCMTK fehlt: ${missing[*]}"
+  echo "DCMTK fehlt in $DCMTK_BIN: ${missing[*]}"
   echo "Installieren mit: sudo apt install dcmtk"
   exit 2
 fi
-echo "   $(dcmtk --version 2>/dev/null | head -1 || wlmscpfs --version 2>/dev/null | head -1)"
+version=$("$DCMTK_BIN/echoscu" --version 2>&1 | head -1)
+printf '%s' "$version" | grep -q "dcmtk" || {
+  echo "Die Werkzeuge in $DCMTK_BIN sind nicht DCMTK: $version"
+  exit 2
+}
+echo "   $version"
+if command -v findscu > /dev/null 2>&1 && [ "$(command -v findscu)" != "$DCMTK_BIN/findscu" ]; then
+  echo "   Hinweis: 'findscu' im PATH ist $(command -v findscu) — der Test nutzt $DCMTK_BIN/findscu"
+fi
 
 # ── fremdes RIS: Worklist-Datenbank aus den DCMTK-Beispielen ──────────────
 echo "── fremdes RIS aufbauen (wlmscpfs + DCMTK-Beispiel-Worklist) ──"
@@ -105,7 +121,7 @@ cp "$EXAMPLE/$WLM_AET/lockfile" "$WORK/wlmdb/$WLM_AET/" 2>/dev/null || touch "$W
 converted=0
 for f in "$EXAMPLE/$WLM_AET"/*.dump; do
   # die Beispiele sind CSV-Text; wlmscpfs will DICOM-Dateien mit Suffix .wl
-  dump2dcm -g "$f" "$WORK/wlmdb/$WLM_AET/$(basename "$f" .dump).wl" > /dev/null 2>&1 && converted=$((converted + 1))
+  "$DCMTK_BIN/dump2dcm" -g "$f" "$WORK/wlmdb/$WLM_AET/$(basename "$f" .dump).wl" > /dev/null 2>&1 && converted=$((converted + 1))
 done
 check "fremde Worklist vorbereitet" "$([ "$converted" -ge 1 ] && echo 1 || echo 0)" "$converted Einträge"
 
@@ -152,13 +168,13 @@ echo "── Fremdsoftware starten ──"
 pkill -x wlmscpfs 2>/dev/null
 pkill -x dcmqrscp 2>/dev/null
 sleep 1
-nohup wlmscpfs -dfp "$WORK/wlmdb" "$WLM_PORT" > "$WORK/wlmscpfs.log" 2>&1 & disown
-nohup dcmqrscp --config "$WORK/dcmqrscp.cfg" "$PACS_PORT" > "$WORK/dcmqrscp.log" 2>&1 & disown
+nohup "$DCMTK_BIN/wlmscpfs" -dfp "$WORK/wlmdb" "$WLM_PORT" > "$WORK/wlmscpfs.log" 2>&1 & disown
+nohup "$DCMTK_BIN/dcmqrscp" --config "$WORK/dcmqrscp.cfg" "$PACS_PORT" > "$WORK/dcmqrscp.log" 2>&1 & disown
 sleep 3
 check "fremdes RIS antwortet (C-ECHO an $WLM_AET)" \
-  "$(echoscu 127.0.0.1 "$WLM_PORT" -aec "$WLM_AET" -aet "$BROKER_AET" > /dev/null 2>&1 && echo 1 || echo 0)"
+  "$("$DCMTK_BIN/echoscu" 127.0.0.1 "$WLM_PORT" -aec "$WLM_AET" -aet "$BROKER_AET" > /dev/null 2>&1 && echo 1 || echo 0)"
 check "fremdes PACS antwortet (C-ECHO an $PACS_AET)" \
-  "$(echoscu 127.0.0.1 "$PACS_PORT" -aec "$PACS_AET" -aet "$BROKER_AET" > /dev/null 2>&1 && echo 1 || echo 0)"
+  "$("$DCMTK_BIN/echoscu" 127.0.0.1 "$PACS_PORT" -aec "$PACS_AET" -aet "$BROKER_AET" > /dev/null 2>&1 && echo 1 || echo 0)"
 
 # ── Broker an die Fremdsoftware anschließen ───────────────────────────────
 echo "── Broker mit der Fremdsoftware verbinden ──"
@@ -175,7 +191,7 @@ check "unser Upstream-Client liest die fremde Worklist" \
   "$([ "${probe_answers:-0}" -ge 10 ] && echo 1 || echo 0)" "Antworten: ${probe_answers:-0}"
 
 echo "── Fremde Modalität fragt den Broker (C-FIND MWL) ──"
-findscu -W -k "0008,0050=" -k "0010,0010=" -k "0040,0100" \
+"$DCMTK_BIN/findscu" -W -k "0008,0050=" -k "0010,0010=" -k "0040,0100" \
   127.0.0.1 "$BROKER_DICOM_PORT" -aec "$BROKER_AET" -aet "DCMTK_MOD" \
   > "$WORK/cfind.out" 2>&1
 # DCMTK druckt je Antwort eine Pending-Zeile: die fremde Modalität muss genau
@@ -235,7 +251,7 @@ ds.PixelData = b"\0" * 32
 ds.save_as(sys.argv[1], enforce_file_format=True)
 print(sop)
 PY
-storescu 127.0.0.1 "$BROKER_DICOM_PORT" -aec "$BROKER_AET" -aet "DCMTK_MOD" \
+"$DCMTK_BIN/storescu" 127.0.0.1 "$BROKER_DICOM_PORT" -aec "$BROKER_AET" -aet "DCMTK_MOD" \
   "$WORK/cstore.dcm" > "$WORK/cstore.out" 2>&1
 store_ok=$?
 check "die fremde Modalität bekommt den Store bestätigt" "$([ "$store_ok" -eq 0 ] && echo 1 || echo 0)" \
@@ -245,7 +261,7 @@ arrived=$(find "$WORK/pacs" -name "CT_*.dcm" -type f | wc -l)
 check "das Bild liegt im fremden PACS" "$([ "$arrived" -ge 1 ] && echo 1 || echo 0)" "$arrived Datei(en)"
 # unabhängig dekodiert: nicht mit pydicom, sondern mit DCMTK
 if [ "$arrived" -ge 1 ]; then
-  decoded=$(dcmdump "$(find "$WORK/pacs" -name "CT_*.dcm" -type f | head -1)" 2>/dev/null)
+  decoded=$("$DCMTK_BIN/dcmdump" "$(find "$WORK/pacs" -name "CT_*.dcm" -type f | head -1)" 2>/dev/null)
   check "der fremde Decoder liest die weitergeleiteten Daten" \
     "$(printf '%s' "$decoded" | grep -q "INTEROP-1" && echo 1 || echo 0)" \
     "$(printf '%s' "$decoded" | grep -E 'AccessionNumber|PatientID' | head -2 | tr -s ' ' | tr '\n' ' ' | cut -c1-70)"
@@ -253,7 +269,7 @@ fi
 
 echo "── Unser Broker als SCP gegen die fremde Modalität (C-ECHO) ──"
 check "fremdes C-ECHO an unseren SCP" \
-  "$(echoscu 127.0.0.1 "$BROKER_DICOM_PORT" -aec "$BROKER_AET" -aet "DCMTK_MOD" > /dev/null 2>&1 && echo 1 || echo 0)"
+  "$("$DCMTK_BIN/echoscu" 127.0.0.1 "$BROKER_DICOM_PORT" -aec "$BROKER_AET" -aet "DCMTK_MOD" > /dev/null 2>&1 && echo 1 || echo 0)"
 
 echo "── Fremdsoftware 2: dcm4che (fremder MPPS-SCU + fremder HL7-Stack) ──"
 # dcm4che (Java, Apache-2.0) hat, was DCMTK nicht hat: einen MPPS-**SCU**
@@ -290,7 +306,7 @@ else
     hl7snd -c mwl-broker:2575 \
     "/opt/dcm4che/etc/testdata/hl7/OMG^O19-GeneralClinicalOrder-Eyecare.hl7" \
     > "$WORK/hl7snd.out" 2>&1
-  received=$(api '/hl7/messages?limit=5' | python3 -c "
+  received=$(api '/hl7/messages?limit=20' | python3 -c "
 import json,sys
 for row in json.load(sys.stdin):
     if row.get('message_type','').startswith('OMG'):
@@ -301,11 +317,26 @@ else:
     "$([ "$received" != "none" ] && [ "$received" != "rejected" ] && echo 1 || echo 0)" \
     "OMG^O19 → $received"
 
+  # 1b) … und die *moderne* Auftragsnachricht (Imaging Order) ebenfalls
+  docker run --rm --network "$NET" "$DCM4CHE_IMAGE" \
+    hl7snd -c mwl-broker:2575 "/opt/dcm4che/etc/testdata/hl7/OMI^O23-ImagingOrder.hl7" \
+    > "$WORK/hl7snd-omi.out" 2>&1
+  imaging=$(api '/hl7/messages?limit=20' | python3 -c "
+import json,sys
+for row in json.load(sys.stdin):
+    if row.get('message_type','').startswith('OMI'):
+        print(row.get('action','')); break
+else:
+    print('none')")
+  check "auch die Imaging Order (OMI^O23) wird angenommen" \
+    "$([ "$imaging" != "none" ] && [ "$imaging" != "rejected" ] && echo 1 || echo 0)" \
+    "OMI^O23 → $imaging"
+
   # 2) fremder HL7-Sender schickt einen Befund — der muss abgelehnt werden
   docker run --rm --network "$NET" "$DCM4CHE_IMAGE" \
     hl7snd -c mwl-broker:2575 "/opt/dcm4che/etc/testdata/hl7/ORU^R01-SR.hl7" \
     > "$WORK/hl7snd-oru.out" 2>&1
-  rejected=$(api '/hl7/messages?limit=5' | python3 -c "
+  rejected=$(api '/hl7/messages?limit=20' | python3 -c "
 import json,sys
 for row in json.load(sys.stdin):
     if row.get('message_type','').startswith('ORU'):
@@ -339,6 +370,114 @@ else:
       "$(printf '%s' "$type" | grep -q '\^' && echo 1 || echo 0)" "MSH-9: $type"
   fi
   docker rm -f interop-hl7rcv > /dev/null 2>&1
+fi
+
+echo "── Fremdsoftware 4: TLS gegen einen fremden TLS-Stack (DCMTK) ──"
+# Unser TLS/mTLS war bisher pydicom-gegen-pydicom geprüft. Hier steht auf der
+# anderen Seite eine fremde TLS-Implementierung — in beide Richtungen.
+if ! command -v openssl > /dev/null 2>&1; then
+  echo "   übersprungen — openssl fehlt"
+else
+  # eigener TLS-Listener: Zertifikat erzeugen, die Pfade eintragen, einschalten,
+  # neu starten (der Listener wird beim Hochfahren aufgebaut).
+  # Hinweis: `POST /tls/self-signed` schreibt die Dateien, trägt sie aber *nicht*
+  # in die Einstellungen ein — ohne die zwei Pfade bleibt der Listener
+  # "not configured". Die Antwort liefert das Zertifikat direkt mit.
+  generated=$(api /tls/self-signed POST \
+    '{"common_name":"mwl-broker.interop.local","days":30,"san":["127.0.0.1","localhost"]}')
+  printf '%s' "$generated" | python3 -c \
+    "import json,sys; print(json.load(sys.stdin)['certificate_pem'])" > "$WORK/broker-cert.pem" 2>/dev/null
+  cert_file=$(printf '%s' "$generated" | python3 -c "import json,sys; print(json.load(sys.stdin)['certificate_path'])" 2>/dev/null)
+  key_file=$(printf '%s' "$generated" | python3 -c "import json,sys; print(json.load(sys.stdin)['key_path'])" 2>/dev/null)
+  api /settings/tls_inbound_cert_file PUT "{\"value\":\"$cert_file\"}" > /dev/null
+  api /settings/tls_inbound_key_file PUT "{\"value\":\"$key_file\"}" > /dev/null
+  api /settings/tls_inbound_enabled PUT '{"value":"true"}' > /dev/null
+  $COMPOSE restart mwl-broker > /dev/null 2>&1
+  for _ in $(seq 1 30); do
+    curl -sf "$API/healthz" > /dev/null 2>&1 && break
+    sleep 2
+  done
+  check "Zertifikat für die Fremdseite bereit" \
+    "$([ -s "$WORK/broker-cert.pem" ] && echo 1 || echo 0)" \
+    "$(wc -c < "$WORK/broker-cert.pem" 2>/dev/null | tr -d ' ') Bytes"
+
+  # a) fremder TLS-Client → unser TLS-Listener.
+  # Der veröffentlichte Port ist sofort offen (docker-proxy) — also nicht den
+  # Port prüfen, sondern den Handshake, und bis dahin erneut versuchen.
+  tls_ready=0
+  tls_error=""
+  for _ in $(seq 1 30); do
+    tls_error=$("$DCMTK_BIN/echoscu" +tla +cf "$WORK/broker-cert.pem" 127.0.0.1 "$BROKER_TLS_PORT" \
+      -aec "$BROKER_AET" 2>&1 | grep -E "^F:|^E:" | head -1)
+    [ -z "$tls_error" ] && { tls_ready=1; break; }
+    sleep 2
+  done
+  check "fremdes C-ECHO über TLS an unseren Listener" "$tls_ready" \
+    "${tls_error:-Verbunden, kein Fehler}"
+  # ein Bild über TLS schicken (der Modalitätenpfad; DCMTK's `findscu` hat in
+  # diesem Build keine TLS-Optionen, `storescu` und `echoscu` haben sie)
+  "$DCMTK_BIN/storescu" +tla -ic 127.0.0.1 "$BROKER_TLS_PORT" "$WORK/cstore.dcm" \
+    -aec "$BROKER_AET" -aet DCMTK_TLS > "$WORK/cstore-intls.out" 2>&1
+  tls_store_ok=$?
+  stored=$(api '/logs/stores?limit=5' | python3 -c "
+import json,sys
+rows = json.load(sys.stdin)
+print(sum(1 for r in rows if r.get('status') == 'success'))" 2>/dev/null)
+  check "fremde Modalität schickt ein Bild über TLS" \
+    "$([ "$tls_store_ok" -eq 0 ] && [ "${stored:-0}" -ge 1 ] && echo 1 || echo 0)" \
+    "exit=$tls_store_ok, zugestellt=${stored:-0}"
+
+  # b) unser TLS-Client → fremder TLS-Server, als **mTLS**: DCMTK's `storescp
+  #    +tls` verlangt ein Client-Zertifikat ("peer did not return a certificate"),
+  #    und DCMTK muss es kennen. Genau das ist der Fall aus dem echten Haus.
+  openssl req -x509 -newkey rsa:2048 -nodes -keyout "$WORK/dcmtk-key.pem" \
+    -out "$WORK/dcmtk-cert.pem" -days 30 -subj "/CN=dcmtk-tls-interop" > /dev/null 2>&1
+  openssl req -x509 -newkey rsa:2048 -nodes -keyout "$WORK/client-key.pem" \
+    -out "$WORK/client-cert.pem" -days 30 -subj "/CN=mwl-broker-client" > /dev/null 2>&1
+  mkdir -p "$WORK/pacs-tls"
+  # DCMTK kennt unser Client-Zertifikat (CA-Liste der Fremdseite)
+  nohup "$DCMTK_BIN/storescp" +tls "$WORK/dcmtk-key.pem" "$WORK/dcmtk-cert.pem" \
+    +cf "$WORK/client-cert.pem" -od "$WORK/pacs-tls" "$PACS_TLS_PORT" \
+    > "$WORK/storescp-tls.log" 2>&1 & disown
+  tls_server=0
+  for _ in $(seq 1 10); do
+    (exec 3<>/dev/tcp/127.0.0.1/"$PACS_TLS_PORT") 2>/dev/null && { tls_server=1; break; }
+    sleep 1
+  done
+  check "fremder TLS-Server lauscht ("$DCMTK_BIN/storescp" +tls)" "$tls_server" \
+    "$(head -1 "$WORK/storescp-tls.log" 2>/dev/null | cut -c1-70)"
+  # unser Client-Zertifikat in den Broker laden und als Ausgangsidentität setzen
+  uploaded=$(python3 - "$WORK" "$API" <<'PYU'
+import json, sys, urllib.request
+work, api = sys.argv[1], sys.argv[2]
+body = {
+    "certificate_pem": open(f"{work}/client-cert.pem").read(),
+    "key_pem": open(f"{work}/client-key.pem").read(),
+    "ca_pem": open(f"{work}/dcmtk-cert.pem").read(),   # wir vertrauen der Fremdseite
+    "filename": "interop-client",
+}
+request = urllib.request.Request(f"{api}/api/v1/tls/upload", data=json.dumps(body).encode(),
+                                 method="POST", headers={"Content-Type": "application/json"})
+with urllib.request.urlopen(request, timeout=15) as response:
+    print(json.dumps(json.loads(response.read())))
+PYU
+)
+  client_cert=$(printf '%s' "$uploaded" | python3 -c "import json,sys; print(json.load(sys.stdin).get('certificate_path',''))" 2>/dev/null)
+  client_key=$(printf '%s' "$uploaded" | python3 -c "import json,sys; print(json.load(sys.stdin).get('key_path',''))" 2>/dev/null)
+  api /settings/tls_outbound_client_cert_file PUT "{\"value\":\"$client_cert\"}" > /dev/null
+  api /settings/tls_outbound_client_key_file PUT "{\"value\":\"$client_key\"}" > /dev/null
+  tls_target=$(api /targets POST \
+    "{\"name\":\"dcmtk-tls\",\"aet\":\"DCMTK_TLS\",\"host\":\"$HOST_FOR_CONTAINER\",\"port\":$PACS_TLS_PORT,\"calling_aet\":\"$BROKER_AET\",\"is_default\":false,\"enabled\":true,\"tls\":true,\"tls_verify\":false}" \
+    | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+  api /rules POST "{\"source_id\":$source_id,\"target_id\":$tls_target,\"priority\":0}" > /dev/null
+  "$DCMTK_BIN/storescu" 127.0.0.1 "$BROKER_DICOM_PORT" -aec "$BROKER_AET" -aet "DCMTK_MOD" \
+    "$WORK/cstore.dcm" > "$WORK/cstore-tls.out" 2>&1
+  sleep 3
+  tls_arrived=$(find "$WORK/pacs-tls" -type f 2>/dev/null | wc -l)
+  check "unser mTLS-Client liefert an einen fremden TLS-Server" \
+    "$([ "${tls_arrived:-0}" -ge 1 ] && echo 1 || echo 0)" \
+    "${tls_arrived:-0} Datei(en); Fremdseite: $(grep -oE 'TLS error: [a-z ]+' "$WORK/storescp-tls.log" 2>/dev/null | head -1)"
+  pkill -x storescp 2>/dev/null
 fi
 
 echo ""

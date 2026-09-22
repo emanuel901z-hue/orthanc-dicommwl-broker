@@ -160,7 +160,7 @@ und eine PR-Vorlage) liegen fertig in
 | [`docs/support-and-sla.md`](docs/support-and-sla.md) | Support-Konzept und SLA-**Vorlage**: Rollen, Störungsklassen, **Alarm → Maßnahme** (an die 18 Regeln gebunden), Wartung, Übergabe-Checkliste, was nicht abgedeckt ist |
 | [`docs/training.md`](docs/training.md) | Schulungsunterlagen: Zielgruppen, Abläufe (30 min bis 1 Tag), **12 Übungen mit überprüfbarem Ergebnis**, Abnahmekriterien, Kurztest |
 | [`docs/ha.md`](docs/ha.md) | Hochverfügbarkeit: was geteilt wird, der Spool-Claim, der Endpunkt, Grenzen |
-| [`docs/interop.md`](docs/interop.md) | Externe Kompatibilitätsprüfung: DCMTK + dcm4che als Fremdsoftware (15 Prüfungen), Gazelle/Connectathon (offen), die 7 gefundenen Fehler |
+| [`docs/interop.md`](docs/interop.md) | Externe Kompatibilitätsprüfung: DCMTK + dcm4che als Fremdsoftware (23 Prüfungen, inkl. TLS/mTLS), Gazelle/Connectathon (offen), die gefundenen Fehler |
 | [`docs/interop-tools.md`](docs/interop-tools.md) | Werkzeug-Lückenanalyse: Gazelle-Test-Bed, dcm4che, DVTk, Orthanc-Worklists — was fehlt noch und warum |
 | [`docs/security-and-validation.md`](docs/security-and-validation.md) | Schutzbedarf, Datenfluss, Härtung, **bekannte Grenzen**, Validierungsablauf |
 | [`docs/production-setup.md`](docs/production-setup.md) | Erstinbetriebnahme auf dem Zielhost (`./setup.sh`) |
@@ -212,13 +212,13 @@ Parametern und Fehlerantworten (der Vertrag wird per Test erzwungen).
 UI-Härtung aus der DAU-Gap-Analyse, die MFA-Testumgebung und die i18n-Aufräumung.
 Die OpenAPI-Dokumentation ist vollständig (78 Operationen, jede mit Beschreibung,
 Parametern und Fehlerantworten). Aktuelle Zahlen:
-605 Backend-Tests (96 %), 594 Frontend-Tests, 55 Browser-E2E-Tests, 149 Checks
+607 Backend-Tests (96 %), 594 Frontend-Tests, 55 Browser-E2E-Tests, 149 Checks
 im Deep-Audit — alles in `./ci-local.sh` verdrahtet.
 
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 605 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
+cd mwl-broker && python -m pytest tests -q        # 607 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
 cd orthanc-explorer-3-usable && npm run test      # 594 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
@@ -238,7 +238,7 @@ cd orthanc-explorer-3-usable && npx vitest run --coverage
 # Externe Kompatibilität: echter Fremdcode als Gegenüber.
 #   DCMTK (apt install dcmtk): fremdes RIS, fremde Modalität, fremdes PACS
 #   dcm4che (docker pull dcm4che/dcm4che-tools:5.33.1): fremder MPPS-SCU, HL7 in/out
-./deploy/interop-test.sh          # 15 Prüfungen, ~2 min; --keep lässt alles stehen
+./deploy/interop-test.sh          # 23 Prüfungen, ~2 min; --keep lässt alles stehen
 
 # Lokale CI-Pipeline (alle Stages: backend pytest → tsc → lint → vitest →
 # docker-e2e auf dem Test-Stack; gleiche Images/Code-Basis wie Produktion):

@@ -267,13 +267,20 @@ eine der verbreitetsten DICOM-Implementierungen:
 | `mppsscu` (dcm4che) | **fremde Modalität mit MPPS** | unser MPPS-SCP nimmt N-CREATE/N-SET an — inklusive des Falls, dass die Modalität die SOP-Instanz-UID dem SCP überlässt |
 | `hl7snd` (dcm4che) | fremder HL7-Sender | unser MLLP-Listener: Auftrag angenommen, Befund abgelehnt |
 | `hl7rcv` (dcm4che) | fremder HL7-Empfänger | unsere MPPS-Statusmeldung (ORU^R01) wird angenommen |
+| `storescp +tls` (DCMTK) | fremder TLS-Server, verlangt ein Client-Zertifikat | unser **mTLS-Client** liefert ein Bild dorthin (mTLS in beide Richtungen) |
+| `echoscu +tla`, `storescu +tla` (DCMTK) | fremder TLS-Client | unser TLS-Listener: C-ECHO und C-STORE über TLS |
 
-Nachweis: `./deploy/interop-test.sh` (**15 Prüfungen**, DCMTK + dcm4che) und
+Nachweis: `./deploy/interop-test.sh` (**23 Prüfungen**, DCMTK + dcm4che) und
 [`interop.md`](interop.md). **Noch nicht** geprüft: eine HL7-*Profilvalidierung*
 durch den Gazelle HL7 Validator (Beispiele liegen in `deploy/interop/samples/`),
-TLS gegen fremde Peers und der Einsatz an einem echten Gerät bzw. RIS
-(Connectathon). Die dabei gefundenen Fehler stehen in
+TLS mit Zertifikaten aus einer echten PKI und der Einsatz an einem echten Gerät
+bzw. RIS (Connectathon). Die dabei gefundenen Fehler stehen in
 [`interop.md`](interop.md) §2.
+
+**Angenommene Nachrichtentypen** (jeweils gegen fremde Beispiele geprüft):
+`ORM^O01`, `OMG^O19`, `OMI^O23` (Imaging Order) als Aufträge; `ADT^A08` und
+`ADT^A31` (Update Person Information) als Patientendaten-Aktualisierung, dazu
+`A24`/`A40`/`A47`. Alles andere wird abgelehnt — mit Begründung.
 
 ## 11. Konformität zu den IHE-Profilen
 

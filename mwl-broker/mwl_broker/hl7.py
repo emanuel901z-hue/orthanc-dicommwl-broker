@@ -37,7 +37,10 @@ NEW_CODES = {"NW", "NA", "OR"}
 # The order messages this broker applies. `ORM^O01` is the classic radiology
 # order, `OMG^O19` the general clinical order — same ORC/OBR layout, so the same
 # code path; both are named in the IHE statement and the conformance statement.
-ORDER_MESSAGE_TYPES = ("ORM^O01", "OMG^O19")
+# `OMI^O23` (Imaging Order) is the modern radiology order — same ORC/OBR layout
+# as ORM/OMG. It came up in a foreign sample set (dcm4che/MESA) where a file
+# named "GeneralOrder" actually contained an OMI^O23, and we refused it.
+ORDER_MESSAGE_TYPES = ("ORM^O01", "OMG^O19", "OMI^O23")
 # The matching *responses* come from the filler and are not orders.
 ORDER_RESPONSE_TYPES = ("ORM^O02", "OMG^O20")
 

@@ -139,7 +139,7 @@ npx vitest run --coverage    # Broker-UI-Coverage (aktuell 98,9 %)
 # Gateway SEINES Compose-Netzes (nicht host.docker.internal — das zeigt auf docker0).
 # zweiter Fremdstack dcm4che (MPPS-SCU + HL7 in/out), einmalig ziehen:
 docker pull dcm4che/dcm4che-tools:5.33.1
-./deploy/interop-test.sh          # 15 Prüfungen (DCMTK + dcm4che)
+./deploy/interop-test.sh          # 23 Prüfungen (DCMTK + dcm4che, inkl. TLS/mTLS)
 ./deploy/interop-test.sh --keep   # danach stehen lassen (--down räumt ab)
 
 # Hochverfügbarkeit (zweite Instanz auf gemeinsamer DB + Spool-Volume)
@@ -357,6 +357,12 @@ Token rotieren = nur die Store-Datei neu schreiben:
   (MLLP-Listener, MPPS-SOP-Klasse) müssen die **Einstellung** lesen
   (`settings_service`), nicht nur den Env-Wert — sonst zeigt die UI einen
   wirkungslosen Schalter.
+- **Fremdsoftware mit absolutem Pfad aufrufen.** `~/.local/bin` enthält
+  **Python-Wrapper** mit den Namen der DCMTK-Werkzeuge (`findscu`, `storescu`,
+  `echoscu`, `storescp` — es sind pynetdicom-CLI-Apps) und liegt **vor**
+  `/usr/bin`. Ein Test, der `findscu` aufruft, prüft dann unsere eigene
+  Bibliothek statt Fremdsoftware. `deploy/interop-test.sh` nutzt `$DCMTK_BIN`
+  und weist per `--version` nach, dass es DCMTK ist.
 - **Metadaten aus DICOM-Antworten immer begrenzen** (`upstream.meta_text`).
   Fremde Worklists schicken **mehrwertige** Attribute (mehrere Stationen je
   Schritt sind legal und verbreitet); ungeprüft landeten sie in `varchar(16)` und

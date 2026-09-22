@@ -37,7 +37,18 @@ DCMTK nicht hat (MPPS, HL7):
 ./deploy/interop-test.sh --keep   # Stack + Fremdsoftware stehen lassen
 ```
 
-Ergebnis (Referenzlauf): **15 von 15 Prüfungen bestanden** — der Broker liest
+**Dritter Fremdstack: DCMTK-TLS** (`storescp +tls`, `echoscu +tla`, `storescu +tla`) —
+TLS in beide Richtungen, inklusive **mTLS** (DCMTK's Server verlangt ein
+Client-Zertifikat: „peer did not return a certificate").
+
+**Und ein methodischer Fund, der die Aussagekraft betraf:** `~/.local/bin`
+enthält **Python-Wrapper** mit denselben Namen wie die DCMTK-Werkzeuge
+(`findscu`, `storescu`, `echoscu`, `storescp` — es sind pynetdicom-CLI-Apps) und
+liegt **vor** `/usr/bin` im PATH. Ein Test, der `findscu` aufruft, prüft dann
+unsere *eigene* Bibliothek statt Fremdsoftware. Das Skript nutzt jetzt absolute
+Pfade und weist nach, dass die Werkzeuge wirklich DCMTK sind.
+
+Ergebnis (Referenzlauf): **23 von 23 Prüfungen bestanden** — der Broker liest
 die fremde Worklist (10 Einträge), die fremde Modalität bekommt genau diese 10
 Einträge zurück (mit DCMTKs Beispieldaten: `VIVALDI^ANTONIO`,
 `HAYDN^FRANZ` …), ein von der fremden Modalität geschicktes Bild wird über die
@@ -94,6 +105,11 @@ Radiologie-Auftragsnachricht, in den fremden Beispieldaten enthalten) und
 `ADT^A31` (Update Person Information) lehnt der Broker ab. Siehe
 [`interop-tools.md`](interop-tools.md) §5.
 
+**Und zwei Konformitätslücken sind geschlossen:** `OMI^O23` (Imaging Order — die
+*moderne* Radiologie-Auftragsnachricht, in den fremden Beispieldaten enthalten)
+und `ADT^A31` (Update Person Information, Variante von A08) werden jetzt
+angenommen — beides direkt gegen die fremden Nachrichten geprüft.
+
 ## 3. Was das **nicht** belegt
 
 - **Keine HL7-*Validierung*:** dcm4che prüft den Nachrichtenaufbau so weit, dass
@@ -103,10 +119,10 @@ Radiologie-Auftragsnachricht, in den fremden Beispieldaten enthalten) und
 - **Kein echtes Gerät, kein echtes RIS:** DCMTK und dcm4che sind Fremdsoftware,
   aber keine Modalitäten-Hersteller mit ihren Eigenheiten. Der Connectathon
   bleibt das Ziel.
-- **Kein TLS gegen fremde Peers** (unser TLS/mTLS ist mit pynetdicom auf beiden
-  Seiten geprüft) — Option: DCMTK-TLS oder Gazelle Security Suite.
+- **Kein TLS mit fremden *Zertifikaten* aus einer echten PKI:** der Handshake und
+  mTLS sind gegen DCMTK geprüft, aber mit selbst erzeugten Zertifikaten (Gazelle
+  Security Suite würde eine echte Test-PKI liefern).
 - **Keine Dauerlast** (dafür gibt es [`loadtest.md`](loadtest.md)).
-- **`OMI^O23`/`ADT^A31` fehlen** (siehe §2).
 
 ## 4. Teil 2: Gazelle (vorbereitet, nicht durchgeführt)
 

@@ -8,7 +8,9 @@ kann — die Kodierung unserer Schnittstellen, nicht unser eigener Parser.
 |---|---|---|
 | `order-orm-o01.hl7` | `ORM^O01` — Auftrag (klassisch) | **angenommen**: lokaler Arbeitslisten-Eintrag |
 | `order-omg-o19.hl7` | `OMG^O19` — Auftrag (General Clinical Order) | **angenommen**: derselbe Pfad wie ORM |
+| `order-omi-o23.hl7` | `OMI^O23` — **Imaging Order** (die moderne Radiologie-Auftragsnachricht) | **angenommen**: derselbe Pfad wie ORM |
 | `patient-adt-a08.hl7` | `ADT^A08` — Patientendaten aktualisiert | **angenommen**: Demografie der eigenen Einträge |
+| `patient-adt-a31.hl7` | `ADT^A31` — Update Person Information (Variante von A08) | **angenommen**: wie A08 |
 | `patient-adt-a24.hl7` | `ADT^A24` — Verknüpfung | **angenommen**: beide IDs bleiben gültig |
 | `patient-adt-a40.hl7` | `ADT^A40` — Zusammenführung | **angenommen**: alte ID entfällt |
 | `patient-adt-a47.hl7` | `ADT^A47` — Verknüpfung zurücknehmen | **angenommen** |

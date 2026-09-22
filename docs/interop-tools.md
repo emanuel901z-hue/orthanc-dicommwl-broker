@@ -69,17 +69,53 @@ alten IHE-**MESA**-Testdaten (`/opt/dcm4che/etc/testdata/hl7/`): `OMG^O19`,
 DICOM-Beispiele. Genau diese Dateien haben zwei Konformitätslücken aufgedeckt
 (§5).
 
+### Orthanc-Worklists: versucht, nicht brauchbar (für diesen Zweck)
+
+Der naheliegende Kandidat für eine **zweite, unabhängige** MWL-Quelle war
+Orthancs `orthanc-worklists`-Plugin (C++, anderes Projekt). Es ist im Test nicht
+als speisbarer MWL-**SCP** verwendbar:
+
+- Die REST-API (`PUT /worklists/{id}` mit `{"Tags": …}`) legt Einträge an — sie
+  landen aber **nicht** in der konfigurierten Ordner-Ablage (`Worklists.Database`
+  blieb leer), und der DICOM-Pfad liefert sie nicht aus.
+- Ein direkt in den Ordner gelegtes Worklist-File wurde ebenfalls nicht
+  ausgeliefert; nach einem Neustart war auch die REST-Sicht leer.
+- Der DICOM-Pfad verlangt außerdem, dass die **calling AET** in
+  `DicomModalities` steht (`This AET is not listed in DicomModalities`) — das ist
+  ein *echter* Interop-Unterschied zu DCMTK's `wlmscpfs` (das jeden annimmt) und
+  im Test berücksichtigt (`DicomAlwaysAllowFindWorklist`), aber die Ablage-Frage
+  bleibt.
+
+**Konsequenz:** Als fremder MWL-SCP bleibt DCMTK (`wlmscpfs`) — eine *zweite*
+unabhängige Implementierung gibt es erst mit dem Gazelle Order Manager oder einem
+echten RIS.
+
 ## 4. Was es sonst noch gibt — und warum es für uns ausfällt
 
 | Werkzeug | Was es kann | Urteil |
 |---|---|---|
-| **DVTk** (DICOM Validation Toolkit, Windows/.NET) | **RIS-Emulator** (MWL **und** MPPS als SCP), Skript-Steuerung, und **DVT validiert gegen die eigene Conformance-Erklärung** („Definition Files") | **interessant, aber Windows-only** — auf diesem Linux-Host nicht lauffähig. Die Fähigkeit „validiert unser Conformance Statement" hat sonst niemand: für eine Windows-Workstation vormerken |
+| **DVTk** (DICOM Validation Toolkit, Windows/.NET) | **RIS-Emulator** (MWL **und** MPPS als SCP), Skript-Steuerung, und **DVT validiert gegen die eigene Conformance-Erklärung** („Definition Files") | **nicht installiert** auf der erreichbaren Windows-Workstation (per SSH geprüft) — die Fähigkeit „validiert unser Conformance Statement" hat sonst niemand; Installation dort wäre der nächste Schritt |
 | **dcm4chee-arc-light** | vollständiges Archiv mit MWL-SCP, MPPS-SCP, DICOMweb, UI | zu schwer für unseren Zweck (wir wollen Werkzeuge, kein zweites PACS) |
 | **Mirth Connect / NextGen Connect** (`nextgenhealthcare/connect`) | HL7-Integrations-Engine, Kanäle per REST/UI | eine Alternative zu `hl7snd`/`hl7rcv` — aber viel Konfiguration für dasselbe Ergebnis |
 | **HAPI TestPanel** | HL7 senden/empfangen mit GUI | nicht skriptbar, Java-GUI |
 | **Orthanc Worklists-Plugin** | **fremder MWL-SCP** (C++, im Stack vorhanden, standardmäßig aus) | **sofort nutzbar** als *zweite* unabhängige MWL-Implementierung — eine Zeile Konfiguration |
 | **pynetdicom, pydicom, hl7apy** | Bibliotheken | wie DCMTK-Bibliotheken: fremder *Code*, aber unser Testcode — kein Ersatz für ein fremdes Produkt |
 | **echte Modalität / echtes RIS** | der eigentliche Nachweis | nur auf einem Connectathon/Projectathon oder im Haus |
+
+### Was die erreichbare Windows-Workstation bietet (per SSH geprüft)
+
+| Gefunden | Bedeutung |
+|---|---|
+| `D:\Projekte`, `D:\VMs`, `D:\WSL`, Hyper-V/VirtualBox | eine vollwertige Windows-Testmaschine — DVTk liesse sich dort installieren |
+| `C:\Program Files\Carestream\PACS\{hstpacs, ruepacs}`, `C:\Program Files\Philips\PACS\hstpacs` | **Hersteller-PACS-Clients** (zwei Standorte) |
+| `medavisAgentService`, `medavisTsUsbService`, `DicomPacsWatcher` | Dienste eines deutschen RIS-Herstellers (medavis) und ein DICOM-Watcher |
+| `C:\Program Files\sendscu\SendSCU.exe` (+ `sendscu.cfg`, binär) | ein **Hersteller-C-STORE-SCU** — als fremde Modalität einsetzbar |
+| **kein** DVTk, **kein** lauschender DICOM-Port (104/2762/4242/11112) | die PACS-Server laufen dort nicht; es sind Clients/Viewer |
+
+Das ist die Grundlage für einen **Vendor-Test im Haus**: `SendSCU.exe` als fremde
+Modalität gegen den Broker, ein Carestream/Philips-Client als Gegenprobe. Was
+fehlt, ist ein *laufender* Fremd-Server (PACS/RIS) — dafür braucht es die
+jeweilige Installation samt Lizenz, oder einen Connectathon.
 
 ## 5. Was die Werkzeuge gefunden haben
 
@@ -107,10 +143,10 @@ gemacht.
 
 | Priorität | Was | Warum | Aufwand |
 |---|---|---|---|
-| 1 | **`OMI^O23` + `ADT^A31` unterstützen** | die modernen Varianten der Auftrags- bzw. Patientennachricht; fremde Daten zeigen sie, wir lehnen sie ab | klein |
-| 2 | **Orthanc-Worklists als zweite fremde MWL-Quelle** in den Interop-Test | zweite unabhängige Implementierung, sofort verfügbar | klein |
+| 1 | ~~**`OMI^O23` + `ADT^A31` unterstützen**~~ — **erledigt** | die modernen Varianten der Auftrags- bzw. Patientennachricht; jetzt gegen die fremden Beispielnachrichten geprüft | — |
+| 2 | ~~**Orthanc-Worklists als zweite fremde MWL-Quelle**~~ — **versucht, nicht brauchbar** (siehe unten) | — | — |
 | 3 | **Gazelle-Zugang** (HL7-Validator, Order Manager, Security Suite) | Kodierungsprüfung durch Fremdsoftware, fremde SWF-Gegenseite, fremde TLS-Peers | organisatorisch |
-| 4 | **DCMTK-TLS** (`dcmqrscp --enable-tls`, `storescu +tls`) | unser TLS/mTLS gegen fremden TLS-Stack, lokal | klein–mittel |
+| 4 | ~~**DCMTK-TLS**~~ — **erledigt**: `storescp +tls` (mTLS) und `echoscu +tla`/`storescu +tla` in `deploy/interop-test.sh` | unser TLS/mTLS gegen einen fremden TLS-Stack, beide Richtungen | — |
 | 5 | **DVTk auf einer Windows-Workstation** | validiert gegen unser Conformance Statement — sonst kann das niemand | organisatorisch |
 | 6 | **Connectathon/Projectathon** | echte Geräte, echte RIS — der eigentliche E1-Nachweis | Termin |
 

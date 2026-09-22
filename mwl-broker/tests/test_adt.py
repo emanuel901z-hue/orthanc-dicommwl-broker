@@ -385,3 +385,20 @@ def test_a_link_reports_that_nothing_moved(client):
     with session_factory()() as s:
         assert s.query(LocalWorklistItem).filter_by(
             accession="ACC-ADT-LINK-COUNT").one().patient_id == "ALT-LINK-COUNT"
+
+
+def test_an_a31_updates_demographics_like_an_a08(client):
+    """A31 ("update person information") is what some houses send instead of A08.
+
+    Found in a foreign sample set (dcm4che/MESA): we refused it as "not handled".
+    """
+    item_id = _local_item("P-A31", accession="ACC-ADT-A31")
+    a31 = ("MSH|^~\\&|RIS|KH|MWLBROKER|KH|20260922190000||ADT^A31^ADT_A05|MSG-A31|P|2.5\r"
+           "PID|1||P-A31^^^KH^MR||Musterfrau^Erika||19800203|F\r")
+
+    result = client.post("/api/v1/hl7/adt?dry_run=false", content=a31,
+                         headers={"Content-Type": "text/plain"}).json()
+
+    assert result["action"] == "updated"
+    assert result["updated_items"] == 1
+    assert _item(item_id).patient_name == "Musterfrau^Erika"

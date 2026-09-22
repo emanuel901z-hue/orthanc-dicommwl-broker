@@ -5,7 +5,7 @@ broker cares about four events:
 
 | Event | What it means                              | What the broker does |
 |-------|--------------------------------------------|----------------------|
-| `A08` | patient information update                  | rewrites the demographics of its **own** worklist entries (emergencies, unscheduled exams); a merge-retired ID is resolved first |
+| `A08`, `A31` | patient information update            | rewrites the demographics of its **own** worklist entries (emergencies, unscheduled exams); a merge-retired ID is resolved first |
 | `A24` | two records are the same person (link)      | records a **link**: both IDs stay valid, no answer is rewritten |
 | `A40` | the old identifier is retired (merge)       | records the merge and moves the stored data to the current ID |
 | `A47` | the link was wrong (unlink)                 | takes **links** back — never a merge |
@@ -28,11 +28,15 @@ from . import hl7, local_worklist, merges, metrics
 log = logging.getLogger("mwl_broker.adt")
 
 EVENT_UPDATE = "A08"
+# A31 ("update person information") is the same kind of change as A08 — which of
+# the two a house sends is a property of its RIS/KIS, not a semantic difference
+# for us. Found in a foreign sample set (dcm4che/MESA).
+EVENT_UPDATE_ALT = "A31"
 EVENT_LINK = "A24"
 EVENT_MERGE = "A40"
 EVENT_UNLINK = "A47"
 
-HANDLED = (EVENT_UPDATE, EVENT_LINK, EVENT_MERGE, EVENT_UNLINK)
+HANDLED = (EVENT_UPDATE, EVENT_UPDATE_ALT, EVENT_LINK, EVENT_MERGE, EVENT_UNLINK)
 
 ACTION_MERGED = "merged"
 ACTION_LINKED = "linked"
@@ -60,7 +64,8 @@ def apply(text: str, *, actor: str = "hl7", transport: str = "http",
 
     if event not in HANDLED:
         result["warnings"].append(
-            f"{event or 'unknown'} is not handled (A08, A24, A40 and A47 are)")
+            f"{event or 'unknown'} is not handled "
+            "(A08/A31, A24, A40 and A47 are)")
         _log(parsed, result["action"], transport, text, dry_run)
         return result
     if result["warnings"]:
@@ -74,6 +79,7 @@ def apply(text: str, *, actor: str = "hl7", transport: str = "http",
         result["action"] = {
             EVENT_MERGE: ACTION_MERGED, EVENT_LINK: ACTION_LINKED,
             EVENT_UNLINK: ACTION_UNLINKED, EVENT_UPDATE: ACTION_UPDATED,
+            EVENT_UPDATE_ALT: ACTION_UPDATED,
         }[event]
         return result
 
@@ -94,7 +100,7 @@ def apply(text: str, *, actor: str = "hl7", transport: str = "http",
                 updated_items=merges.unlink(parsed["old_patient_id"],
                                             parsed["new_patient_id"]),
             )
-        else:  # A08
+        else:  # A08 / A31
             result.update(
                 action=ACTION_UPDATED,
                 updated_items=_update_demographics(parsed),

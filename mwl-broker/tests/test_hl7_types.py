@@ -17,6 +17,10 @@ ORM = ("MSH|^~\\&|RIS|KH|MWLBROKER|KH|20260922190000||ORM^O01|MSG-ORM|P|2.5\r"
        "PID|1||P-1||Muster^Max||19800101|M\r"
        "ORC|NW|ACC-T-1\r"
        "OBR|1|ACC-T-1||CT^CT Thorax\r")
+OMI = ("MSH|^~\\&|RIS|KH|MWLBROKER|KH|20260922190000||OMI^O23^OMI_O23|MSG-OMI|P|2.5.1\r"
+       "PID|1||P-5||Muster^Max||19800101|M\r"
+       "ORC|NW|ACC-T-5\r"
+       "OBR|1|ACC-T-5||CT^CT Thorax\r")
 OMG = ("MSH|^~\\&|KIS|KH|MWLBROKER|KH|20260922190000||OMG^O19|MSG-OMG|P|2.5\r"
        "PID|1||P-2||Musterfrau^Erika||19800203|F\r"
        "ORC|NW|ACC-T-2\r"
@@ -51,8 +55,8 @@ def test_the_parser_marks_a_report_as_not_an_order(client):
     assert parsed["accession"] == "ACC-T-3"
 
 
-def test_the_parser_accepts_both_order_types(client):
-    for message in (ORM, OMG):
+def test_the_parser_accepts_every_order_type(client):
+    for message in (ORM, OMG, OMI):
         parsed = hl7.parse(message)
         assert parsed["supported"] is True
         assert parsed["reject_reason"] == ""
@@ -138,11 +142,22 @@ def test_omg_creates_a_worklist_entry_like_orm(client):
     assert item.patient_id == "P-2"
 
 
-def test_both_order_types_reach_the_same_path(client):
-    for message in (ORM, OMG):
+def test_every_order_type_reaches_the_same_path(client):
+    for message in (ORM, OMG, OMI):
         assert mllp.handle_message(message, transport="mllp")[0] is True
 
-    assert sorted(item.accession for item in _items()) == ["ACC-T-1", "ACC-T-2"]
+    assert sorted(item.accession for item in _items()) == ["ACC-T-1", "ACC-T-2", "ACC-T-5"]
+
+
+def test_an_imaging_order_creates_a_worklist_entry(client):
+    """`OMI^O23` is the modern radiology order (found in foreign sample data)."""
+    result = client.post("/api/v1/hl7/orm?dry_run=false", content=OMI,
+                         headers={"Content-Type": "text/plain"}).json()
+
+    assert result["action"] == "created"
+    item = _items()[0]
+    assert item.accession == "ACC-T-5"
+    assert item.modality == "CT"
 
 
 def test_a_cancel_over_omg_still_cancels(client):
