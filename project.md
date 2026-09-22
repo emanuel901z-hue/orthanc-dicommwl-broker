@@ -590,12 +590,19 @@ Gefundene und behobene Defekte:
 | 19 | MFA-Testumgebung (unbedarfter Anwender) + behobene Befunde | ✅ |
 | 20 | Seiten-Hilfe, Entwürfe für alle Formulare, Entwurfs-Ablauf (1 h) | ✅ |
 | 21 | i18n aufgeräumt (react-i18next, 9 Sprachen, Debug, Abdeckungsprüfer) | ✅ |
+| 22 | API-Vollständigkeit: RBAC-Absicht, Cache-/Breaker-Audit, Version/Uptime, Paging, Zeitraumfilter, Einzelabrufe, PKI-Upload, HL7-Replay, Cache-Refresh, C-FIND-Test, Merged-Vorschau | ✅ |
+| 23 | **MPPS** (N-CREATE/N-SET) + Status-Rückmeldung als HL7 an das RIS | ✅ |
+| 24 | **Feldweiser Merge** + konfigurierbares **HL7→DICOM-Mapping** | ✅ |
+| 25 | **DICOM Conformance Statement** + IHE-Aussage (durch Tests an den Code gebunden) | ✅ |
+| 26 | **Statistik/Reporting** (Auslastung, Fehler, Tagesreihe) + Migration-Guard | ✅ |
+| 27 | **UPS-RS** (DICOMweb-Worklist: Suche/Abruf/Anlegen/Statuswechsel) als Subset | ✅ |
 
-Die nächsten Ausbaustufen sind in
-[docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) priorisiert
-und je Funktion mit Backend-/API-Entwurf, DAU-sicherem OE3-Frontend und
-Teststrategie beschrieben (P0: Worklist-Cache mit Stale-Fallback,
-C-STORE-Spool mit Retry/Dead-Letter, Circuit Breaker pro Upstream).
+Die nächsten Ausbaustufen stehen in
+[docs/next-steps.md](docs/next-steps.md) (Funktion, Betrieb, Beschaffung) und in
+[docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) mit
+Backend-/API-Entwurf, DAU-sicherem OE3-Frontend und Teststrategie je Funktion.
+Empfehlung: zuerst Betrieb (Backup-Automatik, Runbook, Alarmregeln), dann
+MRN-Merge/Identifier-Reconciliation, dann die Beschaffungsdokumente.
 
 ## Offene Punkte / Risiken
 

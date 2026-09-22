@@ -89,6 +89,9 @@ In keiner der eingesehenen Produktbeschreibungen fanden sich:
 Bewusst **außerhalb** des Scopes (Router-/Archiv-Aufgaben): Prefetch von
 Voraufnahmen, Transcoding, De-Identifikation, Storage Commitment.
 
+Die geplanten nächsten Schritte (Funktion, Betrieb, Beschaffung) stehen in
+[`next-steps.md`](next-steps.md).
+
 ## 6. Sprint-Plan und Stand
 
 Die Lücken aus Abschnitt 5 werden in fünf Sprints geschlossen. Der Status wird

@@ -1019,6 +1019,14 @@ abschalten).
 | test-stack.sh | RBAC: Schreiben ohne Rolle → **403**, mit Rolle → **201**, Status-Endpunkt meldet `can_write=False` für den Read-only-Aufrufer |
 | verify-ui.cjs | 109 Checks (Desktop 1400×900 + Mobile 375×812) |
 
+## Stand der Umsetzung (22.09.2026)
+
+Alle Roadmap-Sprints P0/P1/P2 sind abgeschlossen; zusätzlich umgesetzt sind
+MPPS inklusive Status-Rückmeldung an das RIS, feldweiser Merge,
+konfigurierbares HL7→DICOM-Mapping, DICOM Conformance Statement, Reporting und
+ein UPS-RS-Subset. Die geplanten nächsten Schritte — Funktion, Betrieb,
+Beschaffung — stehen in [`next-steps.md`](next-steps.md).
+
 ## Offene Entscheidungen (an den Betreiber)
 
 1. **RBAC — umsetzbar gemacht (Sprint 8):** `rbac_mode=enforce` schaltet die

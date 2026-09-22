@@ -142,7 +142,7 @@ den Code gebunden.
 Der Vergleich mit kommerziellen MWL-Brokern (Funktionslücken, priorisierte
 Sprints) steht in [`docs/commercial-comparison.md`](docs/commercial-comparison.md).
 
-Die Test-Abdeckung (pytest, vitest, Playwright, Chrome-headless-DOM-Audit und
+Die Test-Abdeckung (pytest, vitest, Playwright, Chrome-headless-DOM-Audit (135 Checks) und
 der Screenshot-Walk über alle Views) ist in
 [`docs/test-coverage-audit.md`](docs/test-coverage-audit.md) dokumentiert.
 
@@ -166,7 +166,7 @@ im Deep-Audit — alles in `./ci-local.sh` verdrahtet.
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 398 Tests (API + DIMSE e2e + TLS/RBAC/Retention/HL7/ATNA)
+cd mwl-broker && python -m pytest tests -q        # 490 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS)
 cd orthanc-explorer-3-usable && npm run test      # 490 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
