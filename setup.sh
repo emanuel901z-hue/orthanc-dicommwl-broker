@@ -715,7 +715,9 @@ cat <<EOF
     ./ci-local.sh                    komplette Testpipeline
 
   Sicherung (empfohlen, z.B. als Cron)
-    docker compose exec -T postgres pg_dump -U $(env_get POSTGRES_USER) orthanc | gzip > backup-\$(date +%F).sql.gz
-    Spool-Verzeichnis mitsichern (gepufferte Bilder): Volume $(env_get COMPOSE_PROJECT_NAME)_spool-data
+    ./deploy/backup.sh --dir /mnt/backup --keep 30
+      sichert BEIDE Datenbanken (Broker + Orthanc), das Spool-Volume und die .env
+    ./deploy/backup-roundtrip-test.sh
+      beweist, dass die Wiederherstellung funktioniert (sichern → löschen → zurück)
 EOF
 hr
