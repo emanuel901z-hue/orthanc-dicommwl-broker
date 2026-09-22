@@ -59,6 +59,7 @@ cleanup() {
   if [ "$KEEP" -eq 0 ]; then
     pkill -x wlmscpfs 2>/dev/null
     pkill -x dcmqrscp 2>/dev/null
+    docker rm -f interop-hl7rcv > /dev/null 2>&1
     echo "── tearing down interop stack (volumes included) ──"
     $COMPOSE down -v --remove-orphans > /dev/null 2>&1
   else
@@ -253,6 +254,92 @@ fi
 echo "── Unser Broker als SCP gegen die fremde Modalität (C-ECHO) ──"
 check "fremdes C-ECHO an unseren SCP" \
   "$(echoscu 127.0.0.1 "$BROKER_DICOM_PORT" -aec "$BROKER_AET" -aet "DCMTK_MOD" > /dev/null 2>&1 && echo 1 || echo 0)"
+
+echo "── Fremdsoftware 2: dcm4che (fremder MPPS-SCU + fremder HL7-Stack) ──"
+# dcm4che (Java, Apache-2.0) hat, was DCMTK nicht hat: einen MPPS-**SCU**
+# (`mppsscu`) und einen HL7-v2-Stack (`hl7snd`/`hl7rcv`) — plus echte fremde
+# Beispielnachrichten (aus den alten IHE-MESA-Testdaten).
+DCM4CHE_IMAGE="${DCM4CHE_IMAGE:-dcm4che/dcm4che-tools:5.33.1}"
+NET=mwl-interop_default
+if ! docker image inspect "$DCM4CHE_IMAGE" > /dev/null 2>&1; then
+  echo "   übersprungen — Image fehlt:  docker pull $DCM4CHE_IMAGE"
+else
+  # fremder HL7-Empfänger für unsere Statusmeldungen (läuft im Stack-Netz)
+  docker rm -f interop-hl7rcv > /dev/null 2>&1
+  mkdir -p "$WORK/hl7"
+  docker run -d --name interop-hl7rcv --network "$NET" -v "$WORK/hl7:/var/hl7" \
+    "$DCM4CHE_IMAGE" hl7rcv -b 2576 --directory /var/hl7 > /dev/null
+  sleep 3
+  # Der MLLP-Listener ist standardmäßig aus (opt-in) und wird **beim Start**
+  # aufgebaut: erst einschalten, dann neu starten — sonst bekommt der fremde
+  # Sender "Connection refused".
+  api /settings/hl7_mllp_enabled PUT '{"value":"true"}' > /dev/null
+  $COMPOSE restart mwl-broker > /dev/null 2>&1
+  for _ in $(seq 1 30); do
+    curl -sf "$API/healthz" > /dev/null 2>&1 && break
+    sleep 2
+  done
+  # unsere MPPS-Statusmeldung dorthin schicken (MLLP zum fremden Empfänger)
+  api /settings/mpps_forward_enabled PUT '{"value":"true"}' > /dev/null
+  api /settings/mpps_forward_transport PUT '{"value":"mllp"}' > /dev/null
+  api /settings/mpps_forward_host PUT '{"value":"interop-hl7rcv"}' > /dev/null
+  api /settings/mpps_forward_port PUT '{"value":"2576"}' > /dev/null
+
+  # 1) fremder HL7-Sender → unser MLLP-Listener (fremde Auftragsnachricht)
+  docker run --rm --network "$NET" "$DCM4CHE_IMAGE" \
+    hl7snd -c mwl-broker:2575 \
+    "/opt/dcm4che/etc/testdata/hl7/OMG^O19-GeneralClinicalOrder-Eyecare.hl7" \
+    > "$WORK/hl7snd.out" 2>&1
+  received=$(api '/hl7/messages?limit=5' | python3 -c "
+import json,sys
+for row in json.load(sys.stdin):
+    if row.get('message_type','').startswith('OMG'):
+        print(row.get('action','')); break
+else:
+    print('none')")
+  check "unser MLLP-Listener nimmt eine fremde Auftragsnachricht an" \
+    "$([ "$received" != "none" ] && [ "$received" != "rejected" ] && echo 1 || echo 0)" \
+    "OMG^O19 → $received"
+
+  # 2) fremder HL7-Sender schickt einen Befund — der muss abgelehnt werden
+  docker run --rm --network "$NET" "$DCM4CHE_IMAGE" \
+    hl7snd -c mwl-broker:2575 "/opt/dcm4che/etc/testdata/hl7/ORU^R01-SR.hl7" \
+    > "$WORK/hl7snd-oru.out" 2>&1
+  rejected=$(api '/hl7/messages?limit=5' | python3 -c "
+import json,sys
+for row in json.load(sys.stdin):
+    if row.get('message_type','').startswith('ORU'):
+        print(row.get('action','')); break
+else:
+    print('none')")
+  check "ein fremder Befund wird abgelehnt, nicht als Auftrag gelesen" \
+    "$([ "$rejected" = "rejected" ] && echo 1 || echo 0)" "ORU^R01 → $rejected"
+
+  # 3) fremde Modalität meldet einen Schritt (MPPS N-CREATE + N-SET)
+  docker run --rm --network "$NET" "$DCM4CHE_IMAGE" \
+    mppsscu -c "MWLBROKER@mwl-broker:11113" /opt/dcm4che/etc/testdata/dicom/MR01.dcm \
+    > "$WORK/mppsscu.out" 2>&1
+  steps=$(api /mpps | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null)
+  check "unser MPPS-SCP nimmt einen fremden Schritt an" \
+    "$([ "${steps:-0}" -ge 1 ] && echo 1 || echo 0)" "${steps:-0} Schritt(e)"
+
+  # 4) und unsere Statusmeldung kommt bei der fremden Software an
+  forwarded=0
+  for _ in $(seq 1 20); do
+    forwarded=$(find "$WORK/hl7" -type f 2>/dev/null | wc -l)
+    [ "$forwarded" -ge 1 ] && break
+    sleep 1
+  done
+  check "unsere MPPS-Statusmeldung erreicht den fremden HL7-Empfänger" \
+    "$([ "$forwarded" -ge 1 ] && echo 1 || echo 0)" "$forwarded Datei(en)"
+  if [ "$forwarded" -ge 1 ]; then
+    # der fremde Empfänger legt je Nachrichtentyp ab — und wir lesen mit seinen Augen
+    type=$(tr -d '\r' < "$(find "$WORK/hl7" -type f | head -1)" | head -1 | cut -d'|' -f9)
+    check "die Statusmeldung ist eine gültige HL7-Nachricht" \
+      "$(printf '%s' "$type" | grep -q '\^' && echo 1 || echo 0)" "MSH-9: $type"
+  fi
+  docker rm -f interop-hl7rcv > /dev/null 2>&1
+fi
 
 echo ""
 echo "════════════════════════════════════════"

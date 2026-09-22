@@ -272,6 +272,11 @@ KNOWN: dict[str, tuple[str, str]] = {
         "int",
         "MLLP port of the RIS (usually 2575).",
     ),
+    "mpps_forward_facility": (
+        "str",
+        "Receiving facility (MSH-6) of the RIS in the status message. Some HL7 "
+        "engines reject a message without it.",
+    ),
     "mpps_forward_url": (
         "str",
         "Webhook URL for the state message when the transport is 'webhook'.",

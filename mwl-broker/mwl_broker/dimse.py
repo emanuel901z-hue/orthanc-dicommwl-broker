@@ -8,6 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pydicom.dataset import Dataset
+from pydicom.uid import generate_uid
 from pynetdicom import AE, StoragePresentationContexts, evt
 from pynetdicom.presentation import build_context
 from pynetdicom.sop_class import (ModalityPerformedProcedureStep, ModalityWorklistInformationFind,
@@ -322,18 +323,29 @@ class BrokerSCP:
 
     # ------------------------------------------------------------------
     def handle_mpps_create(self, event):
-        """N-CREATE: the modality started an examination (MPPS IN PROGRESS)."""
+        """N-CREATE: the modality started an examination (MPPS IN PROGRESS).
+
+        The SCU may **omit** the SOP Instance UID and leave it to the SCP
+        (DICOM PS3.7): dcm4che's `mppsscu` does exactly that, and this handler
+        answered "Cannot understand" — the examination never reached the RIS.
+        We assign a UID and return it in the response (pynetdicom takes it from
+        the returned dataset), so the following N-SET can name the step.
+        """
         if not mpps.enabled():
             return S_CANNOT_UNDERSTAND, None
         sop_uid = str(getattr(event.request, "AffectedSOPInstanceUID", "") or "")
+        assigned = None
         if not sop_uid:
-            return S_CANNOT_UNDERSTAND, None
+            sop_uid = generate_uid()
+            assigned = Dataset()
+            assigned.AffectedSOPInstanceUID = sop_uid
+            log.info("MPPS: SCU left the SOP Instance UID to us — assigned %s", sop_uid)
         try:
             mpps.record_create(sop_uid, event.attribute_list)
         except Exception as exc:  # never kill the association over bookkeeping
             log.warning("MPPS create failed: %s", exc)
             return S_CANNOT_UNDERSTAND, None
-        return S_SUCCESS, None
+        return S_SUCCESS, assigned
 
     def handle_mpps_update(self, event):
         """N-SET: status change of a performed procedure step."""

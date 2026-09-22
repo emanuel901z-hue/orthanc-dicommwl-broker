@@ -94,6 +94,29 @@ def test_parse_survives_garbage():
     assert hl7.parse("")["accession"] == ""
 
 
+def test_the_ack_has_the_fields_an_engine_expects():
+    """Found by a foreign HL7 stack: our ACK was shifted by two fields.
+
+    MSH-9 has to be the message type and MSH-10 the control ID; the addressing
+    fields swap (the sender of the incoming message becomes the receiver of the
+    acknowledgement).
+    """
+    incoming = ("MSH|^~\\&|RIS|KH|MWLBROKER|BROKER|20260922120000||ORM^O01|CTRL-9|P|2.5\r"
+                "PID|1||P-1||Muster^Max\rORC|NW|ACC-1\rOBR|1|ACC-1||CT\r")
+
+    fields = hl7.build_ack("CTRL-9", incoming=incoming).split("\r")[0].split("|")
+    assert fields[8] == "ACK", "MSH-9 must be the message type"
+    assert fields[9] == "CTRL-9", "MSH-10 must be the control ID"
+    assert fields[2] == "MWLBROKER"          # MSH-3: we are the sender now
+    assert fields[4] == "RIS" and fields[5] == "KH", "the sender becomes the receiver"
+
+
+def test_the_ack_still_works_without_the_incoming_message():
+    fields = hl7.build_ack("CTRL-1").split("\r")[0].split("|")
+    assert fields[8] == "ACK" and fields[9] == "CTRL-1"
+    assert fields[5], "MSH-6 must not be empty (strict engines reject that)"
+
+
 def test_build_ack():
     ack = hl7.build_ack("MSG0001", ok=True)
     assert ack.startswith("MSH|^~\\&|MWLBROKER|")

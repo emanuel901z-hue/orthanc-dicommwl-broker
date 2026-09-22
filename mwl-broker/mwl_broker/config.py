@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     mpps_forward_host: str = ""
     mpps_forward_port: int = 2575
     mpps_forward_url: str = ""
+    mpps_forward_facility: str = "RIS"   # MSH-6 of the status message (strict engines want it)
     mpps_hide_completed: bool = True
     cache_stale_max_s: int = 120        # hard cap for stale serving (0 = never)
     cache_hide_completed: bool = True   # never resurrect COMPLETED/DISCONTINUED steps

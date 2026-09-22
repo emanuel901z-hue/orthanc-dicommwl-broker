@@ -288,8 +288,11 @@ def build_status_message(step: dict) -> str:
     now = _now().strftime("%Y%m%d%H%M%S")
     control_id = f"MPPS{step['id']}{now[-6:]}"
     # MSH-1 is the field separator itself, so the field indexes are shifted by one
+    # MSH-6 (receiving facility) is required by several HL7 engines — dcm4che's
+    # receiver answered an otherwise valid message with "Missing Receiving Facility"
+    facility = settings_service.get_str("mpps_forward_facility") or "RIS"
     segments = [
-        f"MSH|^~\\&|MWLBROKER|{step.get('station_aet') or 'BROKER'}|RIS||{now}||"
+        f"MSH|^~\\&|MWLBROKER|{step.get('station_aet') or 'BROKER'}|RIS|{facility}|{now}||"
         f"ORU^R01^{trigger}|{control_id}|P|2.4",
         f"PID|1||{step.get('patient_id') or ''}",
         f"ORC|SC|{step.get('accession') or ''}|{step.get('sps_id') or ''}||||||||||"

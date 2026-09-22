@@ -14,6 +14,8 @@ from pynetdicom import AE, evt
 from pynetdicom.sop_class import ModalityPerformedProcedureStep
 
 from mwl_broker import mpps, settings_service
+from mwl_broker.db import session_factory
+from mwl_broker.models import MppsStep
 from mwl_broker.config import Settings
 from mwl_broker.db import session_factory
 from mwl_broker.dimse import BrokerSCP
@@ -301,3 +303,68 @@ def test_completed_steps_disappear_from_the_worklist(client):
     after = aggregation.collect(Dataset())
     assert not any(ds.AccessionNumber == "ACC-DONE" for ds in after.items), \
         "a completed step was served again"
+
+
+def test_the_status_message_names_a_receiving_facility(client):
+    """dcm4che's receiver answered "Missing Receiving Facility" (MSA|AE) — the
+    RIS would never learn that the examination was performed."""
+    message = mpps.build_status_message({
+        "id": 1, "status": "COMPLETED", "accession": "ACC-1", "sps_id": "1",
+        "patient_id": "P-1", "station_aet": "CT_01", "modality": "CT",
+        "sop_instance_uid": "1.2.3", "started_at": "", "ended_at": "",
+        "performed_procedure_step_id": "PPS-1",
+    })
+
+    msh = message.split("\r")[0].split("|")
+    assert msh[5], "MSH-6 (receiving facility) must not be empty"
+    assert msh[8].startswith("ORU^R01"), "MSH-9 stays the message type"
+
+
+def test_a_modality_may_leave_the_sop_instance_uid_to_us(client):
+    """DICOM PS3.7: the SCU may omit it — then the SCP assigns and returns it.
+
+    Found by a foreign MPPS SCU (dcm4che `mppsscu`): it sends the N-CREATE
+    without the element, we answered "Cannot understand" (0xC000) and the
+    examination never reached the RIS.
+    """
+    from types import SimpleNamespace
+
+    from pydicom.uid import generate_uid
+    from pynetdicom.dimse_primitives import N_CREATE, N_SET
+
+    from mwl_broker.config import Settings
+    from mwl_broker.dimse import BrokerSCP
+
+    scp = BrokerSCP(Settings())
+
+    request = N_CREATE()
+    request.MessageID = 1
+    request.AffectedSOPInstanceUID = None          # the element is absent
+    attribute_list = Dataset()
+    attribute_list.PatientID = "MPPS-UID-1"
+    attribute_list.Modality = "MR"
+    attribute_list.PerformedProcedureStepStatus = "IN PROGRESS"
+    attribute_list.StudyInstanceUID = generate_uid()
+    attribute_list.PerformedProcedureStepStartDate = "20260922"
+    attribute_list.PerformedProcedureStepStartTime = "200000"
+
+    status, assigned = scp.handle_mpps_create(
+        SimpleNamespace(request=request, attribute_list=attribute_list),
+    )
+
+    assert status == 0x0000, "an SCU that leaves the UID to us must succeed"
+    assert assigned is not None, "the response must carry the UID we assigned"
+    uid = str(assigned.AffectedSOPInstanceUID)
+    assert uid, "the assigned UID must not be empty"
+
+    # the following N-SET names the step with exactly that UID
+    update = N_SET()
+    update.RequestedSOPInstanceUID = uid
+    status, _ = scp.handle_mpps_update(
+        SimpleNamespace(request=update, attribute_list=Dataset()),
+    )
+    assert status == 0x0000
+
+    with session_factory()() as s:
+        row = s.query(MppsStep).filter_by(sop_instance_uid=uid).one()
+    assert row.status == "COMPLETED"

@@ -42,9 +42,20 @@ ORDER_MESSAGE_TYPES = ("ORM^O01", "OMG^O19")
 ORDER_RESPONSE_TYPES = ("ORM^O02", "OMG^O20")
 
 
+def message_code(message_type: str) -> str:
+    """MSH-9 reduced to `code^trigger`.
+
+    Real messages carry a third component — the message structure
+    (`OMG^O19^OMG_O19`, `ORM^O01^ORM_O01`) — and dcm4che's sample set does it for
+    every message. Comparing the whole string rejected valid orders.
+    """
+    parts = (message_type or "").strip().upper().split("^")
+    return "^".join(parts[:2])
+
+
 def is_order_message(message_type: str) -> bool:
     """Is this message type an order the broker may turn into a worklist entry?"""
-    return (message_type or "").strip().upper() in ORDER_MESSAGE_TYPES
+    return message_code(message_type) in ORDER_MESSAGE_TYPES
 
 
 def describe_message_type(message_type: str) -> str:
@@ -54,7 +65,7 @@ def describe_message_type(message_type: str) -> str:
     ACK/error text, and "not an order" is the difference between a report that
     was ignored and a worklist entry that should not exist.
     """
-    message = (message_type or "").strip().upper()
+    message = message_code(message_type)
     if message in ORDER_MESSAGE_TYPES:
         return ""
     if message in ORDER_RESPONSE_TYPES:
@@ -186,12 +197,27 @@ def is_cancel(parsed: dict) -> bool:
     return parsed.get("order_control", "").upper() in CANCEL_CODES
 
 
-def build_ack(control_id: str, ok: bool = True, error: str = "") -> str:
-    """MLLP acknowledgement (MSA) for a received message."""
+def build_ack(control_id: str, ok: bool = True, error: str = "",
+              incoming: str = "", receiving_facility: str = "") -> str:
+    """MLLP acknowledgement (MSA) for a received message.
+
+    An ACK **swaps** the addressing fields (HL7 v2, chapter 2): what was the
+    sender becomes the receiver. The previous version left MSH-4..6 empty, which
+    shifted everything: the timestamp landed in MSH-6, "ACK" in MSH-8 and the
+    control ID in MSH-9 — a strict engine reads that as "no acknowledgement for
+    my message" and keeps resending. Found by a foreign HL7 stack (dcm4che).
+    """
     code = "AA" if ok else "AE"
     text = error.replace("|", "/")[:200] if error else ""
+    msh = _segments(incoming)[0] if incoming else []
+    # the incoming sender becomes our receiver (MSH-3/4 → MSH-5/6)
+    their_app = _field(msh, 3, msh=True) or "RIS"
+    # never empty: a strict engine rejects an ACK without MSH-6
+    their_facility = _field(msh, 4, msh=True) or receiving_facility or "RIS"
+    our_facility = _field(msh, 6, msh=True) or "MWLBROKER"
     return (
-        f"MSH|^~\\&|MWLBROKER|||{datetime.now().strftime('%Y%m%d%H%M%S')}||ACK|{control_id}|P|2.5\r"
+        f"MSH|^~\\&|MWLBROKER|{our_facility}|{their_app}|{their_facility}|"
+        f"{datetime.now().strftime('%Y%m%d%H%M%S')}||ACK|{control_id}|P|2.5\r"
         f"MSA|{code}|{control_id}|{text}\r"
     )
 

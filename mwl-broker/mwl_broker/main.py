@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from . import api, db
+from . import settings_service, api, db
 from .schemas import ReadyOut
 from .config import get_settings
 from .dimse import BrokerSCP
@@ -59,7 +59,10 @@ async def lifespan(app: FastAPI):
         echo_thread.start()
     if settings.start_atna:
         atna.start()
-    if settings.hl7_mllp_enabled:
+    # The setting wins over the deployment default: the switch is visible in the
+    # UI, and a switch that does nothing is worse than no switch. (A change needs
+    # a restart — the listener is a thread, not a request handler.)
+    if settings_service.get_bool("hl7_mllp_enabled"):
         mllp_thread = threading.Thread(target=mllp.serve, args=(stop,), daemon=True)
         mllp_thread.start()
     if settings.start_spool:

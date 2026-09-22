@@ -137,7 +137,14 @@ PACS (`dcmqrscp`) — 10 Prüfungen, siehe [`interop.md`](interop.md). Dabei kam
 zwei Fehler heraus, die unsere eigenen Tests nicht sehen konnten (mehrwertige
 Attribute in einer fremden Worklist-Antwort).
 
-**Offen (E1):** MPPS gegen fremde Software, die HL7-Nachrichten durch einen
-fremden Validator (Gazelle; Beispiele liegen in `deploy/interop/samples/`) und
-der Einsatz gegen ein echtes Gerät bzw. ein fremdes RIS auf einem Connectathon
-oder Projectathon.
+Ergänzt wurde ein **zweiter Fremdstack**: **dcm4che** als fremde Modalität mit
+**MPPS** (`mppsscu`) und als fremder **HL7-Sender/-Empfänger**
+(`hl7snd`/`hl7rcv`) — damit ist auch der MPPS-Pfad und die HL7-Schnittstelle
+gegen Fremdsoftware geprüft (insgesamt 15 Prüfungen). Sieben dabei gefundene
+Fehler stehen in [`interop.md`](interop.md) §2; die Werkzeug-Übersicht in
+[`interop-tools.md`](interop-tools.md).
+
+**Offen (E1):** eine HL7-Profilvalidierung durch den Gazelle HL7 Validator, TLS
+gegen fremde Peers und der Einsatz gegen ein echtes Gerät bzw. ein fremdes RIS
+auf einem Connectathon oder Projectathon. Zwei Nachrichtentypen fehlen noch:
+`OMI^O23` (Imaging Order) und `ADT^A31`.

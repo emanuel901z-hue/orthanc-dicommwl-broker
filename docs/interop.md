@@ -23,22 +23,31 @@ davon inzwischen belegt ist, womit — und was weiterhin fehlt.
 | `echoscu` | fremde Modalität (C-ECHO) | unser SCP, in beide Richtungen |
 | `dcmdump` | **fremder Decoder** | was tatsächlich angekommen ist — nicht von pydicom gelesen |
 
+**Zweiter Fremdstack: dcm4che** (`dcm4che/dcm4che-tools:5.33.1`) — für das, was
+DCMTK nicht hat (MPPS, HL7):
+
+| dcm4che-Werkzeug | Rolle | wogegen geprüft |
+|---|---|---|
+| `mppsscu` | **fremde Modalität mit MPPS** (N-CREATE/N-SET) | unser MPPS-SCP — vorher gab es dafür **kein** Werkzeug |
+| `hl7snd` | fremder **HL7-Sender** (MLLP) mit echten IHE-MESA-Beispielnachrichten | unser MLLP-Listener (Auftrag angenommen, Befund abgelehnt) |
+| `hl7rcv` | fremder **HL7-Empfänger** | unsere MPPS-Statusmeldung — angenommen und abgelegt |
+
 ```bash
 ./deploy/interop-test.sh          # aufbauen, prüfen, abbauen (~2 min)
 ./deploy/interop-test.sh --keep   # Stack + Fremdsoftware stehen lassen
 ```
 
-Ergebnis (Referenzlauf): **10 von 10 Prüfungen bestanden** — der Broker liest
+Ergebnis (Referenzlauf): **15 von 15 Prüfungen bestanden** — der Broker liest
 die fremde Worklist (10 Einträge), die fremde Modalität bekommt genau diese 10
 Einträge zurück (mit DCMTKs Beispieldaten: `VIVALDI^ANTONIO`,
 `HAYDN^FRANZ` …), ein von der fremden Modalität geschicktes Bild wird über die
 Regel in das **fremde PACS** geroutet und dort von `dcmdump` als
 `AccessionNumber 00003` gelesen.
 
-## 2. Was dieser Test gefunden hat
+## 2. Was diese Tests gefunden haben
 
-Beide Fehler waren für unsere eigenen Tests unsichtbar, weil unser Mock sie nie
-auslöst:
+**Sieben** Fehler, jeder für unsere eigenen Tests unsichtbar, weil unser Mock die
+Auslöser nie erzeugt:
 
 1. **Mehrwertige Attribute.** DCMTKs Worklist trägt `ScheduledStationAETitle`
    mit **mehreren** Stationen je Schritt — legal und in echten RIS-Antworten
@@ -51,22 +60,53 @@ auslöst:
    Schreibfehler darf die Antwort nicht mitnehmen — und schon gar nicht den
    Circuit Breaker einer gesunden Quelle öffnen.
 
+3. **MPPS ohne `AffectedSOPInstanceUID`.** DICOM erlaubt der Modalität, die UID
+   dem SCP zu überlassen (PS3.7) — dcm4che's `mppsscu` macht genau das, und
+   unser Handler antwortete „Cannot understand" (0xC000): **der
+   Untersuchungsschritt erreichte das RIS nie.** Jetzt vergibt der SCP die UID
+   und liefert sie in der Antwort zurück (pynetdicom nimmt sie aus dem
+   Rückgabe-Dataset), sodass das folgende N-SET den Schritt trifft.
+4. **Unser ACK war um zwei Felder verschoben** (Zeitstempel in MSH-6, „ACK" in
+   MSH-8, Control-ID in MSH-9) — ein strenges RIS liest das als „keine
+   Bestätigung für meine Nachricht" und sendet erneut. Ein ACK **tauscht** die
+   Adressfelder; jetzt tut er das.
+5. **MSH-6 (Receiving Facility) fehlte** in der MPPS-Statusmeldung — der fremde
+   Empfänger antwortete `MSA|AE|… Missing Receiving Facility`. Neues Setting
+   `mpps_forward_facility` (Default `RIS`).
+6. **MSH-9 wurde komplett verglichen.** Echte Nachrichten tragen den dritten
+   Bestandteil — die Nachrichtenstruktur (`OMG^O19^OMG_O19`); ein gültiger
+   fremder Auftrag wurde deshalb abgelehnt. `hl7.message_code` vergleicht nur
+   `code^trigger`.
+7. **Der Schalter `hl7_mllp_enabled` war wirkungslos**: die Oberfläche zeigt ihn,
+   der Start entschied über den Env-Wert. Ein Schalter, der nichts tut, ist
+   schlimmer als keiner.
+
 Behoben in `upstream.meta_text` (erster Wert, auf Spaltenbreite begrenzt — der
 Payload behält alles), angewendet in `cache._describe` und
-`dimse._record_seen_items`, plus Isolation des Cache-Schreibvorgangs in
-`aggregation`. Regressionstests: `tests/test_interop_findings.py` (6).
+`dimse._record_seen_items`; Isolation des Cache-Schreibvorgangs in `aggregation`;
+SCP-vergebene MPPS-UID; ACK-Adresstausch; `mpps_forward_facility`;
+`hl7.message_code`; Start liest die Einstellung. Regressionstests:
+`tests/test_interop_findings.py` (6), `tests/test_mpps.py`,
+`tests/test_hl7.py`, `tests/test_hl7_types.py`.
+
+**Und eine offene Konformitätslücke:** `OMI^O23` (Imaging Order — die *moderne*
+Radiologie-Auftragsnachricht, in den fremden Beispieldaten enthalten) und
+`ADT^A31` (Update Person Information) lehnt der Broker ab. Siehe
+[`interop-tools.md`](interop-tools.md) §5.
 
 ## 3. Was das **nicht** belegt
 
-- **Kein MPPS gegen fremde Software:** DCMTK bringt keinen MPPS-SCU. Die
-  N-CREATE/N-SET-Seite bleibt mit pynetdicom als Client geprüft (fremde
-  *Bibliothek*, aber unser Testcode).
-- **Kein HL7-Gegenüber:** DCMTK ist DICOM. Die HL7-Seite (ORM/OMG/ADT eingehend,
-  ACK/ORU ausgehend) ist damit **nicht** fremd geprüft — dafür §4.
-- **Kein echtes Gerät, kein echtes RIS:** DCMTK ist Fremdsoftware, aber kein
-  Modalitäten-Hersteller mit seinen Eigenheiten. Der Connectathon bleibt das Ziel.
-- **Keine Dauerlast, kein TLS** in diesem Test (TLS ist separat geprüft,
-  [`runbook.md`](runbook.md) §9).
+- **Keine HL7-*Validierung*:** dcm4che prüft den Nachrichtenaufbau so weit, dass
+  es gültige von ungültigen Nachrichten trennt (es hat unsere fehlende MSH-6
+  erkannt) — eine Profilvalidierung gegen den IHE-Anwendungsfall macht nur der
+  Gazelle HL7 Validator (§4).
+- **Kein echtes Gerät, kein echtes RIS:** DCMTK und dcm4che sind Fremdsoftware,
+  aber keine Modalitäten-Hersteller mit ihren Eigenheiten. Der Connectathon
+  bleibt das Ziel.
+- **Kein TLS gegen fremde Peers** (unser TLS/mTLS ist mit pynetdicom auf beiden
+  Seiten geprüft) — Option: DCMTK-TLS oder Gazelle Security Suite.
+- **Keine Dauerlast** (dafür gibt es [`loadtest.md`](loadtest.md)).
+- **`OMI^O23`/`ADT^A31` fehlen** (siehe §2).
 
 ## 4. Teil 2: Gazelle (vorbereitet, nicht durchgeführt)
 

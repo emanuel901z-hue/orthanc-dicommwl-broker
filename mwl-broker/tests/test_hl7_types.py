@@ -58,6 +58,17 @@ def test_the_parser_accepts_both_order_types(client):
         assert parsed["reject_reason"] == ""
 
 
+def test_the_message_structure_component_does_not_change_the_verdict(client):
+    """MSH-9 is `code^trigger^structure` — dcm4che's samples always carry it.
+
+    Comparing the whole string rejected a valid OMG^O19 from foreign software.
+    """
+    assert hl7.is_order_message("OMG^O19^OMG_O19") is True
+    assert hl7.is_order_message("ORM^O01^ORM_O01") is True
+    assert hl7.is_order_message("ORU^R01^ORU_R01") is False
+    assert "result/report" in hl7.describe_message_type("ORU^R01^ORU_R01")
+
+
 def test_an_order_response_is_not_an_order(client):
     parsed = hl7.parse(ORDER_RESPONSE)
 

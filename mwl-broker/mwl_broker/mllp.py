@@ -106,7 +106,10 @@ def serve(stop: threading.Event) -> None:
                 try:
                     text = _read_frame(conn)
                     ok, control_id, error = handle_message(text, transport="mllp")
-                    conn.sendall(hl7.build_ack(control_id, ok, error).encode("utf-8"))
+                    # the ACK swaps the addressing fields — hand it the incoming MSH
+                    conn.sendall(
+                        hl7.build_ack(control_id, ok, error, incoming=text).encode("utf-8")
+                    )
                 except Exception as exc:
                     log.warning("MLLP connection from %s failed: %s", addr, exc)
     finally:

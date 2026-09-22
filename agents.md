@@ -132,11 +132,14 @@ npm run test && npm run lint
 npx tsc --noEmit -p tsconfig.app.json
 npx vitest run --coverage    # Broker-UI-Coverage (aktuell 98,9 %)
 
+# Werkzeug-Lückenanalyse (welche Fremdsoftware uns fehlt und warum): docs/interop-tools.md
 # Externe Kompatibilität gegen Fremdsoftware (DCMTK ist ein apt-Paket):
 # fremdes RIS (wlmscpfs), fremde Modalität (findscu/storescu/echoscu),
 # fremdes PACS (dcmqrscp). Läuft auf dem Host, der Broker erreicht sie über das
 # Gateway SEINES Compose-Netzes (nicht host.docker.internal — das zeigt auf docker0).
-./deploy/interop-test.sh
+# zweiter Fremdstack dcm4che (MPPS-SCU + HL7 in/out), einmalig ziehen:
+docker pull dcm4che/dcm4che-tools:5.33.1
+./deploy/interop-test.sh          # 15 Prüfungen (DCMTK + dcm4che)
 ./deploy/interop-test.sh --keep   # danach stehen lassen (--down räumt ab)
 
 # Hochverfügbarkeit (zweite Instanz auf gemeinsamer DB + Spool-Volume)
@@ -339,6 +342,21 @@ Token rotieren = nur die Store-Datei neu schreiben:
 - **PHI**: `PatientName` niemals in Logs/Metriken/DB-Logs. Erlaubt für
   Matching: AccessionNumber, SPS-ID, StudyInstanceUID. PatientID nur in
   `seen_items` mit Retention.
+- **MSH-9 ist `code^trigger^struktur`.** Nur die ersten zwei Bestandteile
+  vergleichen (`hl7.message_code`) — echte Nachrichten tragen den dritten
+  (`OMG^O19^OMG_O19`), und ein zu strenger Vergleich lehnt gültige Aufträge ab.
+- **Ein ACK tauscht die Adressfelder.** Die MSH-Felder des ACK sind vollständig
+  (MSH-3..6), sonst verschiebt sich alles und ein strenges RIS liest „keine
+  Bestätigung für meine Nachricht". `build_ack(..., incoming=<Roh> )` erledigt
+  den Tausch; MSH-6 darf **nie** leer sein.
+- **MPPS: die Modalität darf die SOP-Instanz-UID dem SCP überlassen** (DICOM
+  PS3.7). Wer sie verlangt, verliert den Untersuchungsschritt. Der SCP vergibt
+  sie und liefert sie im Rückgabe-Dataset der N-CREATE-Antwort zurück
+  (pynetdicom nimmt sie von dort in den Response-Command).
+- **Ein Schalter, der nichts tut, ist schlimmer als keiner.** Start-Entscheidungen
+  (MLLP-Listener, MPPS-SOP-Klasse) müssen die **Einstellung** lesen
+  (`settings_service`), nicht nur den Env-Wert — sonst zeigt die UI einen
+  wirkungslosen Schalter.
 - **Metadaten aus DICOM-Antworten immer begrenzen** (`upstream.meta_text`).
   Fremde Worklists schicken **mehrwertige** Attribute (mehrere Stationen je
   Schritt sind legal und verbreitet); ungeprüft landeten sie in `varchar(16)` und

@@ -264,12 +264,16 @@ eine der verbreitetsten DICOM-Implementierungen:
 | `storescu` | fremde Modalität | C-STORE angenommen und regelbasiert geroutet |
 | `dcmqrscp` | fremdes PACS | das Bild kommt dort an (`dcmdump`: `AccessionNumber 00003`) |
 | `echoscu` | fremde Modalität | C-ECHO in beide Richtungen |
+| `mppsscu` (dcm4che) | **fremde Modalität mit MPPS** | unser MPPS-SCP nimmt N-CREATE/N-SET an — inklusive des Falls, dass die Modalität die SOP-Instanz-UID dem SCP überlässt |
+| `hl7snd` (dcm4che) | fremder HL7-Sender | unser MLLP-Listener: Auftrag angenommen, Befund abgelehnt |
+| `hl7rcv` (dcm4che) | fremder HL7-Empfänger | unsere MPPS-Statusmeldung (ORU^R01) wird angenommen |
 
-Nachweis: `./deploy/interop-test.sh` (10 Prüfungen) und
-[`interop.md`](interop.md). **Noch nicht** geprüft: MPPS gegen fremde Software
-(DCMTK bringt keinen MPPS-SCU), HL7-Nachrichten durch einen fremden Validator
-(Gazelle, vorbereitet in `deploy/interop/samples/`) und der Einsatz an einem
-echten Gerät bzw. RIS (Connectathon).
+Nachweis: `./deploy/interop-test.sh` (**15 Prüfungen**, DCMTK + dcm4che) und
+[`interop.md`](interop.md). **Noch nicht** geprüft: eine HL7-*Profilvalidierung*
+durch den Gazelle HL7 Validator (Beispiele liegen in `deploy/interop/samples/`),
+TLS gegen fremde Peers und der Einsatz an einem echten Gerät bzw. RIS
+(Connectathon). Die dabei gefundenen Fehler stehen in
+[`interop.md`](interop.md) §2.
 
 ## 11. Konformität zu den IHE-Profilen
 
