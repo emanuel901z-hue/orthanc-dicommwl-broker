@@ -598,11 +598,14 @@ Gefundene und behobene Defekte:
 | 27 | **UPS-RS** (DICOMweb-Worklist: Suche/Abruf/Anlegen/Statuswechsel) als Subset | ✅ |
 
 Die nächsten Ausbaustufen stehen in
-[docs/next-steps.md](docs/next-steps.md) (Funktion, Betrieb, Beschaffung) und in
+[docs/next-steps.md](docs/next-steps.md) (Funktion, Betrieb, Nachweise,
+Beschaffung) und in
 [docs/roadmap-worklist-broker.md](docs/roadmap-worklist-broker.md) mit
 Backend-/API-Entwurf, DAU-sicherem OE3-Frontend und Teststrategie je Funktion.
-Empfehlung: zuerst Betrieb (Backup-Automatik, Runbook, Alarmregeln), dann
-MRN-Merge/Identifier-Reconciliation, dann die Beschaffungsdokumente.
+Empfehlung nach dem Stand vom 22.09.2026: zuerst **Lasttest** (Dimensionierung
+und Validierungslücke), dann **Interop-Nachweis mit Fremdsystemen**, dann
+**Hochverfügbarkeit** — letztere erst nach einem Design-Vorlauf, weil der Spool
+noch kein Claiming hat (siehe `next-steps.md` §3).
 
 ## Offene Punkte / Risiken
 
