@@ -29,6 +29,7 @@ Begründung.
 | **MADO** (Manifest-basierter Zugriff) | **bewusst kein Akteur** — Content-Access ist PACS/VNA-Aufgabe; Einordnung und Berührungspunkte in der [IHE-Aussage §6](ihe-profile-statement.md#6-mado-manifest-based-access-to-dicom-objects--einordnung) |
 | Werkzeuge: Vorschau, C-FIND-Test, Trockenläufe, Health, Bootstrap, Tests aller Ebenen | vorhanden |
 | **Hochverfügbarkeit** | zweite Instanz (Profil `ha`) auf gemeinsamer DB und gemeinsamem Spool-Volume, atomarer Spool-Claim, Instanz-Heartbeat in UI + Health-Prüfung ([`ha.md`](ha.md)) |
+| **Betriebsdokumente** | Runbook, Support-/SLA-Vorlage, Schulungsunterlagen — alle per Test an Code, Alarme, Skripte und Hilfeseiten gebunden |
 | **Nachweise** | Conformance Statement und IHE-Aussage sind per Test an den Code gebunden, die Suiten dienen als Abnahmegrundlage, der **Lasttest** ist gefahren ([`loadtest.md`](loadtest.md)) — **der Interop-Nachweis mit Fremdsystemen fehlt** (E1) |
 
 ## 2. Funktionale Kandidaten
@@ -101,7 +102,7 @@ Matching-Feinheiten auffallen, die kein Mock nachbildet.
 | C1 | **CE-Kennzeichnung nach MDR** (auf Wunsch des Betreibers zurückgestellt) als Medizinprodukt, IEC 62304-Lebenszyklus, ISO 14971-Risikodossier | Ohne das ist kein Verkauf/Einsatz als Medizinprodukt in der EU möglich — der eigentliche Unterschied zu kommerziellen Produkten | organisatorisch, groß |
 | C2 | ~~Validierungsdokumentation~~ — **erledigt** als Ablaufbeschreibung (§4 in `security-and-validation.md`: Suiten als Abnahmegrundlage, drei Betriebsfälle, Ablage von Datum/Version/Findings). Formale Abzeichnung bleibt Sache des Betreibers | — | ✅ |
 | C3 | ~~Cybersecurity-Dokumentation~~ — **erledigt** (ohne Zertifizierungsanspruch): [`security-and-validation.md`](security-and-validation.md) — Schutzbedarf/Datenfluss, Härtungsliste, **bekannte Grenzen**, Validierungsablauf, Patchprozess, was für einen echten Nachweis fehlt (Pentest, IEC 81001-5-1, Lasttest, DSFA) | — | ✅ |
-| C4 | **Support-/SLA-Konzept**, Schulungsunterlagen | Teil jeder Ausschreibung. Die „Was ist das?"-Hilfe je Seite (`PageHelp`), die MFA-Reise und das Runbook sind schon die halbe Miete — es fehlt die Form (Reaktionszeiten, Eskalation, Schulungsablauf) | organisatorisch |
+| C4 | ~~Support-/SLA-Konzept + Schulungsunterlagen~~ — **erledigt**: [`support-and-sla.md`](support-and-sla.md) (Rollen, Störungsklassen S1–S4 mit Platzhaltern für die Zusagen, **Alarm → Maßnahme**-Tabelle, Wartung, Übergabe-Checkliste, was nicht abgedeckt ist) und [`training.md`](training.md) (Zielgruppen, Abläufe, **12 Übungen mit überprüfbarem Ergebnis**, Abnahmekriterien, Kurztest). Beide an den Code gebunden: `tests/test_support_docs.py` prüft Alarmnamen, Runbook-Anker, Skripte und die Hilfeseiten der Oberfläche | — | ✅ |
 | C5 | **IHE MADO / EHDS** — Beobachtungsposten (auf Wunsch: nur dokumentieren) | MADO v1.0.0 ist **trial-use** (publiziert 09/2026), die EHDS-Sekundärnutzung greift 2029. Der Broker ist **kein** MADO-Akteur (Content-Access vs. Workflow) — die Einordnung, die Berührungspunkte (Auftragskontext, WADO-RS im Orthanc) und die Lücke stehen in der [IHE-Aussage §6](ihe-profile-statement.md#6-mado-manifest-based-access-to-dicom-objects--einordnung). Umsetzung nur bei konkreter Kundenanforderung | organisatorisch, groß |
 
 ## 6. Empfohlene Reihenfolge
@@ -122,8 +123,10 @@ Matching-Feinheiten auffallen, die kein Mock nachbildet.
    `deploy/ha-smoke.sh`.
 9. ~~**F2a (ADT `A08`/`A24`/`A47`)**~~ — **erledigt**: die PIR-Lücke ist
     geschlossen, Verknüpfung und Zusammenführung sind sauber getrennt.
-10. **C4 (SLA/Schulungsunterlagen)** — organisatorisch, aber Eintrittskarte für
-    jede Ausschreibung.
+10. ~~**C4 (SLA/Schulungsunterlagen)**~~ — **erledigt**: [`support-and-sla.md`](support-and-sla.md)
+    und [`training.md`](training.md), beide per Test an Alarme, Runbook-Kapitel,
+    Skripte und die Hilfeseiten gebunden. Was bleibt, ist Betreiberarbeit:
+    Reaktionszeiten und Eskalationswege ausfüllen.
 11. **F2b (GDT/BDT)**, **F5 (Tag-Morphing)** — nach Bedarf, je Haus.
 12. **F3/F4** nur, wenn ein konkreter Kunde sie verlangt. **C1** bleibt
     zurückgestellt, **C5** bleibt Beobachtungsposten.

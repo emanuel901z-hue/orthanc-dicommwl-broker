@@ -152,6 +152,22 @@ und eine PR-Vorlage) liegen fertig in
 - **Tabellenzeilen waren nicht klickbar**: ein Klick (oder Enter/Leertaste) auf
   eine Zeile öffnet jetzt die Bearbeitung — in allen Broker-Listen.
 
+## Betrieb, Support und Schulung
+
+| Dokument | Wofür |
+|---|---|
+| [`docs/runbook.md`](docs/runbook.md) | „was tun, wenn …" — die fünf echten Störungen mit Befehlen, Eskalationsgrenzen, Update-Ablauf |
+| [`docs/support-and-sla.md`](docs/support-and-sla.md) | Support-Konzept und SLA-**Vorlage**: Rollen, Störungsklassen, **Alarm → Maßnahme** (an die 18 Regeln gebunden), Wartung, Übergabe-Checkliste, was nicht abgedeckt ist |
+| [`docs/training.md`](docs/training.md) | Schulungsunterlagen: Zielgruppen, Abläufe (30 min bis 1 Tag), **12 Übungen mit überprüfbarem Ergebnis**, Abnahmekriterien, Kurztest |
+| [`docs/ha.md`](docs/ha.md) | Hochverfügbarkeit: was geteilt wird, der Spool-Claim, der Endpunkt, Grenzen |
+| [`docs/security-and-validation.md`](docs/security-and-validation.md) | Schutzbedarf, Datenfluss, Härtung, **bekannte Grenzen**, Validierungsablauf |
+| [`docs/production-setup.md`](docs/production-setup.md) | Erstinbetriebnahme auf dem Zielhost (`./setup.sh`) |
+
+Die Support- und Schulungsdokumente sind ebenfalls **an den Code gebunden**
+(`tests/test_support_docs.py`): jeder genannte Alarm muss in den Regeln stehen,
+jeder Runbook-Link auf ein echtes Kapitel zeigen, jedes genannte Skript
+existieren — und jede Hilfeseite der Oberfläche in der Schulungsliste auftauchen.
+
 ## API-Dokumentation
 
 Für Ausschreibungen und die Abnahme mit Modalitäten-Herstellern:
@@ -194,13 +210,13 @@ Parametern und Fehlerantworten (der Vertrag wird per Test erzwungen).
 UI-Härtung aus der DAU-Gap-Analyse, die MFA-Testumgebung und die i18n-Aufräumung.
 Die OpenAPI-Dokumentation ist vollständig (78 Operationen, jede mit Beschreibung,
 Parametern und Fehlerantworten). Aktuelle Zahlen:
-585 Backend-Tests (96 %), 590 Frontend-Tests, 55 Browser-E2E-Tests, 146 Checks
+591 Backend-Tests (96 %), 590 Frontend-Tests, 55 Browser-E2E-Tests, 146 Checks
 im Deep-Audit — alles in `./ci-local.sh` verdrahtet.
 
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 585 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit)
+cd mwl-broker && python -m pytest tests -q        # 591 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
 cd orthanc-explorer-3-usable && npm run test      # 590 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800

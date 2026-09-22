@@ -32,6 +32,13 @@ def get_engine():
                 pool_timeout=int(os.getenv("BROKER_DB_POOL_TIMEOUT", "15")),
                 pool_recycle=1800,
             )
+        if url.startswith("sqlite"):
+            # The test suite runs on a file-based SQLite. Several tests use
+            # threads (spool claims, cache snapshots) and the CI machine may be
+            # busy — the 5 s default busy timeout then turns a *waiting* writer
+            # into "database is locked" and a flaky failure. Waiting longer is
+            # what a serialising database wants; Postgres is unaffected.
+            pool_args["connect_args"] = {"timeout": 30}
         _engine = create_engine(url, **pool_args)
         if url.startswith("sqlite"):
             # SQLite disables FK enforcement by default; production runs on
