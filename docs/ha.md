@@ -148,6 +148,13 @@ Zusätzlich prüfen `tests/test_ha.py` (16 Tests) den Claim und den Herzschlag
 ohne Docker, inklusive des entscheidenden Falls: zwei Worker laufen **gleichzeitig**
 über dieselbe Warteschlange, und jedes Bild wird genau einmal zugestellt.
 
+**Warum der HA-Test eigenständig läuft** (und nicht in `test-stack.sh` hängt): Er
+braucht einen eigenen Stack mit dem Profil `ha` — also einen zweiten Broker auf
+denselben Host-Ports, die der ephemere Test-Stack bereits belegt. Er startet
+deshalb sein eigenes Projekt (`mwl-ha`) und räumt es wieder ab. Wer ihn in einer
+Pipeline haben will, ruft ihn als eigenen Schritt auf; er braucht nur Docker und
+ungefähr eine Minute.
+
 **Was der Nachweis nicht zeigt:** keine echte VIP/kein LB (nur die zwei
 Instanzen), kein Postgres-Failover, kein Netzwerkausfall zwischen den Instanzen.
 Die Datenbank und das Spool-Volume bleiben eigene Single Points of Failure — HA
