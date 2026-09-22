@@ -182,9 +182,17 @@ def collect(
                         metrics.UPSTREAM_ANSWERS.labels(source=src.name).inc(len(answers))
                     breaker.record_success(src.id)
                     # a live answer replaces the cached snapshot — completed
-                    # orders disappear with it (the RIS is the truth)
+                    # orders disappear with it (the RIS is the truth).
+                    # A failure here must NOT cost the answer: the cache is an
+                    # outage bridge, the RIS answer is what the modality needs.
+                    # (A foreign worklist with multi-valued attributes made this
+                    # write fail and took the whole answer down with it.)
                     if store_cache:
-                        cache.store_snapshot(src.id, answers)
+                        try:
+                            cache.store_snapshot(src.id, answers)
+                        except Exception as exc:  # noqa: BLE001
+                            log.error("cache snapshot for %s not stored: %s", src.name, exc)
+                            metrics.CACHE_REFRESH.labels(source=src.name, result="error").inc()
                     collected.append((src, answers))
                     result.outcomes.append(SourceOutcome(src.name, src.id, len(answers)))
                 except Exception as exc:  # dead RIS must not break the query

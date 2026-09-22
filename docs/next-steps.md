@@ -87,13 +87,15 @@ bewegen — das ist Netzwerk- und Deployment-Aufgabe.
 
 | # | Vorhaben | Warum | Aufwand |
 |---|---|---|---|
-| E1 | **Interop-Nachweis mit Fremdsystemen** — IHE-Connectathon/Projectathon oder ein Vendor-Test mit einer echten Modalität und einem echten RIS | Alle DIMSE-Gegenstellen sind heute **unser eigener Code**: `mock-ris-a/b` und `dicom-peer` bauen aus `./mwl-broker`, `tests/test_dimse_integration.py` nutzt `mwl_broker.mock_ris`; fremd ist nur Orthanc als C-STORE-Ziel. **Kein echter Modalitäten-Client, kein fremdes RIS war je am Broker.** Das Conformance Statement ist per Test an *unseren* Code gebunden — belegt ist es damit nicht | organisatorisch (Vorbereitung klein, Termin-/Reiseaufwand) |
+| E1a | ~~Interop-Nachweis, Teil 1: DICOM gegen **Fremdsoftware**~~ — **erledigt**: [`interop.md`](interop.md), `deploy/interop-test.sh` (10 Prüfungen) gegen **DCMTK** als fremdes RIS (`wlmscpfs`), fremde Modalität (`findscu`/`storescu`/`echoscu`) und fremdes PACS (`dcmqrscp`). **Zwei echte Fehler gefunden** (mehrwertige Attribute sprengten die Metadatenspalten und kosteten die ganze Antwort; ein Cache-Schreibfehler wurde wie ein toter RIS behandelt) — behoben, `tests/test_interop_findings.py` | — | ✅ |
+| E1b | **Interop-Nachweis, Teil 2: HL7-Validator + Connectathon/Projectathon** — Gazelle HL7 Validator für die Nachrichten (`deploy/interop/samples/` liegt bereit), Order Manager als fremde SWF-Gegenseite, echte Modalität + fremdes RIS | Die HL7-Seite ist bisher nur von *unserem* Parser geprüft, und **kein echter Modalitäten-Client, kein fremdes RIS** war je am Broker. Gazelle ist Test-Management/Validierung, **nicht** die Gegenseite (das `framework`-Repo ist eine Java-Bibliothek zum Bauen eigener Tools, ein lokaler Test-Bed-Aufbau läuft auf EOL-Software — beides nicht sinnvoll). Braucht einen IHE-Zugang bzw. einen Termin | organisatorisch (Vorbereitung klein) |
 
 Für die Vorbereitung ist wenig zu bauen: die Testfälle existieren schon
 (C-FIND-Matching, MPPS-Zustellung, TLS, SPS-Status), es fehlt der Gegenüber. Ein
 Connectathon ist genau der Ort, an dem die Aussage aus §2 der
 [IHE-Aussage](ihe-profile-statement.md) geprüft wird — und der Ort, an dem
-Matching-Feinheiten auffallen, die kein Mock nachbildet.
+Matching-Feinheiten auffallen, die kein Mock nachbildet. Teil 1 (DICOM gegen
+DCMTK) ist gefahren; Teil 2 braucht einen IHE-Zugang.
 
 ## 5. Beschaffung und Compliance
 

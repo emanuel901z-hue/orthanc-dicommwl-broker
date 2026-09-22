@@ -36,7 +36,7 @@ from sqlalchemy import delete, func, select
 from . import db, metrics, settings_service
 from .db import session_factory
 from .models import MwlSource, WorklistCache
-from .upstream import dedupe_key
+from .upstream import dedupe_key, meta_text
 
 log = logging.getLogger("mwl_broker.cache")
 
@@ -68,17 +68,16 @@ def _first_sps(ds: Dataset) -> Dataset | None:
 def _describe(ds: Dataset) -> dict:
     """Non-PHI metadata for the cache index (accession is allowed by policy)."""
     sps = _first_sps(ds)
-    status = ""
-    station = ""
-    if sps is not None:
-        status = str(sps.get("ScheduledProcedureStepStatus", "") or "").strip().upper()
-        station = str(sps.get("ScheduledStationAETitle", "") or "").strip()
+    # bounded, first value only: foreign answers carry multi-valued attributes
+    # (see upstream.meta_text) and the columns are narrower than the wire
     return {
-        "accession": str(ds.get("AccessionNumber", "") or "").strip(),
-        "study_uid": str(ds.get("StudyInstanceUID", "") or "").strip(),
-        "modality": str((sps.get("Modality", "") if sps is not None else "") or "").strip(),
-        "station_aet": station,
-        "sps_status": status,
+        "accession": meta_text(ds.get("AccessionNumber"), 64),
+        "study_uid": meta_text(ds.get("StudyInstanceUID"), 128),
+        "modality": meta_text(sps.get("Modality") if sps is not None else "", 16),
+        "station_aet": meta_text(sps.get("ScheduledStationAETitle") if sps is not None else "", 16),
+        "sps_status": meta_text(
+            sps.get("ScheduledProcedureStepStatus") if sps is not None else "", 16,
+        ).upper(),
     }
 
 

@@ -127,3 +127,17 @@ auch nicht geplant. Die EHDS-Frist für die Sekundärnutzung (2029) ist in
 Berührungspunkte und die Lücke — damit eine Ausschreibung nicht an einer
 fehlenden Zeile scheitert und ein späterer Ausbau nicht an einer falschen
 Annahme.
+
+## 7. Nachweisstand (externe Kompatibilität)
+
+Die Aussagen in §2 sind per Test an den Code gebunden. Zusätzlich wurde die
+**DICOM-Seite gegen Fremdsoftware** geprüft: gegen **DCMTK** (OFFIS) als fremdes
+RIS (`wlmscpfs`), fremde Modalität (`findscu`/`storescu`/`echoscu`) und fremdes
+PACS (`dcmqrscp`) — 10 Prüfungen, siehe [`interop.md`](interop.md). Dabei kamen
+zwei Fehler heraus, die unsere eigenen Tests nicht sehen konnten (mehrwertige
+Attribute in einer fremden Worklist-Antwort).
+
+**Offen (E1):** MPPS gegen fremde Software, die HL7-Nachrichten durch einen
+fremden Validator (Gazelle; Beispiele liegen in `deploy/interop/samples/`) und
+der Einsatz gegen ein echtes Gerät bzw. ein fremdes RIS auf einem Connectathon
+oder Projectathon.

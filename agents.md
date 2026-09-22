@@ -132,6 +132,13 @@ npm run test && npm run lint
 npx tsc --noEmit -p tsconfig.app.json
 npx vitest run --coverage    # Broker-UI-Coverage (aktuell 98,9 %)
 
+# Externe Kompatibilität gegen Fremdsoftware (DCMTK ist ein apt-Paket):
+# fremdes RIS (wlmscpfs), fremde Modalität (findscu/storescu/echoscu),
+# fremdes PACS (dcmqrscp). Läuft auf dem Host, der Broker erreicht sie über das
+# Gateway SEINES Compose-Netzes (nicht host.docker.internal — das zeigt auf docker0).
+./deploy/interop-test.sh
+./deploy/interop-test.sh --keep   # danach stehen lassen (--down räumt ab)
+
 # Hochverfügbarkeit (zweite Instanz auf gemeinsamer DB + Spool-Volume)
 docker compose --profile ha up -d            # broker-a + broker-b
 ./deploy/ha-smoke.sh                         # Live-Nachweis: keine Doppelzustellung
@@ -332,6 +339,15 @@ Token rotieren = nur die Store-Datei neu schreiben:
 - **PHI**: `PatientName` niemals in Logs/Metriken/DB-Logs. Erlaubt für
   Matching: AccessionNumber, SPS-ID, StudyInstanceUID. PatientID nur in
   `seen_items` mit Retention.
+- **Metadaten aus DICOM-Antworten immer begrenzen** (`upstream.meta_text`).
+  Fremde Worklists schicken **mehrwertige** Attribute (mehrere Stationen je
+  Schritt sind legal und verbreitet); ungeprüft landeten sie in `varchar(16)` und
+  Postgres verweigerte den ganzen Snapshot — die Antwort der Quelle war damit
+  verloren. Der Payload behält alles, der Index bekommt einen begrenzten Wert.
+- **Ein Cache-Fehler darf die Antwort nicht kosten.** Der Cache ist die
+  *Ausfallbrücke*, die RIS-Antwort ist das, was die Modalität braucht: der
+  Schreibvorgang steht in `aggregation.collect` in einem **eigenen** `try`.
+  Sonst zählt eine gesunde Quelle als Fehler und der Breaker öffnet.
 - **Der Spool wird beansprucht, nie einfach gelesen.** `spool.due_items()` sagt
   nur, was fällig *wäre* — der Worker ruft `claim_items` (atomar,
   `FOR UPDATE SKIP LOCKED` + Lease aus `spool_lease_s`). Ohne Claim würden zwei

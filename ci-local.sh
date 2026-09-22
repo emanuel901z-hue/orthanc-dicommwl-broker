@@ -34,7 +34,7 @@ stage() {
 # the operator scripts are code too: syntax, help text and the dry-run must work
 stage "scripts" bash -c '
   set -e
-  for script in setup.sh build.sh bootstrap.sh ci-local.sh test-stack.sh pre-push-fork.sh mfa-test.sh deploy/backup.sh deploy/backup-roundtrip-test.sh; do
+  for script in setup.sh build.sh bootstrap.sh ci-local.sh test-stack.sh pre-push-fork.sh mfa-test.sh deploy/backup.sh deploy/backup-roundtrip-test.sh deploy/ha-smoke.sh deploy/interop-test.sh; do
     [ -f "$script" ] || { echo "missing: $script"; exit 1; }
     bash -n "$script" || { echo "syntax error: $script"; exit 1; }
   done

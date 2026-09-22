@@ -19,7 +19,7 @@ from . import (aggregation, atna, breaker, cache, cstore, local_worklist, metric
 from .config import Settings
 from .db import session_factory
 from .models import QueryLog, RoutingRule, SeenItem, StoreLog, MwlSource, PacsTarget
-from .upstream import SourceCfg, merge_answers, query_source
+from .upstream import SourceCfg, merge_answers, meta_text, query_source
 
 log = logging.getLogger("mwl_broker.dimse")
 
@@ -370,13 +370,15 @@ class BrokerSCP:
             with session_factory()() as s:
                 for ds, src in merged:
                     sps_seq = ds.get("ScheduledProcedureStepSequence") or []
-                    sps_id = str(sps_seq[0].get("ScheduledProcedureStepID", "")) if sps_seq else ""
+                    sps_id = meta_text(
+                        sps_seq[0].get("ScheduledProcedureStepID") if sps_seq else "", 64,
+                    )
                     s.add(
                         SeenItem(
-                            accession=str(ds.get("AccessionNumber", "")),
+                            accession=meta_text(ds.get("AccessionNumber"), 64),
                             sps_id=sps_id,
-                            study_uid=str(ds.get("StudyInstanceUID", "")),
-                            patient_id=str(ds.get("PatientID", "")),
+                            study_uid=meta_text(ds.get("StudyInstanceUID"), 128),
+                            patient_id=meta_text(ds.get("PatientID"), 64),
                             source_id=src.id,
                         )
                     )

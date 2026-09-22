@@ -251,6 +251,26 @@ ist die Auftragskorrelation, die ein Manifest-Erzeuger braucht
 | HL7 MLLP (eingehend) | 2575 | `hl7_mllp_port` |
 | ATNA (Syslog/TLS) | 6514 | `atna_syslog_port` |
 
+## 10a. Wogegen geprüft wurde (externe Kompatibilität)
+
+Die Aussagen dieses Dokuments sind durch Tests an den Code gebunden. Darüber
+hinaus wurde die DICOM-Seite gegen **Fremdsoftware** geprüft — DCMTK (OFFIS),
+eine der verbreitetsten DICOM-Implementierungen:
+
+| Fremdsoftware | Rolle | Ergebnis |
+|---|---|---|
+| `wlmscpfs` | fremdes RIS (MWL SCP) | unser SCU liest dessen Worklist (10 Einträge) |
+| `findscu -W` | fremde Modalität | unser SCP liefert genau diese 10 Einträge, von DCMTK dekodiert |
+| `storescu` | fremde Modalität | C-STORE angenommen und regelbasiert geroutet |
+| `dcmqrscp` | fremdes PACS | das Bild kommt dort an (`dcmdump`: `AccessionNumber 00003`) |
+| `echoscu` | fremde Modalität | C-ECHO in beide Richtungen |
+
+Nachweis: `./deploy/interop-test.sh` (10 Prüfungen) und
+[`interop.md`](interop.md). **Noch nicht** geprüft: MPPS gegen fremde Software
+(DCMTK bringt keinen MPPS-SCU), HL7-Nachrichten durch einen fremden Validator
+(Gazelle, vorbereitet in `deploy/interop/samples/`) und der Einsatz an einem
+echten Gerät bzw. RIS (Connectathon).
+
 ## 11. Konformität zu den IHE-Profilen
 
 Siehe [`ihe-profile-statement.md`](ihe-profile-statement.md).

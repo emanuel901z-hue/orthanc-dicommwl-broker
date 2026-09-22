@@ -33,6 +33,25 @@ class SourceCfg:
     tls_verify: bool = True
 
 
+def meta_text(value, limit: int) -> str:
+    """One DICOM value as a bounded string for the metadata columns.
+
+    Foreign worklists send **multi-valued** attributes — a
+    `ScheduledStationAETitle` with several stations per step is legal and common
+    (DCMTK's example worklist has it). The metadata columns hold one value per
+    row, and a longer string made Postgres refuse the whole snapshot
+    ("value too long for character varying(16)"), which lost the entire answer of
+    that source. The payload keeps the full dataset; the index only needs a label.
+    """
+    from pydicom.multival import MultiValue
+
+    if value is None:
+        return ""
+    if isinstance(value, (MultiValue, list, tuple)):
+        value = value[0] if len(value) else ""
+    return str(value).strip()[:limit]
+
+
 def dedupe_key(ds: Dataset) -> tuple[str, str, str]:
     """Merge key: PatientID + AccessionNumber + first SPS ID."""
     sps_seq = ds.get("ScheduledProcedureStepSequence") or []

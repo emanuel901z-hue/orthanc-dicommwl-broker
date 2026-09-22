@@ -160,6 +160,7 @@ und eine PR-Vorlage) liegen fertig in
 | [`docs/support-and-sla.md`](docs/support-and-sla.md) | Support-Konzept und SLA-**Vorlage**: Rollen, Störungsklassen, **Alarm → Maßnahme** (an die 18 Regeln gebunden), Wartung, Übergabe-Checkliste, was nicht abgedeckt ist |
 | [`docs/training.md`](docs/training.md) | Schulungsunterlagen: Zielgruppen, Abläufe (30 min bis 1 Tag), **12 Übungen mit überprüfbarem Ergebnis**, Abnahmekriterien, Kurztest |
 | [`docs/ha.md`](docs/ha.md) | Hochverfügbarkeit: was geteilt wird, der Spool-Claim, der Endpunkt, Grenzen |
+| [`docs/interop.md`](docs/interop.md) | Externe Kompatibilitätsprüfung: DCMTK als Fremdsoftware (belegt), Gazelle/Connectathon (offen), was der Test gefunden hat |
 | [`docs/security-and-validation.md`](docs/security-and-validation.md) | Schutzbedarf, Datenfluss, Härtung, **bekannte Grenzen**, Validierungsablauf |
 | [`docs/production-setup.md`](docs/production-setup.md) | Erstinbetriebnahme auf dem Zielhost (`./setup.sh`) |
 
@@ -210,13 +211,13 @@ Parametern und Fehlerantworten (der Vertrag wird per Test erzwungen).
 UI-Härtung aus der DAU-Gap-Analyse, die MFA-Testumgebung und die i18n-Aufräumung.
 Die OpenAPI-Dokumentation ist vollständig (78 Operationen, jede mit Beschreibung,
 Parametern und Fehlerantworten). Aktuelle Zahlen:
-594 Backend-Tests (96 %), 594 Frontend-Tests, 55 Browser-E2E-Tests, 149 Checks
+600 Backend-Tests (96 %), 594 Frontend-Tests, 55 Browser-E2E-Tests, 149 Checks
 im Deep-Audit — alles in `./ci-local.sh` verdrahtet.
 
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 594 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
+cd mwl-broker && python -m pytest tests -q        # 600 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
 cd orthanc-explorer-3-usable && npm run test      # 594 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
@@ -232,6 +233,10 @@ npx playwright test --config=e2e/stack/playwright.stack.config.ts
 # Coverage (Broker-Code): backend 96 %, frontend Broker-UI 98.9 %
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 cd orthanc-explorer-3-usable && npx vitest run --coverage
+
+# Externe Kompatibilität: echter Fremdcode als Gegenüber (DCMTK: fremdes RIS,
+# fremde Modalität, fremdes PACS) — braucht `apt install dcmtk`
+./deploy/interop-test.sh          # 10 Prüfungen, ~2 min; --keep lässt alles stehen
 
 # Lokale CI-Pipeline (alle Stages: backend pytest → tsc → lint → vitest →
 # docker-e2e auf dem Test-Stack; gleiche Images/Code-Basis wie Produktion):
