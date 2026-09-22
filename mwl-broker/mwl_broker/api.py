@@ -97,6 +97,7 @@ from .schemas import (
     MergeRuleOut,
     Hl7FieldMapIn,
     Hl7FieldMapOut,
+    PatientMergeCreatedOut,
     PatientMergeIn,
     PatientMergeOut,
     Hl7AdtOut,
@@ -1218,7 +1219,7 @@ def list_patient_merges(
 
 
 @router.post(
-    "/merges", response_model=PatientMergeOut, status_code=201, tags=["local"],
+    "/merges", response_model=PatientMergeCreatedOut, status_code=201, tags=["local"],
     summary="Merge or link two patient identifiers",
     description="Records the relation between two identifiers. `kind=merge` "
                 "(default, ADT A40): the old ID is retired — local entries and the "
@@ -1226,7 +1227,7 @@ def list_patient_merges(
                 "follows it. `kind=link` (ADT A24): both records are the same "
                 "person but both identifiers stay valid — nothing is moved and no "
                 "answer is rewritten. Reversible (`DELETE`).",
-    response_description="The stored merge or link.",
+    response_description="The stored merge or link, plus how many entries it moved.",
     responses=_docs(VALIDATION_422, READ_ONLY_403),
 )
 def create_patient_merge(

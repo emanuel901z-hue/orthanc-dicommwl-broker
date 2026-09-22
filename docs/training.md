@@ -169,7 +169,10 @@ curl -s -X POST 'http://127.0.0.1:18081/api/v1/hl7/adt?dry_run=false' \
 
 **Erwartet:** die Karte kennzeichnet beide Arten; die Abfrage
 `GET /api/v1/merges/resolve/<alte ID>` liefert für **beide** die aktuelle ID —
-aber nur die Zusammenführung schreibt die Arbeitslisten-Antwort um.
+aber nur die Zusammenführung schreibt die Arbeitslisten-Antwort um. Die
+Rückmeldung nach dem Eintragen sagt, **wie viel umgezogen ist** („3
+Arbeitslisten-Einträge und 2 Routing-Zeilen tragen jetzt die aktuelle ID") —
+eine Verknüpfung meldet, dass nichts umgezogen wurde.
 **Lehre:** eine Verknüpfung entzieht keine ID.
 
 ### Ü11 — Zwei Instanzen (Hochverfügbarkeit)

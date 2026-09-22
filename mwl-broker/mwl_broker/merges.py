@@ -124,7 +124,11 @@ def merge(old_patient_id: str, new_patient_id: str, reason: str = "",
     if created:
         log.info("patient ID merged: %s → %s (%s)", result["old_patient_id"],
                  result["new_patient_id"], origin)
-        _apply_to_data(result["old_patient_id"], result["new_patient_id"])
+        moved_items, moved_seen = _apply_to_data(result["old_patient_id"],
+                                                 result["new_patient_id"])
+        # the operator asked "what did that do?" — answer it instead of guessing
+        result["moved_items"] = moved_items
+        result["moved_seen"] = moved_seen
     return result
 
 
@@ -141,6 +145,9 @@ def link(old_patient_id: str, new_patient_id: str, reason: str = "",
     if created:
         log.info("patient IDs linked: %s ↔ %s (%s)", result["old_patient_id"],
                  result["new_patient_id"], origin)
+    # a link moves nothing, by definition — say it explicitly
+    result.setdefault("moved_items", 0)
+    result.setdefault("moved_seen", 0)
     return result
 
 
@@ -240,7 +247,7 @@ def _resolve_many(patient_ids: list[str], kinds: tuple[str, ...] | None) -> dict
     return {pid: _follow((pid or "").strip(), mapping) for pid in patient_ids}
 
 
-def _apply_to_data(old: str, new: str) -> None:
+def _apply_to_data(old: str, new: str) -> tuple[int, int]:
     """Follow the merge through the data that is already stored.
 
     * local worklist items: the modality must see the current ID
@@ -264,6 +271,7 @@ def _apply_to_data(old: str, new: str) -> None:
     if items or seen:
         log.info("patient merge %s → %s applied to %d local item(s) and %d provenance row(s)",
                  old, new, len(items), len(seen))
+    return len(items), len(seen)
 
 
 def rewrite_datasets(items: list, mapping: dict[str, str]) -> int:

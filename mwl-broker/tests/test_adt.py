@@ -327,3 +327,61 @@ def test_the_link_kind_reaches_the_database(client):
     with session_factory()() as s:
         row = s.query(PatientMerge).one()
     assert row.kind == "link"
+
+
+# ── Was hat das jetzt bewirkt? ────────────────────────────────────────────
+
+
+def test_an_a40_over_rest_moves_the_entries_and_says_so(client):
+    """'What did that do?' — a merge retires an ID, so it has to answer that."""
+    item_id = _local_item("ALT-MOVED", accession="ACC-ADT-MOVED")
+    with session_factory()() as s:
+        source = MwlSource(name="ris-moved", aet="RIS_M", host="127.0.0.1", port=11112,
+                           calling_aet="MWLBROKER", charset="ISO_IR 100",
+                           enabled=True, timeout_s=1, priority=10)
+        s.add(source)
+        s.commit()
+        s.refresh(source)
+        s.add(SeenItem(accession="ACC-ADT-MOVED", patient_id="ALT-MOVED",
+                       source_id=source.id))
+        s.commit()
+
+    result = client.post("/api/v1/hl7/adt?dry_run=false",
+                         content=ADT_A24.replace("ADT^A24", "ADT^A40")
+                                          .replace("ALT-4711", "ALT-MOVED")
+                                          .replace("12345", "NEU-MOVED"),
+                         headers={"Content-Type": "text/plain"}).json()
+
+    assert result["action"] == "merged"
+    assert _item(item_id).patient_id == "NEU-MOVED"
+    with session_factory()() as s:
+        assert s.query(SeenItem).filter_by(
+            accession="ACC-ADT-MOVED").one().patient_id == "NEU-MOVED"
+
+
+def test_the_merge_response_says_how_much_moved(client):
+    """The API answers 'what did that do?' — not just 'ok'."""
+    _local_item("ALT-COUNT", accession="ACC-ADT-COUNT")
+
+    created = client.post("/api/v1/merges", json={
+        "old_patient_id": "ALT-COUNT", "new_patient_id": "NEU-COUNT",
+        "kind": "merge", "reason": "test"}).json()
+
+    assert created["kind"] == "merge"
+    assert created["moved_items"] == 1
+    assert created["moved_seen"] == 0
+
+
+def test_a_link_reports_that_nothing_moved(client):
+    _local_item("ALT-LINK-COUNT", accession="ACC-ADT-LINK-COUNT")
+
+    created = client.post("/api/v1/merges", json={
+        "old_patient_id": "ALT-LINK-COUNT", "new_patient_id": "NEU-LINK-COUNT",
+        "kind": "link"}).json()
+
+    assert created["kind"] == "link"
+    assert created["moved_items"] == 0
+    assert created["moved_seen"] == 0
+    with session_factory()() as s:
+        assert s.query(LocalWorklistItem).filter_by(
+            accession="ACC-ADT-LINK-COUNT").one().patient_id == "ALT-LINK-COUNT"

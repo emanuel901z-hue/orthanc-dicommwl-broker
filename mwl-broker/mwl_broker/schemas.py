@@ -1337,6 +1337,24 @@ class PatientMergeOut(BaseModel):
     active: bool = Field(description="Whether it is in effect.")
 
 
+class PatientMergeCreatedOut(PatientMergeOut):
+    """The stored relation plus what it changed in the data.
+
+    A merge retires an identifier, so entries and routing provenance move to the
+    new one — the operator who clicked it should not have to guess whether
+    anything happened. A link moves nothing (both identifiers stay valid).
+    """
+
+    moved_items: int = Field(
+        default=0,
+        description="Local worklist entries that now carry the new ID.",
+    )
+    moved_seen: int = Field(
+        default=0,
+        description="Routing provenance rows (seen_items) that now carry the new ID.",
+    )
+
+
 class Hl7AdtOut(BaseModel):
     """Result of an ADT message."""
 
