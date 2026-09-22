@@ -39,7 +39,7 @@ fastapi  postgresql  docker  orthanc  ohif  python
 ```text
 Sprint 1–8 der Roadmap: Circuit Breaker, Worklist-Cache, C-STORE-Spool,
 Simulation/Config-Audit, Alerting, lokale Worklist + HL7-ORM, Stationsregeln,
-ATNA-Export, DICOM-TLS/mTLS, RBAC und Aufbewahrungskonzepte. 398 Backend-Tests.
+ATNA-Export, DICOM-TLS/mTLS, RBAC und Aufbewahrungskonzepte. 526 Backend-Tests.
 ```
 
 ---
@@ -99,7 +99,7 @@ Falls der Fork als PR angeboten wird, passt dieser Text:
 
 ## Tests
 
-- `npm run test` — 490 Unit-Tests (Vitest), `npm run i18n:check`, `tsc`, ESLint
-- Playwright: 55 Stack-Tests (Desktop + Mobile), `verify-ui.cjs`: 127 Checks
-- Backend des Brokers: 398 pytest-Tests (96 % Coverage) im Schwester-Repo
+- `npm run test` — 582 Unit-Tests (Vitest), `npm run i18n:check`, `tsc`, ESLint
+- Playwright: 55 Stack-Tests (Desktop + Mobile), `verify-ui.cjs`: 137 Checks
+- Backend des Brokers: 526 pytest-Tests (96 % Coverage) im Schwester-Repo
 ```

@@ -139,10 +139,24 @@ Für Ausschreibungen und die Abnahme mit Modalitäten-Herstellern:
 [IHE-Profil-Aussage](docs/ihe-profile-statement.md) — beide durch einen Test an
 den Code gebunden.
 
+Die IHE-Aussage ordnet zusätzlich **IHE MADO** ein: der Broker ist dort bewusst
+**kein** Akteur (MADO ist Content-Zugriff, der Broker Workflow) — mit Begründung,
+Berührungspunkten und benannter Lücke, damit eine Ausschreibung nicht an einer
+fehlenden Zeile scheitert. Zwei Berührungspunkte sind umgesetzt:
+
+- **IID (Invoke Image Display, RAD-106)** — OE3 öffnet den Viewer über
+  `/oe3/IHEInvokeImageDisplay?requestType=STUDY&studyUID=…` (auch
+  `accessionNumber=…` bzw. `?requestType=PATIENT&patientID=…`); derselbe Weg,
+  den ein fremdes RIS/KIS nimmt, wird auch von der eigenen Oberfläche benutzt.
+- **Auftragskontext** — `GET /api/v1/orders/context?study_uid=…` (oder
+  `?accession=…`) beantwortet „zu welchem Auftrag gehört diese Studie?"
+  (Accession, SPS-ID, Station, Herkunft, MPPS-Zustand) und bindet damit ein
+  Manifest an den Auftrag. PHI-frei: der Patientenname verlässt den Broker nie.
+
 Der Vergleich mit kommerziellen MWL-Brokern (Funktionslücken, priorisierte
 Sprints) steht in [`docs/commercial-comparison.md`](docs/commercial-comparison.md).
 
-Die Test-Abdeckung (pytest, vitest, Playwright, Chrome-headless-DOM-Audit (135 Checks) und
+Die Test-Abdeckung (pytest, vitest, Playwright, Chrome-headless-DOM-Audit (137 Checks) und
 der Screenshot-Walk über alle Views) ist in
 [`docs/test-coverage-audit.md`](docs/test-coverage-audit.md) dokumentiert.
 
@@ -158,16 +172,16 @@ Parametern und Fehlerantworten (der Vertrag wird per Test erzwungen).
 
 **Broker v1.0.0** — alle Roadmap-Themen (P0/P1/P2) sind umgesetzt, dazu die
 UI-Härtung aus der DAU-Gap-Analyse, die MFA-Testumgebung und die i18n-Aufräumung.
-Die OpenAPI-Dokumentation ist vollständig (66 Operationen, jede mit Beschreibung,
+Die OpenAPI-Dokumentation ist vollständig (78 Operationen, jede mit Beschreibung,
 Parametern und Fehlerantworten). Aktuelle Zahlen:
-398 Backend-Tests (96 %), 490 Frontend-Tests, 55 Browser-E2E-Tests, 127 Checks
+526 Backend-Tests (96 %), 582 Frontend-Tests, 55 Browser-E2E-Tests, 137 Checks
 im Deep-Audit — alles in `./ci-local.sh` verdrahtet.
 
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 490 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS)
-cd orthanc-explorer-3-usable && npm run test      # 490 Tests
+cd mwl-broker && python -m pytest tests -q        # 526 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext)
+cd orthanc-explorer-3-usable && npm run test      # 582 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):

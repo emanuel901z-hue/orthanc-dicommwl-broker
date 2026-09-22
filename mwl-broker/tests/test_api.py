@@ -1343,6 +1343,7 @@ def test_openapi_documents_all_endpoints(client):
         "TlsOverviewOut", "TlsCertificateOut", "TlsKeyOut",
         "TlsSelfSignedIn", "TlsSelfSignedOut", "TlsTestIn", "TlsTestOut",
         "LocalItemIn", "LocalItemOut", "Hl7MessageOut", "Hl7ParseOut",
+        "OrderContextOut",
         "StationRuleIn", "StationRuleOut", "StationSimulateIn",
         "StationPreviewOut", "StationPreviewSourceOut",
     ]:

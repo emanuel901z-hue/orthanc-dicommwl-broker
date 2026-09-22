@@ -105,6 +105,14 @@ curl -s http://127.0.0.1:18081/api/v1/config/export > /tmp/broker-config.json
 curl -s -X POST 'http://127.0.0.1:18081/api/v1/config/import?dry_run=true' \
   -H 'Content-Type: application/json' -d @/tmp/broker-config.json | python3 -m json.tool
 
+# Auftragskontext: zu welchem Auftrag gehört diese Studie? (für MADO-Manifest-Erzeuger)
+curl -s 'http://127.0.0.1:18081/api/v1/orders/context?study_uid=1.2.3' | python3 -m json.tool
+curl -s 'http://127.0.0.1:18081/api/v1/orders/context?accession=ACC-A-001' | python3 -m json.tool
+# IID (Invoke Image Display, RAD-106) — der Weg, den auch ein fremdes RIS/KIS nimmt:
+#   http://127.0.0.1:18082/oe3/IHEInvokeImageDisplay?requestType=STUDY&studyUID=<UID>
+#   http://127.0.0.1:18082/oe3/IHEInvokeImageDisplay?requestType=STUDY&accessionNumber=<ACC>
+#   http://127.0.0.1:18082/oe3/IHEInvokeImageDisplay?requestType=PATIENT&patientID=<ID>
+
 # Broker-API + Swagger/OpenAPI (laufender Stack)
 curl -s http://127.0.0.1:18081/openapi.json | python3 -m json.tool | head
 #   Swagger UI: http://127.0.0.1:18081/docs

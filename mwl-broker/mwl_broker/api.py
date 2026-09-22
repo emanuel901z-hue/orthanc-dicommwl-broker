@@ -42,6 +42,7 @@ from .schemas import (
     RollbackOut,
     NotifyEventOut,
     NotifyTestOut,
+    OrderContextOut,
     SpoolItemOut,
     SpoolRetryOut,
     SpoolStatsOut,
@@ -101,7 +102,7 @@ from .schemas import (
     Hl7AdtOut,
 )
 from . import (atna, audit, breaker, cache, config_io, health_checks, hl7, hl7_mapping,
-               merge_rules, merges, mpps, stats, ups,
+               merge_rules, merges, mpps, orders, stats, ups,
                local_worklist, metrics, notify, rbac, retention, settings_service,
                simulate, spool, station_rules, tls, transforms)
 from .models import (BrokerSetting, ConfigAudit, Hl7Message, LocalWorklistItem,
@@ -2096,6 +2097,38 @@ def store_logs(
     if since:
         q = q.where(StoreLog.ts >= _parse_since(since))
     return s.scalars(q).all()
+
+
+# ── Order context ──────────────────────────────────────────────────────
+
+
+@router.get(
+    "/orders/context", response_model=list[OrderContextOut], tags=["orders"],
+    summary="Order context for a study (accession ↔ study correlation)",
+    description="Which order does this imaging study belong to? Give a study UID "
+                "and/or an accession number and get the order back: accession, "
+                "scheduled step, station, modality, which upstream worklist source "
+                "knows it, what the modality reported (MPPS) and how many instances "
+                "were already forwarded. This is the correlation an IHE MADO "
+                "manifest creator needs to tie its manifest to the order — the "
+                "broker is the system that knows it. Facts come from the local "
+                "worklist, the worklist provenance, the performed steps and the "
+                "store log. PHI-free: the patient name is never part of the answer.",
+    response_description="One entry per order (accession + scheduled step), "
+                         "sorted; empty when the broker never saw this study.",
+    responses=_docs(VALIDATION_422),
+)
+def order_context(
+    s: Session = _db_dep,
+    study_uid: str = Query(default="", description="Study Instance UID to look up."),
+    accession: str = Query(default="", description="Accession number to look up."),
+    limit: int = Query(default=50, ge=1, le=500,
+                       description="Maximum rows read per underlying table."),
+):
+    if not study_uid and not accession:
+        raise HTTPException(422, "give a study_uid or an accession number "
+                                 "(at least one of the two is required).")
+    return orders.context(s, study_uid=study_uid, accession=accession, limit=limit)
 
 
 # ── Echo + status ──────────────────────────────────────────────────────

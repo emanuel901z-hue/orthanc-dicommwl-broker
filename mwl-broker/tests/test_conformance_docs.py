@@ -19,6 +19,8 @@ from mwl_broker.config import Settings
 
 DOC = Path(__file__).resolve().parents[2] / "docs" / "dicom-conformance-statement.md"
 IHE_DOC = Path(__file__).resolve().parents[2] / "docs" / "ihe-profile-statement.md"
+# the OE3 fork (the UI slice) — a submodule, so it may be absent in a bare clone
+OE3_DIR = Path(__file__).resolve().parents[2] / "orthanc-explorer-3-usable"
 
 
 @pytest.fixture()
@@ -123,8 +125,50 @@ def test_statement_documents_the_mpps_switch(statement):
 
 def test_ihe_statement_names_the_profiles(statement=None):
     text = IHE_DOC.read_text()
-    for profile in ("Scheduled Workflow", "Patient Information Reconciliation", "ATNA"):
+    for profile in ("Scheduled Workflow", "Patient Information Reconciliation", "ATNA",
+                    "Invoke Image Display", "MADO"):
         assert profile in text, f"{profile} is missing from the IHE statement"
     # what is only partially covered must be marked as such
     assert "teilweise" in text
     assert "MRN-Merge" in text or "PIX" in text
+
+
+def test_ihe_statement_names_mado_as_a_non_role_with_a_reason():
+    """MADO is a content profile — the broker is a workflow broker.
+
+    The statement has to say that out loud (and why), because a tender asks the
+    question and a silent gap looks like a missing feature.
+    """
+    text = IHE_DOC.read_text()
+    assert "trial-use" in text, "the MADO maturity (trial-use) must be visible"
+    assert "kein MADO-Akteur" in text
+    assert "Imaging Manifest Creator" in text and "Imaging Manifest Consumer" in text
+    assert "WADO-RS" in text
+    # the correlation it *does* provide must be named as such
+    assert "orders/context" in text
+
+
+def test_ihe_statement_promises_only_endpoints_that_exist():
+    """A documented endpoint that does not exist is worse than no document."""
+    from mwl_broker import api
+
+    source = Path(api.__file__).read_text()
+    statement = IHE_DOC.read_text()
+
+    assert "/orders/context" in source
+    assert "orders/context" in statement
+    # IID is served by the OE3 SPA, not by the broker
+    assert "IHEInvokeImageDisplay" in statement
+    assert "RAD-106" in statement
+
+
+@pytest.mark.skipif(
+    not OE3_DIR.is_dir(),
+    reason="the OE3 fork is a submodule — not checked out in this environment",
+)
+def test_ihe_statement_iid_route_exists_in_the_ui():
+    """The IID endpoint the statement names is really routed in the SPA."""
+    assert (OE3_DIR / "src" / "features" / "viewer" / "pages" / "InvokeImageDisplayPage.tsx").is_file()
+    assert (OE3_DIR / "src" / "features" / "viewer" / "lib" / "iid.ts").is_file()
+    app = (OE3_DIR / "src" / "App.tsx").read_text()
+    assert 'path="IHEInvokeImageDisplay"' in app

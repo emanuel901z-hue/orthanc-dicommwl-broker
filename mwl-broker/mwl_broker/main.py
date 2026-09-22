@@ -150,6 +150,7 @@ def create_app() -> FastAPI:
             {"name": "config", "description": "Configuration export, import (dry-run) and rollback."},
             {"name": "simulation", "description": "Dry-run simulation of routing and modify rules — same code as the live path."},
             {"name": "logs", "description": "C-FIND and C-STORE audit logs (PHI-free)."},
+            {"name": "orders", "description": "Order context: accession ↔ study correlation for a study (IHE MADO manifest creators)."},
             {"name": "monitoring", "description": "Health, status snapshot, C-ECHO and Prometheus metrics."},
         ],
         lifespan=lifespan,

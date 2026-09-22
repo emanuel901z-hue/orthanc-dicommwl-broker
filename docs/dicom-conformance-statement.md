@@ -165,6 +165,7 @@ Angeboten, wenn `mpps_enabled` (Standard an):
 | Transkodierung / Pixel-Manipulation | nicht | Der Broker ändert keine Bilddaten |
 | De-Identifikation (PS3.15) | nicht | gehört in einen Router mit Pseudonym-Verwaltung |
 | Prefetch von Voraufnahmen | nicht | Aufgabe von PACS/VNA |
+| Manifest-basierter Zugriff (IHE MADO) | nicht | Content-Access-Profil (Manifest + WADO-RS) — Aufgabe von PACS/VNA/Viewer. Der Broker liefert nur die Auftragskorrelation, siehe §9c und [IHE-Aussage §6](ihe-profile-statement.md) |
 
 ## 9a. UPS-RS (DICOMweb-Worklist)
 
@@ -200,6 +201,20 @@ Arbeitslisten-Eintrag geroutet.
 
 **Nicht enthalten:** die IHE-Link/Unlink-Events `A24`/`A47`, PIX-/PDQ-Abfragen
 und eine automatische Auflösung aus dem PACS.
+
+## 9c. Auftragskontext (REST, für MADO-Manifest-Erzeuger)
+
+`GET /api/v1/orders/context?study_uid=…` (oder `?accession=…`) beantwortet „zu
+welchem Auftrag gehört diese Studie?" — Accession, SPS-ID, Station, Modality,
+Verfahren, Termin, Arbeitslisten-Herkunft, MPPS-Zustand und die Zahl der bereits
+weitergeleiteten Instanzen. Quellen sind die lokale Worklist, die
+Worklist-Herkunft (`seen_items`), die MPPS-Schritte und das Store-Log. Der
+Aufruf ist PHI-frei: der Patientenname wird nie zurückgegeben, `PatientID` ist
+der Korrelationsschlüssel.
+
+Dies ist **kein** MADO-Manifest und macht den Broker zu keinem MADO-Akteur — es
+ist die Auftragskorrelation, die ein Manifest-Erzeuger braucht
+([IHE-Aussage §6](ihe-profile-statement.md)).
 
 ## 10. Grenzen und Betriebswerte
 

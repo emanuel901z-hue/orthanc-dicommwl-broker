@@ -610,6 +610,39 @@ class LocalItemOut(LocalItemIn):
     updated_at: datetime = Field(description="Last modification (UTC).")
 
 
+class OrderContextOut(BaseModel):
+    """Order context for one scheduled step — the correlation IHE MADO needs.
+
+    A manifest creator (or the UI) knows a Study Instance UID and has to find the
+    order behind it: accession, requested procedure, station. This is that
+    answer, assembled from the worklist provenance, the local entries, the
+    performed steps and the forwarded images. No patient name.
+    """
+
+    study_uid: str = Field(description="Study Instance UID the order is bound to (empty = not known yet).")
+    accession: str = Field(description="Accession number of the order.")
+    sps_id: str = Field(description="Scheduled Procedure Step ID (empty = only the images are known).")
+    patient_id: str = Field(description="Patient ID — the key the correlation runs on. The name is never returned.")
+    modality: str = Field(description="Modality of the scheduled step (e.g. CT).")
+    station_aet: str = Field(description="Scheduled station AE title (empty = any station).")
+    procedure_description: str = Field(description="What the order asks for.")
+    scheduled_date: str = Field(description="Scheduled date (YYYY-MM-DD).")
+    scheduled_time: str = Field(description="Scheduled time (HH:MM).")
+    sps_status: str = Field(description="SPS status (0040,0020) of the scheduled step.")
+    sources: list[str] = Field(
+        default_factory=list,
+        description="Upstream worklist sources that know this order.",
+    )
+    origins: list[str] = Field(
+        default_factory=list,
+        description="Where the facts came from: local, worklist, mpps or store.",
+    )
+    mpps_status: str = Field(description="Performed step state reported by the modality (empty = none reported).")
+    mpps_started_at: datetime | None = Field(default=None, description="When the modality started the step (UTC).")
+    mpps_ended_at: datetime | None = Field(default=None, description="When the modality finished the step (UTC).")
+    forwarded_instances: int = Field(description="Instances of this order the broker has already forwarded.")
+
+
 class Hl7MessageOut(BaseModel):
     """One inbound HL7 message (troubleshooting log)."""
 

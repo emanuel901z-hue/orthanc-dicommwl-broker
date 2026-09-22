@@ -77,9 +77,9 @@ verdrahtet und prüfen Verhalten, nicht Implementierung.
 
 | Ebene | Umfang | Was sie belegt |
 |---|---|---|
-| `pytest` (Backend) | 516 Tests | DIMSE-Verhalten über echte Assoziationen (C-FIND, C-STORE, C-ECHO, MPPS N-CREATE/N-SET/**N-GET**), MLLP über echte Sockets, TLS/mTLS, RBAC, Aufbewahrung, Aggregation/Merge, Patienten-Zusammenführung, Reporting, UPS-RS, Schema-Migrationen |
-| `vitest` (Frontend) | 551 Tests | jede Broker-Seite und -Karte, Fehlerpfade, Berechtigungslogik |
-| `verify-ui.cjs` | 135 Checks | jede Seite in Desktop und Mobil: keine Konsolen-/Netzwerkfehler, genau ein `<h1>`, kein Overflow, erwartete Inhalte |
+| `pytest` (Backend) | 526 Tests | DIMSE-Verhalten über echte Assoziationen (C-FIND, C-STORE, C-ECHO, MPPS N-CREATE/N-SET/**N-GET**), MLLP über echte Sockets, TLS/mTLS, RBAC, Aufbewahrung, Aggregation/Merge, Patienten-Zusammenführung, Reporting, UPS-RS, Auftragskontext (MADO-Korrelation), Schema-Migrationen |
+| `vitest` (Frontend) | 582 Tests | jede Broker-Seite und -Karte, Fehlerpfade, Berechtigungslogik, IID-Einstiegspunkt (RAD-106) |
+| `verify-ui.cjs` | 137 Checks | jede Seite in Desktop und Mobil: keine Konsolen-/Netzwerkfehler, genau ein `<h1>`, kein Overflow, erwartete Inhalte |
 | `verify-screens.cjs` | 225 Checks + 52 Bilder | jede Ansicht und jeder Dialog, inkl. Rohschlüssel-Erkennung |
 | Playwright | 55 Tests | echte Bedienabläufe gegen den laufenden Stack (Konfiguration, MFA-Reise, Audit/Rollback, Spool) |
 | `backup-roundtrip-test.sh` | 1 Ablauf | Sicherung → Daten zerstören → Wiederherstellung → Daten wieder da |
