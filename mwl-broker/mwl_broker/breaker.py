@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from . import metrics, notify, settings_service
+from . import db, metrics, notify, settings_service
 from .db import session_factory
 from .models import MwlSource, SourceBreaker
 
@@ -90,18 +90,34 @@ def record_success(source_id: int) -> None:
 
 
 def record_failure(source_id: int, error: str = "") -> None:
-    """A source failed — open the breaker once the threshold is reached."""
+    """A source failed — open the breaker once the threshold is reached.
+
+    The counter is incremented **by the database** (`failures = failures + 1`),
+    not by reading and writing it back: at shift start many modalities query at
+    once, and two of them failing on the same dead source must neither collide on
+    the primary key (that raised out of the C-FIND handler and answered the
+    modality with `0xC311`) nor lose an increment (the breaker would open later
+    than configured).
+    """
     threshold, open_seconds = _thresholds()
+    now = _now()
+    err = (error or "")[:512]
+
     with session_factory()() as s:
+        db.upsert(
+            s, SourceBreaker,
+            values={"source_id": source_id, "state": STATE_CLOSED, "failures": 1,
+                    "open_until": None, "last_error": err, "updated_at": now},
+            index_elements=[SourceBreaker.source_id],
+            update_values={"failures": SourceBreaker.failures + 1,
+                           "last_error": err, "updated_at": now},
+        )
         row = s.get(SourceBreaker, source_id)
-        if row is None:
-            row = SourceBreaker(source_id=source_id)
-            s.add(row)
-        row.failures = (row.failures or 0) + 1
-        row.last_error = (error or "")[:512]
-        if row.failures >= threshold:
+        # A separate, idempotent decision instead of a CASE in the upsert: two
+        # threads may both set OPEN, and setting the same value twice is fine.
+        if row.failures >= threshold and row.state != STATE_OPEN:
             row.state = STATE_OPEN
-            row.open_until = _now() + timedelta(seconds=open_seconds)
+            row.open_until = now + timedelta(seconds=open_seconds)
         s.commit()
         state = row.state
         failures = row.failures

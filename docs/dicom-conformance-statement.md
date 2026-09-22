@@ -40,6 +40,13 @@ Prüfung erfolgt über die **Calling**-AET (`allowed_calling_aets`). Ist die Lis
 leer, wird jede Calling-AET akzeptiert (Werkseinstellung, im Health-Panel als
 Hinweis gemeldet).
 
+**Oberhalb von `max_associations` wird abgewiesen, nicht gepuffert** — das ist
+gemessen (siehe [`loadtest.md`](loadtest.md) §3.2): bei mehr gleichzeitigen
+Verbindungen als dem Limit antwortet der Broker mit einer
+Assoziations-Ablehnung, die Modalität muss wiederholen. Die Zahl der
+*gleichzeitig* verbundenen Konsolen ist damit die Dimensionierungsgröße, nicht
+die Zahl der konfigurierten Geräte.
+
 Transport: TCP/IP v4. TLS optional und pro Richtung getrennt (siehe §6).
 
 ## 3. Presentation Contexts

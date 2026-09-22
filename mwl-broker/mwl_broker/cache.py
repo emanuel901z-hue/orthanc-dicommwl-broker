@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from pydicom.dataset import Dataset
 from sqlalchemy import delete, func, select
 
-from . import metrics, settings_service
+from . import db, metrics, settings_service
 from .db import session_factory
 from .models import MwlSource, WorklistCache
 from .upstream import dedupe_key
@@ -112,6 +112,12 @@ def store_snapshot(source_id: int, answers: list[Dataset]) -> int:
 
     Items that are no longer in the answer (completed/cancelled orders) are
     dropped — the RIS is the source of truth.
+
+    The write is an **upsert**: two modalities querying the same source at the
+    same instant produce the same snapshot, and losing that race used to raise an
+    IntegrityError on `uq_cache_source_item` — which turned a *successful* upstream
+    answer into a recorded failure (found by the load test, see
+    `docs/loadtest.md`). Whichever thread arrives second now updates the row.
     """
     if not is_enabled():
         return 0
@@ -125,36 +131,45 @@ def store_snapshot(source_id: int, answers: list[Dataset]) -> int:
 
     now = _now()
     seen: set[str] = set()
-    stored = 0
+    rows: list[dict] = []
+    for ds in answers:
+        key = "|".join(dedupe_key(ds))
+        seen.add(key)
+        meta = _describe(ds)
+        rows.append({
+            "source_id": source_id,
+            "dedupe_key": key,
+            "accession": meta["accession"],
+            "study_uid": meta["study_uid"],
+            "modality": meta["modality"],
+            "station_aet": meta["station_aet"],
+            "sps_status": meta["sps_status"],
+            "payload": {"json": ds.to_json()},
+            "fetched_at": now,
+        })
+
     with session_factory()() as s:
+        if rows:
+            db.upsert(
+                s, WorklistCache, rows,
+                index_elements=[WorklistCache.source_id, WorklistCache.dedupe_key],
+                update_columns=["accession", "study_uid", "modality", "station_aet",
+                                "sps_status", "payload", "fetched_at"],
+            )
+        # Rows the upstream no longer reports. Read separately (and only for the
+        # deletion decision) so the write path stays a single atomic statement.
         existing = {
             row.dedupe_key: row
             for row in s.scalars(
                 select(WorklistCache).where(WorklistCache.source_id == source_id)
             ).all()
         }
-        for ds in answers:
-            key = "|".join(dedupe_key(ds))
-            seen.add(key)
-            meta = _describe(ds)
-            row = existing.get(key)
-            if row is None:
-                row = WorklistCache(source_id=source_id, dedupe_key=key)
-                s.add(row)
-            row.accession = meta["accession"]
-            row.study_uid = meta["study_uid"]
-            row.modality = meta["modality"]
-            row.station_aet = meta["station_aet"]
-            row.sps_status = meta["sps_status"]
-            row.payload = {"json": ds.to_json()}
-            row.fetched_at = now
-            stored += 1
-
         gone = [row for key, row in existing.items() if key not in seen]
         for row in gone:
             s.delete(row)
         s.commit()
 
+    stored = len(rows)
     if gone:
         metrics.CACHE_DROPPED.labels(source=source_id, reason="gone_from_upstream").inc(len(gone))
         log.info("cache: %d item(s) dropped for source %s (no longer in the worklist)",

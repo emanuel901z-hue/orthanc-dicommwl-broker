@@ -10,9 +10,7 @@ Begründung.
 > **Die billigen Punkte sind weg.** Was hier noch steht, ist entweder **groß**
 > (B1, F3, F4) oder **organisatorisch** (C1, C4, E1). Die nächste Stufe beginnt
 > deshalb nicht mit dem größten Vorhaben, sondern mit dem, das die meisten
-> anderen freischaltet — und B1 ist keine Compose-Änderung (siehe §3).
-
-## 1. Wo wir stehen (kurz)
+> anderen freischaltet — und B1 ist keine Compose-Änderung (siehe §3).## 1. Wo wir stehen (kurz)
 
 | Fähigkeit | Stand |
 |---|---|
@@ -27,7 +25,7 @@ Begründung.
 | **Auftragskontext** (`GET /orders/context`) | vorhanden — Korrelationsdienst für einen MADO-Manifest-Erzeuger |
 | **MADO** (Manifest-basierter Zugriff) | **bewusst kein Akteur** — Content-Access ist PACS/VNA-Aufgabe; Einordnung und Berührungspunkte in der [IHE-Aussage §6](ihe-profile-statement.md#6-mado-manifest-based-access-to-dicom-objects--einordnung) |
 | Werkzeuge: Vorschau, C-FIND-Test, Trockenläufe, Health, Bootstrap, Tests aller Ebenen | vorhanden |
-| **Nachweise** | Conformance Statement und IHE-Aussage sind per Test an den Code gebunden, die Suiten dienen als Abnahmegrundlage — **der Interop-Nachweis mit Fremdsystemen fehlt** (E1) |
+| **Nachweise** | Conformance Statement und IHE-Aussage sind per Test an den Code gebunden, die Suiten dienen als Abnahmegrundlage, der **Lasttest** ist gefahren ([`loadtest.md`](loadtest.md)) — **der Interop-Nachweis mit Fremdsystemen fehlt** (E1) |
 
 ## 2. Funktionale Kandidaten
 
@@ -52,7 +50,7 @@ Begründung.
 | B2 | ~~Backup-Automatik~~ — **erledigt**: `deploy/backup.sh` (beide Datenbanken, Spool, `.env`, Prüfungen) + `deploy/backup-roundtrip-test.sh` (sichern → zerstören → wiederherstellen → prüfen), läuft bei jedem `./test-stack.sh` | — | ✅ |
 | B3 | ~~Betriebshandbuch/Runbook~~ — **erledigt**: [`runbook.md`](runbook.md) („was tun, wenn …“ mit echten Befehlen, Eskalationsgrenzen, Update-Ablauf) | — | ✅ |
 | B4 | ~~Monitoring-Vorlage~~ — **erledigt**: `deploy/monitoring/prometheus-rules.yml` (17 Regeln) + `grafana-dashboard.json` (14 Panels), durch `test_monitoring_config.py` an die echten Metriknamen gebunden | — | ✅ |
-| B5 | **Lasttest** (100+ Modalitäten, 20 000 Spool-Einträge, 100 000 Cache-Einträge) mit dokumentierten Grenzwerten | Belegt die Dimensionierung für die Beschaffung — **und** schließt die in [`security-and-validation.md`](security-and-validation.md) benannte Validierungslücke („Lasttest fehlt") | mittel |
+| B5 | ~~Lasttest~~ — **erledigt**: [`loadtest.md`](loadtest.md) — Harness (`scripts/loadtest.py`), Messwerte, Grenzen. **Zwei echte Nebenläufigkeitsfehler gefunden und behoben** (Breaker-Zeile und Cache-Snapshot kollidierten unter parallelen Abfragen; eine Arbeitslisten-Abfrage kam als DIMSE-Fehler zurück), das Assoziationslimit als harte Grenze belegt. Offen: Wiederholung auf der Zielhardware und ein Soak-Test | — | ✅ |
 | B6 | ~~Selbstüberwachung~~ — **erledigt**: Health-Findings `spool_disk_low`/`spool_disk_tight`/`spool_dir_unusable`/`db_slow` + Alarmregel | — | ✅ |
 
 ### B1 — Vorbedingung: erst das Design, dann die zweite Instanz
@@ -109,12 +107,12 @@ Matching-Feinheiten auffallen, die kein Mock nachbildet.
 3. ~~**F1 (MRN-Merge)** — die größte verbleibende funktionale Lücke~~ — **erledigt**.
 4. ~~**C2 + C3** — Vorbereitung der Beschaffung~~ — **erledigt** (C1/MDR bewusst zurückgestellt).
 5. ~~**F8 + F9 + C5** (klein): Auftragskontext, IID und die MADO-Einordnung~~ — **erledigt**.
-6. **B5 (Lasttest)** — klein-mittel und schaltet zwei Dinge frei: die
-   Dimensionierungszahl für die Beschaffung und eine in
-   [`security-and-validation.md`](security-and-validation.md) benannte
-   Validierungslücke.
+6. ~~**B5 (Lasttest)**~~ — **erledigt**: [`loadtest.md`](loadtest.md) liefert die
+   Dimensionierungszahl *und* hat zwei Nebenläufigkeitsfehler aufgedeckt, die
+   jetzt behoben sind. Offen bleibt die Wiederholung auf der Zielhardware.
 7. **E1 (Interop-Nachweis)** — der einzige Weg, aus dem Statement einen Beweis
-   zu machen.
+   zu machen. Beantwortet außerdem die im Lasttest offen gebliebene Frage, wo die
+   ~90 ms pro C-FIND-Runde herkommen (eigener Client oder Gegenstelle).
 8. **B1 (Hochverfügbarkeit)** — mit dem Design-Vorlauf aus §3; erst danach die
    zweite Instanz.
 9. **F2a (ADT `A08`/`A24`/`A47`)** — klein, schließt die PIR-Lücke.

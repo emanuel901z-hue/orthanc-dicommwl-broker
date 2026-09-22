@@ -136,6 +136,19 @@ npx vitest run --coverage    # Broker-UI-Coverage (aktuell 98,9 %)
 # Desktop 1400x900 + Mobile 375x812, Screenshots in e2e/stack/shots/)
 node e2e/stack/verify-ui.cjs
 
+# Lasttest (misst das laufende System über die Leitung — DIMSE + REST).
+# Gegen den ISOLIERTEN Test-Stack fahren, nie gegen eine Anlage im Betrieb:
+# der Lasttest füllt Spools. Erst die Gegenstelle messen, dann den Broker
+# (der Mock-RIS war schon einmal der Flaschenhals) — siehe docs/loadtest.md.
+docker compose --project-name mwl-test --env-file .env.test \
+  -f docker-compose.yml -f docker-compose.demo.yml up -d
+python3 mwl-broker/scripts/loadtest.py cfind --port 11123 --api http://127.0.0.1:19081 \
+  --clients 40 --queries 5 --concurrency 10 --json /tmp/cfind.json
+python3 mwl-broker/scripts/loadtest.py cstore --port 11123 --api http://127.0.0.1:19081 \
+  --instances 200 --concurrency 8 --payload-kb 64
+docker compose --project-name mwl-test --env-file .env.test \
+  -f docker-compose.yml -f docker-compose.demo.yml down -v
+
 # Vollständige lokale Pipeline / Test-Stack / Fork-Push-Guard
 ./ci-local.sh               # pytest → tsc → lint → vitest → docker-e2e (--quick ohne Docker)
 ./test-stack.sh             # ephemerer Stack: up → DIMSE-Smokes → Playwright → down -v
@@ -287,6 +300,22 @@ Token rotieren = nur die Store-Datei neu schreiben:
 - **PHI**: `PatientName` niemals in Logs/Metriken/DB-Logs. Erlaubt für
   Matching: AccessionNumber, SPS-ID, StudyInstanceUID. PatientID nur in
   `seen_items` mit Retention.
+- **Zeilen, die zwei DIMSE-Threads gleichzeitig anlegen können, per Upsert
+  schreiben.** `source_breaker` (Primärschlüssel = Quelle) und
+  `worklist_cache` (Unique über Quelle + Dedupe-Schlüssel) wurden per
+  Read-then-Insert geschrieben: bei zehn gleichzeitigen Abfragen kollidierte das
+  mit einer `IntegrityError`, und im C-FIND-Handler wurde daraus **`0xC311`** —
+  die Modalität bekam einen Fehler für eine Abfrage, die der Broker hätte
+  beantworten können. Dafür gibt es `db.upsert` (`INSERT … ON CONFLICT DO
+  UPDATE`, Postgres und SQLite gleich). **Zähler von der Datenbank erhöhen
+  lassen** (`failures = failures + 1`), nie im Python-Code lesen-und-zurückschreiben
+  — sonst geht unter einem Ausfall-Burst ein Inkrement verloren. Gefunden vom
+  Lasttest (`docs/loadtest.md`), Regressionstests in `tests/test_concurrency.py`.
+- **Der Mock-RIS ist ein Entwicklungswerkzeug, kein Last-Gegenüber.**
+  pynetdicom's Server-Default ist **eine** Assoziation gleichzeitig; damit wies
+  der Mock den parallelen Fan-out des Brokers ab und der Lasttest maß den Mock
+  statt des Brokers. `--max-associations` setzen und **erst die Gegenstelle
+  messen, dann den Broker**.
 - **DB-Pool bewusst dimensionieren.** Der Stack hat mehrere Hintergrund-Worker
   (Echo-Loop, Spool, Retention, ATNA, MPPS-Zustellung) neben DIMSE-Handlern und
   API. Der SQLAlchemy-Standard (5 + 10 Overflow) lief unter Last voll und

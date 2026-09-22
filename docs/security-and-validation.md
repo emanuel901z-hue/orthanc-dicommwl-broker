@@ -77,7 +77,7 @@ verdrahtet und prüfen Verhalten, nicht Implementierung.
 
 | Ebene | Umfang | Was sie belegt |
 |---|---|---|
-| `pytest` (Backend) | 526 Tests | DIMSE-Verhalten über echte Assoziationen (C-FIND, C-STORE, C-ECHO, MPPS N-CREATE/N-SET/**N-GET**), MLLP über echte Sockets, TLS/mTLS, RBAC, Aufbewahrung, Aggregation/Merge, Patienten-Zusammenführung, Reporting, UPS-RS, Auftragskontext (MADO-Korrelation), Schema-Migrationen |
+| `pytest` (Backend) | 536 Tests | DIMSE-Verhalten über echte Assoziationen (C-FIND, C-STORE, C-ECHO, MPPS N-CREATE/N-SET/**N-GET**), MLLP über echte Sockets, TLS/mTLS, RBAC, Aufbewahrung, Aggregation/Merge, Patienten-Zusammenführung, Reporting, UPS-RS, Auftragskontext (MADO-Korrelation), Nebenläufigkeit (Breaker/Cache unter parallelen Abfragen), Schema-Migrationen |
 | `vitest` (Frontend) | 582 Tests | jede Broker-Seite und -Karte, Fehlerpfade, Berechtigungslogik, IID-Einstiegspunkt (RAD-106) |
 | `verify-ui.cjs` | 137 Checks | jede Seite in Desktop und Mobil: keine Konsolen-/Netzwerkfehler, genau ein `<h1>`, kein Overflow, erwartete Inhalte |
 | `verify-screens.cjs` | 225 Checks + 52 Bilder | jede Ansicht und jeder Dialog, inkl. Rohschlüssel-Erkennung |
@@ -120,7 +120,10 @@ Nicht durchgeführt und für eine belastbare Aussage nötig:
 
 - **Penetrationstest** der API und des DICOM-Listeners durch Dritte.
 - **Bedrohungsmodell nach IEC 81001-5-1** mit dokumentierter Risikobewertung.
-- **Lasttest** mit 100+ Modalitäten (Dimensionierung derzeit Erfahrungswert,
-  siehe `next-steps.md` B5).
+- **Lasttest** — inzwischen durchgeführt ([`loadtest.md`](loadtest.md): Harness,
+  Messwerte, gefundene Nebenläufigkeitsfehler, benannte Lücken). Was weiter
+  fehlt, ist die Wiederholung **auf der Zielhardware** und unter Dauerlast: die
+  vorliegenden Zahlen stammen von einem Entwicklungsrechner mit parallel
+  laufendem Stack.
 - **Datenschutz-Folgenabschätzung** durch den Betreiber (der Broker ist
   Verarbeitung im Auftrag, nicht Verantwortlicher).

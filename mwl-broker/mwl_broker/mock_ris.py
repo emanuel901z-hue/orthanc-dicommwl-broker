@@ -76,6 +76,11 @@ def main() -> int:
     p.add_argument("--aet", default="RIS_A")
     p.add_argument("--port", type=int, default=11114)
     p.add_argument("--variant", default="a", choices=sorted(VARIANTS))
+    p.add_argument("--max-associations", type=int, default=20,
+                   help="Concurrent associations this mock accepts. pynetdicom's "
+                        "default is 1, which makes the mock the bottleneck in any "
+                        "load test (and rejects a broker's parallel fan-out) — "
+                        "raise it to match a real RIS.")
     args = p.parse_args()
 
     items = VARIANTS[args.variant]
@@ -87,6 +92,7 @@ def main() -> int:
         yield 0x0000, None
 
     ae = AE(ae_title=args.aet)
+    ae.maximum_associations = args.max_associations
     ae.add_supported_context(ModalityWorklistInformationFind)
     from pynetdicom.sop_class import Verification
 

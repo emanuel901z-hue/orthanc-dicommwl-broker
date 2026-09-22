@@ -59,6 +59,48 @@ def get_session() -> Session:
     return session_factory()()
 
 
+def upsert(session: Session, model, values, index_elements, *,
+           update_columns: list | None = None, update_values: dict | None = None,
+           returning: list | None = None):
+    """`INSERT … ON CONFLICT DO UPDATE` — the same statement on Postgres and SQLite.
+
+    Two DIMSE threads can create the same row at the same instant: a source's
+    breaker state, a source's cache item. A plain insert loses that race with an
+    IntegrityError, and inside the C-FIND handler that exception was answered to
+    the modality as a DIMSE failure (`0xC311`) — a worklist query the broker could
+    have served. Found by the load test, see `docs/loadtest.md`.
+
+    `values` is one row dict or a list of them. Either name the columns whose new
+    value should win (`update_columns` → `excluded.<column>`), or pass explicit
+    `update_values` (which may be SQL expressions, e.g. `Model.failures + 1`).
+    Without either, a conflict does nothing.
+    """
+    dialect = session.get_bind().dialect.name
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+    elif dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+    else:  # pragma: no cover - MySQL/Oracle are not supported deployments
+        raise RuntimeError(
+            f"upsert() needs ON CONFLICT support, which {dialect!r} does not offer"
+        )
+
+    stmt = dialect_insert(model).values(values)
+    if update_columns:
+        stmt = stmt.on_conflict_do_update(
+            index_elements=index_elements,
+            set_={column: stmt.excluded[column] for column in update_columns},
+        )
+    elif update_values is not None:
+        stmt = stmt.on_conflict_do_update(index_elements=index_elements,
+                                          set_=update_values)
+    else:
+        stmt = stmt.on_conflict_do_nothing(index_elements=index_elements)
+    if returning:
+        stmt = stmt.returning(*returning)
+    return session.execute(stmt)
+
+
 # Idempotent column additions — this project intentionally has no Alembic;
 # The base schema comes from the models (`create_all`). Ordered migrations for
 # *existing* installations live in `migrations/` (Alembic); every revision after
