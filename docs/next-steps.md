@@ -36,9 +36,9 @@ UPS-RS-Subset). Dieses Dokument plant, was danach sinnvoll ist — getrennt nach
 | # | Vorhaben | Warum | Aufwand |
 |---|---|---|---|
 | B1 | **Hochverfügbarkeit**: zweite Instanz + gemeinsame DB/Spool-Volume, Health-basiertes Umschalten, Runbook | Ein einzelner Broker ist ein Single Point of Failure für alle Modalitäten | groß |
-| B2 | **Backup-Automatik**: `deploy/backup.sh` (pg_dump + Spool-Volume + `.env`-Sicherung) inkl. Wiederherstellungsprobe | `setup.sh` zeigt den Befehl, richtet aber keinen Cron ein | klein–mittel |
+| B2 | ~~Backup-Automatik~~ — **erledigt**: `deploy/backup.sh` (beide Datenbanken, Spool, `.env`, Prüfungen) + `deploy/backup-roundtrip-test.sh` (sichern → zerstören → wiederherstellen → prüfen), läuft bei jedem `./test-stack.sh` | — | ✅ |
 | B3 | **Betriebshandbuch/Runbook**: „Modalität sieht nichts", „PACS nimmt nicht an", „RIS bekommt keine Rückmeldung" mit Befehlen | Verkürzt die Fehlersuche im Dienst | klein |
-| B4 | **Monitoring-Vorlage**: fertige Prometheus-Regeln/Alerts (Grafana-Dashboard als JSON) für die vorhandenen Metriken | Die Metriken existieren, die Alarme fehlen | klein–mittel |
+| B4 | ~~Monitoring-Vorlage~~ — **erledigt**: `deploy/monitoring/prometheus-rules.yml` (17 Regeln) + `grafana-dashboard.json` (14 Panels), durch `test_monitoring_config.py` an die echten Metriknamen gebunden | — | ✅ |
 | B5 | **Lasttest** (100+ Modalitäten, 20 000 Spool-Einträge, 100 000 Cache-Einträge) mit dokumentierten Grenzwerten | Belegt die Dimensionierung für die Beschaffung | mittel |
 | B6 | **Selbstüberwachung**: Broker prüft seine eigene DB/Spool-Platte und meldet es über die Alarmierung | „Platte voll" fällt heute erst beim Schreiben auf | klein |
 

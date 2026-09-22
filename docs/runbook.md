@@ -30,7 +30,7 @@ curl -s http://127.0.0.1:18081/api/v1/status          # Version, Quellen, Ziele
 
 | Beobachtung | Ursache | Maßnahme |
 |---|---|---|
-| **Kein Eintrag im Abfrage-Log** | Die Modalität erreicht den Broker nicht (falscher AET/Port, Netz, Firewall) | Am Gerät AET `BROKER_AET` (Standard `MWLBROKER`) und Port `BROKER_DICOM_PORT` prüfen; `ss -tln | grep <port>` auf dem Broker-Host |
+| **Kein Eintrag im Abfrage-Log** | Die Modalität erreicht den Broker nicht (falscher AET/Port, Netz, Firewall) | Am Gerät AET `BROKER_AET` (Standard `MWLBROKER`) und Port `BROKER_DICOM_PORT` prüfen; auf dem Broker-Host `ss -tln` zeigt, ob der Port lauscht |
 | Eintrag mit Status **failed** | Keine Quelle hat geantwortet | Unten „Eine Quelle antwortet nicht" |
 | Eintrag mit Status **partial**, Spalte „stale" | Eine Quelle war weg, Cache hat überbrückt | Quelle prüfen (siehe unten) — die Liste war unvollständig |
 | Eintrag mit **0 Antworten**, Quellen aber grün | Die Quellen kennen den Fall nicht, oder die **Stationsregel** verbirgt ihn | Übersicht → *Fall prüfen*; Stationsregeln-Seite → *Vorschau* für diese Station |
@@ -44,25 +44,31 @@ eine `deny`-Regel greift.
 ## 2. „Eine Quelle (RIS) antwortet nicht"
 
 1. **C-ECHO:** Übersicht → in der Quellenzeile auf das Blitz-Symbol, oder
+
    ```bash
    curl -s -X POST http://127.0.0.1:18081/api/v1/sources/1/echo | python3 -m json.tool
    ```
+
    - `ok: false` mit `Temporary failure in name resolution` → **Hostname falsch** oder der Broker erreicht das Netz nicht.
    - `ok: false` mit `Connection refused` → Dienst am Ziel aus oder falscher Port.
    - `ok: true` → die Quelle lebt: es ist ein **Inhaltsproblem**, kein Netzproblem.
 2. **Liefert sie Arbeitslisten?** Upstream-Quellen → **Lupe** (C-FIND-Test):
+
    ```bash
    curl -s -X POST http://127.0.0.1:18081/api/v1/sources/1/query \
      -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
    ```
+
    `answers: 0` bei `ok: true` heißt: das RIS hat für diese Abfrage nichts —
    nicht der Broker ist das Problem.
 3. **Circuit Breaker offen?** In der Quellenzeile erscheint ein Badge
    „übersprungen"; die Übersicht zeigt `breaker_state: open`. Der Broker wartet
    `breaker_open_seconds` (Standard 60 s) ab. Sofort wieder aufnehmen:
+
    ```bash
    curl -X POST http://127.0.0.1:18081/api/v1/sources/1/reset-breaker
    ```
+
    Der Reset steht im Änderungsprotokoll.
 4. **Timeout zu knapp?** Broker-Einstellungen → `upstream_timeout_s`
    (Standard 10 s). Bei langsamen RIS auf 20–30 s erhöhen.
@@ -91,14 +97,18 @@ eine `deny`-Regel greift.
 2. Broker-Einstellungen prüfen: `mpps_forward_enabled`, `mpps_forward_transport`
    (`mllp`/`webhook`), `mpps_forward_host`/`_port` bzw. `_url`.
 3. MLLP-Test von Hand:
+
    ```bash
    nc -zv <ris-host> 2575          # erreichbar?
    ```
+
 4. Offene Meldungen erneut senden:
+
    ```bash
    curl -X POST http://127.0.0.1:18081/api/v1/mpps/forward-pending \
      -H 'X-OE3-Roles: brokerWrite'
    ```
+
 5. Der Broker meldet **asynchron** — eine langsame Gegenstelle verzögert die
    Modalität nie.
 
@@ -126,14 +136,17 @@ docker compose ps                            # alles healthy?
 ./deploy/backup.sh --restore <Pfad>       # wiederherstellen (fragt nach!)
 ```
 
-* Gesichert werden **beide** Datenbanken (Broker `mwl`, Orthanc `orthanc`),
+- Gesichert werden **beide** Datenbanken (Broker `mwl`, Orthanc `orthanc`),
   das Spool-Verzeichnis und die `.env`.
-* Eine Sicherung ist erst dann etwas wert, wenn die Wiederherstellung geübt ist:
+- Eine Sicherung ist erst dann etwas wert, wenn die Wiederherstellung geübt ist:
   `./deploy/backup-roundtrip-test.sh` legt im Test-Stack einen Marker an, löscht
   ihn, stellt die Sicherung zurück und prüft, dass er wieder da ist. Das läuft
   bei jedem `./test-stack.sh` mit.
-* Empfohlener Cron (täglich 2:15, 30 Sicherungen behalten):
-  `15 2 * * * cd /opt/orthanc-dicommwl-broker && ./deploy/backup.sh --dir /mnt/backup --keep 30 >> /var/log/mwl-backup.log 2>&1`
+- Empfohlener Cron (täglich 2:15, 30 Sicherungen behalten):
+
+  ```text
+  15 2 * * * cd /opt/orthanc-dicommwl-broker && ./deploy/backup.sh --dir /mnt/backup --keep 30 >> /var/log/mwl-backup.log 2>&1
+  ```
 
 ## 7. Update auf eine neue Version
 
@@ -144,6 +157,7 @@ git pull --recurse-submodules
 ./build.sh --health         # bauen + starten; Migrationen laufen beim Start
 ./setup.sh --check          # Health-Findings ansehen
 ```
+
 Der Broker **verweigert den Start**, wenn das Image Migrationen enthält, die
 nicht zur Datenbank passen — dann ist das Image falsch gebaut, nicht die
 Datenbank defekt.
