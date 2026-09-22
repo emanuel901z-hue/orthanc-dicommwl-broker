@@ -148,6 +148,21 @@ docker compose ps                            # alles healthy?
   15 2 * * * cd /opt/orthanc-dicommwl-broker && ./deploy/backup.sh --dir /mnt/backup --keep 30 >> /var/log/mwl-backup.log 2>&1
   ```
 
+## 6a. Nach Änderungen an der nginx-Konfiguration
+
+`deploy/oe3-stack.nginx.conf` wird beim Bauen ins Image kopiert; ein laufender
+nginx hält seine Konfiguration im Speicher. Nach einer Änderung deshalb:
+
+```bash
+./build.sh oe3 && docker compose exec oe3 nginx -s reload
+```
+
+Prüfen, ob die Sicherheits-Header ankommen:
+
+```bash
+curl -sI http://127.0.0.1:18082/oe3/ | grep -i x-content-type-options
+```
+
 ## 7. Update auf eine neue Version
 
 ```bash

@@ -46,9 +46,9 @@ UPS-RS-Subset). Dieses Dokument plant, was danach sinnvoll ist — getrennt nach
 
 | # | Vorhaben | Warum | Aufwand |
 |---|---|---|---|
-| C1 | **CE-Kennzeichnung nach MDR** als Medizinprodukt, IEC 62304-Lebenszyklus, ISO 14971-Risikodossier | Ohne das ist kein Verkauf/Einsatz als Medizinprodukt in der EU möglich — der eigentliche Unterschied zu kommerziellen Produkten | organisatorisch, groß |
-| C2 | **Validierungsdokumentation** (Installations-, Funktions-, Regressionstest mit Abzeichnung) auf Basis der vorhandenen Suiten | Krankenhäuser verlangen die Abnahme dokumentiert | klein–mittel (Tests existieren) |
-| C3 | **Cybersecurity-Dokumentation** (IEC 81001-5-1): Bedrohungsmodell, Härtung, Patchprozess | Wird in Ausschreibungen zunehmend gefordert | mittel |
+| C1 | **CE-Kennzeichnung nach MDR** (auf Wunsch des Betreibers zurückgestellt) als Medizinprodukt, IEC 62304-Lebenszyklus, ISO 14971-Risikodossier | Ohne das ist kein Verkauf/Einsatz als Medizinprodukt in der EU möglich — der eigentliche Unterschied zu kommerziellen Produkten | organisatorisch, groß |
+| C2 | ~~Validierungsdokumentation~~ — **erledigt** als Ablaufbeschreibung (§4 in `security-and-validation.md`: Suiten als Abnahmegrundlage, drei Betriebsfälle, Ablage von Datum/Version/Findings). Formale Abzeichnung bleibt Sache des Betreibers | — | ✅ |
+| C3 | ~~Cybersecurity-Dokumentation~~ — **erledigt** (ohne Zertifizierungsanspruch): [`security-and-validation.md`](security-and-validation.md) — Schutzbedarf/Datenfluss, Härtungsliste, **bekannte Grenzen**, Validierungsablauf, Patchprozess, was für einen echten Nachweis fehlt (Pentest, IEC 81001-5-1, Lasttest, DSFA) | — | ✅ |
 | C4 | **Support-/SLA-Konzept**, Schulungsunterlagen | Teil jeder Ausschreibung | organisatorisch |
 
 ## 5. Empfohlene Reihenfolge
@@ -56,8 +56,8 @@ UPS-RS-Subset). Dieses Dokument plant, was danach sinnvoll ist — getrennt nach
 1. ~~**B2 + B3 + B4** (klein, sofort nutzbar: Backup, Runbook, Alarme)~~ — **erledigt**.
 2. ~~**F6 + F7 + B6** (klein): schnell sichtbarer Nutzen für Betreiber~~ — **erledigt**.
 3. ~~**F1 (MRN-Merge)** — die größte verbleibende funktionale Lücke~~ — **erledigt**.
-4. **C2 + C3** — Vorbereitung der Beschaffung, auf den vorhandenen Tests.
-5. **B1 (Hochverfügbarkeit)**, dann **F2**, **F5**.
+4. ~~**C2 + C3** — Vorbereitung der Beschaffung~~ — **erledigt** (C1/MDR bewusst zurückgestellt).
+5. **B1 (Hochverfügbarkeit)**, dann **F2**, **F5** — als Nächstes.
 6. **F3/F4** nur, wenn ein konkreter Kunde sie verlangt.
 
 ## 6. Was bewusst außerhalb bleibt

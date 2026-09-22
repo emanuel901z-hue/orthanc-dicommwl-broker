@@ -1800,3 +1800,20 @@ def test_cache_refresh_queries_now(client, monkeypatch):
     assert any(e["action"] == "cache.refresh" for e in entries)
 
     assert client.post("/api/v1/cache/refresh", params={"source_id": 999}).status_code == 404
+
+
+def test_oversized_request_bodies_are_refused(client):
+    """The API only receives HL7 text and small JSON — a cap protects the container."""
+    huge = "x" * (3 * 1024 * 1024)
+
+    response = client.post("/api/v1/hl7/orm?dry_run=true", content=huge,
+                           headers={"Content-Type": "text/plain"})
+
+    assert response.status_code == 413
+    assert "larger than" in response.json()["detail"]
+
+    # a normal HL7 message still goes through
+    normal = ("MSH|^~\\&|RIS|KH|MWLBROKER|KH|20260922100000||ORM^O01|M1|P|2.4\r"
+              "PID|1||P-1||Muster^Max\rORC|NW|ACC-1\rOBR|1|ACC-1||CT\r")
+    assert client.post("/api/v1/hl7/orm?dry_run=true", content=normal,
+                       headers={"Content-Type": "text/plain"}).status_code == 200

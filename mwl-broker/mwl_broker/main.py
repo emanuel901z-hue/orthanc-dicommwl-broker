@@ -4,10 +4,12 @@ Run:  uvicorn mwl_broker.main:app --host 0.0.0.0 --port 8081
 """
 import json
 import logging
+import os
 import threading
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
@@ -172,6 +174,22 @@ def create_app() -> FastAPI:
                            "configuration (missing role "
                            f"'{rbac.describe(request.headers)['write_role']}')."},
                 status_code=403,
+            )
+        return await call_next(request)
+
+    # Request size limit: the API only ever receives HL7 text and small JSON
+    # (images arrive over DIMSE). Without a cap a single request could exhaust
+    # the memory of the container.
+    max_body = int(os.getenv("BROKER_MAX_BODY_BYTES", str(2 * 1024 * 1024)))
+
+    @app.middleware("http")
+    async def limit_body_size(request, call_next):
+        length = request.headers.get("content-length")
+        if length and length.isdigit() and int(length) > max_body:
+            return JSONResponse(
+                {"detail": f"Request body larger than {max_body} bytes — the API "
+                           "accepts HL7 text and small JSON only."},
+                status_code=413,
             )
         return await call_next(request)
 

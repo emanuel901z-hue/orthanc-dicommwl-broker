@@ -18,18 +18,33 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 info "Test-Stack starten"
 "${COMPOSE[@]}" up -d >/dev/null 2>&1
+# nicht nur /status: die Datenbank muss auch antworten (Migrationen!)
 for _ in $(seq 1 60); do
-  curl -sf "$API/status" >/dev/null 2>&1 && break
+  curl -sf "$API/status" >/dev/null 2>&1 && curl -sf "$API/local-items" >/dev/null 2>&1 && break
   sleep 2
 done
-curl -sf "$API/status" >/dev/null || fail "Broker nicht erreichbar"
-ok "Broker läuft"
+curl -sf "$API/local-items" >/dev/null || fail "Broker oder Datenbank antwortet nicht"
+ok "Broker läuft (Status und Datenbank)"
 
 info "Marker anlegen (lokaler Eintrag $MARKER)"
-curl -sf -X POST "$API/local-items" -H 'Content-Type: application/json' \
-  -H 'X-OE3-Roles: brokerWrite' \
-  -d "{\"accession\":\"$MARKER\",\"sps_id\":\"1\",\"patient_id\":\"P-RT\",\"patient_name\":\"Runde^Rita\",\"modality\":\"CT\",\"station_aet\":\"CT_01\"}" \
-  >/dev/null
+# einen Rest aus einem abgebrochenen Lauf zuerst entfernen
+existing="$(curl -s "$API/local-items" | python3 -c "
+import json,sys
+try:
+    rows = json.load(sys.stdin)
+except Exception:
+    rows = []
+for row in rows:
+    if row.get('accession') == '$MARKER':
+        print(row['id']); break" || true)"
+[ -n "$existing" ] && curl -sf -X DELETE "$API/local-items/$existing" \
+  -H 'X-OE3-Roles: brokerWrite' >/dev/null || true
+
+created="$(curl -s -X POST "$API/local-items" -H 'Content-Type: application/json' \
+  -H 'X-OE3-Roles: brokerWrite' -w '\n%{http_code}' \
+  -d "{\"accession\":\"$MARKER\",\"sps_id\":\"1\",\"patient_id\":\"P-RT\",\"patient_name\":\"Runde^Rita\",\"modality\":\"CT\",\"station_aet\":\"CT_01\"}")"
+code="$(printf '%s' "$created" | tail -1)"
+[ "$code" = "200" ] || [ "$code" = "201" ] || { printf '%s\n' "$created" | head -2 >&2; fail "Marker konnte nicht angelegt werden (HTTP $code)"; }
 count() { curl -s "$API/local-items" | grep -c "$MARKER" || true; }
 [ "$(count)" -ge 1 ] || fail "Marker wurde nicht angelegt"
 ok "Marker vorhanden"
@@ -57,12 +72,23 @@ info "Wiederherstellen"
   > /tmp/roundtrip-restore.log 2>&1 || { tail -8 /tmp/roundtrip-restore.log; fail "Wiederherstellung fehlgeschlagen"; }
 
 info "Prüfen"
-for _ in $(seq 1 30); do
-  curl -sf "$API/status" >/dev/null 2>&1 && break
+# Die Wiederherstellung startet den Broker neu — erst warten, bis er wieder
+# vollständig antwortet (sonst sieht der nächste Schritt einen halbfertigen Dienst)
+for _ in $(seq 1 60); do
+  curl -sf "$API/status" >/dev/null 2>&1 && curl -sf "$API/local-items" >/dev/null 2>&1 && break
   sleep 2
 done
 [ "$(count)" -ge 1 ] || fail "Marker ist nach der Wiederherstellung nicht zurück"
 ok "Marker ist wieder da — Round-Trip erfolgreich"
+
+# Der Stack muss für den nächsten Schritt bereit sein (Health + Datenbank)
+info "Stack bereit melden"
+for _ in $(seq 1 60); do
+  curl -sf "http://127.0.0.1:19081/healthz" >/dev/null 2>&1 && break
+  sleep 2
+done
+curl -sf "http://127.0.0.1:19081/healthz" >/dev/null || fail "der Broker ist nach der Wiederherstellung nicht erreichbar"
+ok "Broker antwortet wieder"
 
 if [ "$KEEP_STACK" = 0 ]; then
   info "Aufräumen"

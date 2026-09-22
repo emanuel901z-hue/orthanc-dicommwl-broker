@@ -489,7 +489,14 @@ echo "── Playwright (desktop + mobile) ──"
 echo "── Sicherung/Wiederherstellung (Round-Trip gegen den Test-Stack) ──"
 ./deploy/backup-roundtrip-test.sh --keep-stack
 
+# the round trip restarts the broker and restores the database — make sure the
+# stack is answering before the UI checks run
+for _ in $(seq 1 60); do
+  curl -sf "$BROKER_API_URL/healthz" >/dev/null 2>&1 && break
+  sleep 2
+done
+
 echo "── Screenshot-Walk über alle Views/Menüs (Chrome headless) ──"
-(cd orthanc-explorer-3-usable && node e2e/stack/verify-screens.cjs)
+(cd orthanc-explorer-3-usable && OE3_BASE="$OE3_BASE" node e2e/stack/verify-screens.cjs)
 
 echo "── all checks passed ──"
