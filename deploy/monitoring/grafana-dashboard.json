@@ -1,0 +1,201 @@
+{
+  "title": "MWL Broker",
+  "uid": "mwl-broker",
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "tags": ["dicom", "worklist", "broker"],
+  "templating": {
+    "list": [
+      {
+        "name": "source",
+        "label": "Quelle",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "query": "label_values(mwl_echo_up{kind=\"source\"}, source)",
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Arbeitslisten-Abfragen (pro Minute)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(rate(mwl_cfind_requests_total[5m])) by (result)",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "title": "Antwortzeit C-FIND (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(mwl_cfind_duration_seconds_bucket[10m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "title": "Quellen und Ziele: C-ECHO-Status",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "mwl_echo_up",
+          "legendFormat": "{{kind}} {{name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "ausgefallen", "color": "red" },
+                                            "1": { "text": "erreichbar", "color": "green" } } }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Circuit Breaker",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "mwl_upstream_breaker_state",
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "geschlossen", "color": "green" },
+                                            "1": { "text": "halb offen", "color": "orange" },
+                                            "2": { "text": "offen", "color": "red" } } }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Antworten je Quelle (pro Minute)",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(rate(mwl_cfind_upstream_answers_total[5m])) by (source)",
+          "legendFormat": "{{source}}"
+        }
+      ]
+    },
+    {
+      "title": "Spool: wartende Bilder",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "mwl_spool_items{status=\"queued\"}", "legendFormat": "wartend" },
+        { "expr": "mwl_spool_items{status=\"dead\"}", "legendFormat": "aufgegeben" },
+        { "expr": "mwl_spool_oldest_seconds", "legendFormat": "ältester (s)" }
+      ]
+    },
+    {
+      "title": "Cache: Einträge und Alter",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "sum(mwl_cache_entries) by (source)", "legendFormat": "{{source}}" },
+        { "expr": "mwl_cache_age_seconds", "legendFormat": "Alter (s)" }
+      ]
+    },
+    {
+      "title": "Aus dem Cache bediente Abfragen (pro Minute)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "sum(rate(mwl_cache_served_total[5m]))", "legendFormat": "aus dem Cache" }
+      ]
+    },
+    {
+      "title": "MPPS: Schritte und Rückmeldungen (pro Minute)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 21 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "sum(rate(mwl_mpps_steps_total[5m])) by (status)", "legendFormat": "Schritt {{status}}" },
+        { "expr": "sum(rate(mwl_mpps_forwarded_total[5m])) by (result)", "legendFormat": "Meldung {{result}}" }
+      ]
+    },
+    {
+      "title": "C-STORE-Annahmen (pro Minute)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 21 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "sum(rate(mwl_cstore_total[5m])) by (result)", "legendFormat": "{{result}}" }
+      ]
+    },
+    {
+      "title": "Konfigurations-Findings",
+      "type": "stat",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 21 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "sum(mwl_config_findings) by (severity)", "legendFormat": "{{severity}}" }
+      ]
+    },
+    {
+      "title": "Zertifikate: Restlaufzeit (Tage)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "mwl_tls_certificate_days_left", "legendFormat": "{{role}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute",
+                          "steps": [ { "color": "red", "value": null },
+                                     { "color": "orange", "value": 30 },
+                                     { "color": "green", "value": 90 } ] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Audit und Alarmierung",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "sum(rate(mwl_atna_sent_total[5m]))", "legendFormat": "ATNA gesendet" },
+        { "expr": "sum(rate(mwl_atna_failed_total[5m]))", "legendFormat": "ATNA fehlgeschlagen" },
+        { "expr": "sum(rate(mwl_notify_sent_total[5m]))", "legendFormat": "Alarme gesendet" },
+        { "expr": "sum(rate(mwl_notify_failed_total[5m]))", "legendFormat": "Alarme fehlgeschlagen" }
+      ]
+    },
+    {
+      "title": "Älteste Zeile je Tabelle (Tage)",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "mwl_retention_oldest_seconds / 86400", "legendFormat": "{{table}}" }
+      ]
+    }
+  ]
+}

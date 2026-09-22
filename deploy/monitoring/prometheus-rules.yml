@@ -1,0 +1,164 @@
+# Prometheus-Alarmregeln für den MWL-Broker
+#
+# Einbinden:  rule_files: [ "/etc/prometheus/mwl-broker-rules.yml" ]
+# Die Metriknamen sind gegen `mwl_broker/metrics.py` geprüft — ein Test
+# (tests/test_monitoring_config.py) hält Datei und Code zusammen.
+#
+# Schwellen sind bewusst konservativ: ein Fehlalarm im Dienst ist teurer als
+# eine Minute Verzögerung.
+groups:
+  - name: mwl-broker
+    rules:
+      # ── Erreichbarkeit ───────────────────────────────────────────────────
+      - alert: MWLBrokerDown
+        expr: up{job="mwl-broker"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "MWL-Broker nicht erreichbar"
+          description: "Kein Scrape seit 2 Minuten — die Modalitäten bekommen keine Arbeitslisten."
+          runbook: "docs/runbook.md#5-der-broker-antwortet-nicht--500er"
+
+      - alert: MWLSourceDown
+        expr: mwl_echo_up == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Worklist-Quelle {{ $labels.source }} antwortet nicht auf C-ECHO"
+          description: "Ohne diese Quelle ist die Arbeitsliste unvollständig. C-ECHO und C-FIND-Test in der Oberfläche prüfen."
+          runbook: "docs/runbook.md#2-eine-quelle-ris-antwortet-nicht"
+
+      - alert: MWLTargetDown
+        expr: mwl_echo_up == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "PACS-Ziel {{ $labels.target }} antwortet nicht auf C-ECHO"
+          description: "Bilder laufen in den Spool; sie gehen nicht verloren, aber die Zustellung steht."
+          runbook: "docs/runbook.md#3-bilder-kommen-nicht-im-pacs-an"
+
+      - alert: MWLBreakerOpen
+        expr: mwl_upstream_breaker_state >= 2
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Circuit Breaker für {{ $labels.source }} offen"
+          description: "Der Broker überspringt diese Quelle, um Abfragen schnell zu halten."
+          runbook: "docs/runbook.md#2-eine-quelle-ris-antwortet-nicht"
+
+      # ── Worklist-Qualität ────────────────────────────────────────────────
+      - alert: MWLQueriesFailing
+        expr: |
+          sum(rate(mwl_cfind_requests_total{result="failed"}[15m]))
+            / clamp_min(sum(rate(mwl_cfind_requests_total[15m])), 0.001) > 0.2
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Über 20 % der Arbeitslisten-Abfragen scheitern"
+          description: "Mehrere oder alle Quellen antworten nicht — Abfrage-Log und C-ECHO-Matrix prüfen."
+
+      - alert: MWLQueriesFromCache
+        expr: increase(mwl_cache_served_total[30m]) > 5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Arbeitslisten kommen aus dem Cache"
+          description: "Eine Quelle war ausgefallen; die Liste kann veraltet sein. Quelle prüfen."
+
+      - alert: MWLSlowQueries
+        expr: |
+          histogram_quantile(0.95, sum(rate(mwl_cfind_duration_seconds_bucket[10m])) by (le)) > 3
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "95 % der Abfragen brauchen länger als 3 s"
+          description: "Ein RIS ist langsam. upstream_timeout_s prüfen, Quelle beim Betreiber melden."
+
+      # ── Bilder / Spool ───────────────────────────────────────────────────
+      - alert: MWLSpoolGrowing
+        expr: mwl_spool_items{status="queued"} > 50
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value }} Bilder warten im Spool"
+          description: "Das Ziel nimmt nicht an (oder langsam). Ziel-C-ECHO prüfen."
+          runbook: "docs/runbook.md#3-bilder-kommen-nicht-im-pacs-an"
+
+      - alert: MWLSpoolFull
+        expr: mwl_spool_items{status="queued"} >= 19000
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Spool fast voll — neue Bilder werden abgewiesen"
+          description: "Sofort Platz schaffen oder das Ziel reparieren; ab dem Limit antwortet der Broker der Modalität mit einem Fehler."
+          runbook: "docs/runbook.md#3-bilder-kommen-nicht-im-pacs-an"
+
+      - alert: MWLSpoolDeadLetters
+        expr: increase(mwl_spool_dead_total[1h]) > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Bilder wurden aufgegeben (Dead Letter)"
+          description: "Diese Bilder sind NICHT zugestellt. Store-Warteschlange öffnen und erneut senden."
+          runbook: "docs/runbook.md#3-bilder-kommen-nicht-im-pacs-an"
+
+      - alert: MWLSpoolOldest
+        expr: mwl_spool_oldest_seconds > 3600
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Das älteste gepufferte Bild ist älter als 1 Stunde"
+          description: "Die Zustellung hängt — Ziel und Netz prüfen."
+
+      # ── Rückkanal (MPPS) ─────────────────────────────────────────────────
+      - alert: MWLMppsNotReported
+        expr: increase(mwl_mpps_steps_total[30m]) > 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "MPPS-Schritte kommen an, aber die Rückmeldung stockt"
+          description: "Nur relevant, wenn die Rückmeldung aktiviert ist — sonst prüfen, ob sie aktiviert sein sollte."
+          runbook: "docs/runbook.md#4-das-ris-bekommt-keine-statusmeldungen-mpps"
+
+      - alert: MWLMppsForwardFailing
+        expr: increase(mwl_mpps_forwarded_total{result="failed"}[30m]) > 3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Statusmeldungen an das RIS scheitern"
+          description: "MLLP/Webhook-Konfiguration prüfen, offene Meldungen erneut senden."
+          runbook: "docs/runbook.md#4-das-ris-bekommt-keine-statusmeldungen-mpps"
+
+      # ── Konfiguration / Zertifikate / Audit ──────────────────────────────
+      - alert: MWLConfigError
+        expr: mwl_config_findings{severity="error"} > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Die Konfigurationsprüfung meldet einen Fehler"
+          description: "Übersicht → Konfigurations-Check; die Meldung nennt das betroffene Objekt."
+
+      - alert: MWLCertificateExpiring
+        expr: mwl_tls_certificate_days_left < 30
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Ein TLS-Zertifikat läuft in {{ $value }} Tagen ab"
+          description: "Neues Zertifikat bei der PKI anfordern und einspielen (TLS-Karte)."
+          runbook: "docs/runbook.md#9-wo-man-nachsieht-kurzliste"
+
+      - alert: MWLAtnaDropping
+        expr: increase(mwl_atna_dropped_total[15m]) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Audit-Nachrichten werden verworfen (Warteschlange voll)"
+          description: "Audit-Gegenstelle nicht erreichbar oder zu langsam — atna_queue_max prüfen."
+
+      - alert: MWLNotifyFailing
+        expr: increase(mwl_notify_failed_total[15m]) > 3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Alarmierung kann nicht zustellen"
+          description: "Webhook-URL/Netz prüfen — sonst erfährt niemand von Ausfällen."
