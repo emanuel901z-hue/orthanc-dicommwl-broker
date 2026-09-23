@@ -125,6 +125,7 @@ Prüfung, die unsere eigenen Tests nicht leisten können. Die Skripte liegen in
 | **Modality Worklist `C-FIND`** | **PASSED** — 0 Validierungsfehler (Skript aus einer echten Antwort erzeugt, s. u.) |
 | **C-STORE** (DVTk erzeugt ein Secondary-Capture-Bild im Skript) | **PASSED**; der Store liegt nachweislich im Broker (`/logs/stores`: `DVTK_SCU … success`) |
 | **MPPS** `N-CREATE` + `N-SET` (eigenes Skript mit gültiger UID) | **PASSED** — 0 Validierungsfehler |
+| **Ausgehender C-STORE** (unser Broker → DVTk als PACS) | **PASSED** — 0 Validierungsfehler; DVTk legte die empfangenen Objekte als Media ab |
 
 Damit ist die **komplette SWF-Kette** — Arbeitsliste, Bildannahme,
 Schrittmeldung, Lebenszeichen — von einem fremden, herstellergeprägten Werkzeug

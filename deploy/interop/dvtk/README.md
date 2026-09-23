@@ -14,6 +14,7 @@ können.
 | **Modality Worklist C-FIND** | `mwl_live.ds` (erzeugt, s. u.) | **PASSED** — 0 Validierungsfehler |
 | **C-STORE** (DVTk erzeugt ein Secondary-Capture-Bild im Skript) | `Storage_Scu/2.dss` | **PASSED**; der Store liegt nachweislich im Broker (`/logs/stores`: `DVTK_SCU … success`) |
 | **MPPS** `N-CREATE` + `N-SET` | `mpps_interop.ds` | **PASSED** — 0 Validierungsfehler |
+| **Ausgehender C-STORE** (Broker → DVTk als PACS) | Storage-SCP-Emulator (`dvtk_emulator.py`) | **PASSED** — 0 Validierungsfehler; DVTk legte die Objekte als Media ab (`1I00001.dcm`, `1I00002.dcm`) |
 
 Damit ist die **komplette SWF-Kette** (Arbeitsliste, Bildannahme, Schrittmeldung,
 Lebenszeichen) von einem fremden, herstellergeprägten Werkzeug gegen den
@@ -75,6 +76,32 @@ Die Beispiel-Sessions liegen im DVTk-Quellbaum
    *Kommando*-Elemente (`(0000,0002)` Affected SOP Class UID). Und
    `RequestedProcedureID` (0040,1001) liefert der Broker auf **oberster Ebene**,
    nicht innerhalb der SPS-Sequenz — beides steht jetzt im Generator.
+
+## Der Storage-SCP-Emulator (unsere *ausgehenden* C-STOREs)
+
+`DVTCmd -estscp` macht DVTk zum **fremden PACS**: es nimmt unsere C-STOREs an und
+validiert jeden gegen die Definition-Dateien. Der Weg dahin hatte vier Fallen:
+
+1. **Emulator-Session, nicht Skript-Session.** Die Beispiele unter
+   `DVT/Resources/Example/Scripts/...` sind `SESSION-TYPE script`; `-estscp`
+   bricht damit ab („ScriptSession kann nicht in EmulatorSession umgewandelt
+   werden"). Vorlage ist `DVT/Resources/Example/Emulators/Emulator_1/Emulator_1.ses`.
+2. **`SUT-ROLE requestor`** (DVTk ist hier der SCP) und die Transfer-Syntax des
+   Aufrufers in der Liste: unser Broker sendet Explicit VR Little Endian
+   (`1.2.840.10008.1.2.1`) — fehlt sie, wird jede Assoziation abgelehnt.
+3. **stdin muss offen bleiben** („Press ENTER to Stop") — dafür gibt es
+   `dvtk_emulator.py` (Python `Popen` mit `stdin=PIPE`), das den Emulator startet,
+   die Laufzeit begrenzt und ihn wieder beendet.
+4. **Netzrichtung:** die Windows-Box blockt eingehende Verbindungen vom
+   Linux-Host (Windows-Firewall ist aus, aber Sophos läuft; SSH auf 22 geht).
+   Ohne deren Firewall anzufassen: eine **SSH-Portweiterleitung**
+   (`ssh -N -L <host-ip>:<port>:127.0.0.1:<DVT-PORT> …`) — und dabei **127.0.0.1**
+   statt `localhost` verwenden: auf Windows löst `localhost` zuerst auf `::1`
+   auf, der Emulator lauscht aber nur auf IPv4 (`Socket closed during socket
+   read`).
+
+Damit lief es durch: der Broker lieferte zwei Bilder (aus dem Spool) an den
+Emulator, DVTk validierte sie mit **0 Fehlern** und legte sie als Media ab.
 
 ## Was das nicht ist
 
