@@ -212,7 +212,7 @@ fehlenden Zeile scheitert. Zwei Berührungspunkte sind umgesetzt:
 Der Vergleich mit kommerziellen MWL-Brokern (Funktionslücken, priorisierte
 Sprints) steht in [`docs/commercial-comparison.md`](docs/commercial-comparison.md).
 
-Die Test-Abdeckung (pytest, vitest, Playwright, Chrome-headless-DOM-Audit (150 Checks) und
+Die Test-Abdeckung (pytest, vitest, Playwright, Chrome-headless-DOM-Audit (154 Checks) und
 der Screenshot-Walk über alle Views) ist in
 [`docs/test-coverage-audit.md`](docs/test-coverage-audit.md) dokumentiert.
 
@@ -230,14 +230,15 @@ Parametern und Fehlerantworten (der Vertrag wird per Test erzwungen).
 UI-Härtung aus der DAU-Gap-Analyse, die MFA-Testumgebung und die i18n-Aufräumung.
 Die OpenAPI-Dokumentation ist vollständig (78 Operationen, jede mit Beschreibung,
 Parametern und Fehlerantworten). Aktuelle Zahlen:
-610 Backend-Tests (96 %), 595 Frontend-Tests, 55 Browser-E2E-Tests, 150 Checks
-im Deep-Audit — alles in `./ci-local.sh` verdrahtet.
+626 Backend-Tests (95 %), 606 Frontend-Tests, 30 Playwright-Tests im Stack-Lauf,
+154 Checks im Deep-Audit und 225 im Screenshot-Walk — alles in `./ci-local.sh`
+verdrahtet.
 
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 610 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
-cd orthanc-explorer-3-usable && npm run test      # 595 Tests
+cd mwl-broker && python -m pytest tests -q        # 626 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
+cd orthanc-explorer-3-usable && npm run test      # 606 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -249,7 +250,7 @@ npx playwright test --config=e2e/stack/playwright.stack.config.ts
 # läuft parallel zum regulären Stack; up → C-FIND-Smoke → Playwright → down -v):
 ./test-stack.sh          # alles; --keep lässt ihn laufen, --down räumt ab
 
-# Coverage (Broker-Code): backend 96 %, frontend Broker-UI 98.9 %
+# Coverage (Broker-Code): backend 95 % (626 Tests), frontend Broker-UI siehe vitest --coverage
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 cd orthanc-explorer-3-usable && npx vitest run --coverage
 

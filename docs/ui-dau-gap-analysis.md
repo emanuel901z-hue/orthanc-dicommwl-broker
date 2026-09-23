@@ -273,5 +273,5 @@ Alle drei Sprints sind umgesetzt, getestet, dokumentiert und gepusht:
 | 10 | P2: Eingabeführung (Picker, Vorprüfung, ein Workflow pro Änderung, Konsequenzen) | +14 vitest, verify-ui +4 |
 | 11 | P2/P3: Dirty-Guard, Duplikate, Tag-Vorprüfung, Konsistenz, A11y, i18n-Doku | +6 vitest, verify-ui +4 |
 
-**Kennzahlen nach der Härtung:** 395 Backend-Tests (96 %), 462 Frontend-Tests
+**Kennzahlen nach der Härtung** (Sprint 9–11, September 2026; aktueller Stand: siehe [`test-coverage-audit.md`](test-coverage-audit.md)): 395 Backend-Tests (96 %), 462 Frontend-Tests
 (98 % Broker-UI), 50 Playwright-Tests, **122 Checks** im Deep-Audit.

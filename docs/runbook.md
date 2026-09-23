@@ -34,7 +34,14 @@ curl -s http://127.0.0.1:18081/api/v1/status          # Version, Quellen, Ziele
 | Eintrag mit Status **failed** | Keine Quelle hat geantwortet | Unten „Eine Quelle antwortet nicht" |
 | Eintrag mit Status **partial**, Spalte „stale" | Eine Quelle war weg, Cache hat überbrückt | Quelle prüfen (siehe unten) — die Liste war unvollständig |
 | Eintrag mit **0 Antworten**, Quellen aber grün | Die Quellen kennen den Fall nicht, oder die **Stationsregel** verbirgt ihn | Übersicht → *Fall prüfen*; Stationsregeln-Seite → *Vorschau* für diese Station |
+| Eintrag mit **0 Antworten**, obwohl *eine* Quelle im C-FIND-Test (Lupe) Treffer liefert | Diese Quelle behandelt `QueryRetrieveLevel (0008,0052)` als **Matching-Schlüssel** — manche fremden MWL-SCPs tun das und antworten dann nichts (das Attribut gehört nicht zum Arbeitslisten-Modell) | Upstream-Quellen → Zeile bearbeiten → **„MWL-Interoperabilität → QueryRetrieveLevel weglassen"** einschalten (pro Quelle, auditiert). Voreinstellung ist *aus*: die Anfrage der Modalität wird sonst unverändert weitergegeben |
 | Antworten vorhanden, Gerät zeigt sie nicht | Filter am Gerät (Datum/Modalität/Station) | Mit derselben Abfrage gegen den Broker testen: **Upstream-Quellen → Lupe** (C-FIND-Test) |
+
+**Der Unterschied, auf den man schaut:** liefert der **C-FIND-Test** gegen *genau
+diese* Quelle Treffer (er fragt mit einem minimalen Identifier), während die
+**Aggregation** für die Modalität leer bleibt, dann ist es fast immer das
+`QueryRetrieveLevel`-Attribut in der Anfrage der Modalität — kein Fehler der
+Quelle, sondern eine Eigenheit der Fremdseite.
 
 **Stationsregel-Verdacht:** Stationsregeln → *„Was würde diese Konsole
 bekommen?"* mit der AET der Modalität. Erscheint die Liste leer, während die
@@ -73,18 +80,28 @@ eine `deny`-Regel greift.
 4. **Timeout zu knapp?** Broker-Einstellungen → `upstream_timeout_s`
    (Standard 10 s). Bei langsamen RIS auf 20–30 s erhöhen.
 
+**Cache dieser einen Quelle:** In der Karte *Worklist-Cache* steht der Zustand
+**je Quelle** (Einträge, Alter, stale-Fallback). Ist eine Quelle dauerhaft weg
+und ihr Snapshot veraltet, lässt er sich **einzeln** verwerfen (Papierkorb in der
+Zeile) — dann bedient sie keine Modalität mehr aus dem Cache, statt veraltete
+Aufträge zu liefern. Das ist auditiert.
+
 ## 3. „Bilder kommen nicht im PACS an"
 
-1. **Store-Queue** (Seite *Store-Warteschlange*): Einträge mit Status
+1. **Store-Log** (Übersicht, Karte *Ausgelieferte Bilder*): je Instanz Zeit,
+   aufrufende AET, Zugangsnummer, Status und Fehler. Steht dort `ausgeliefert`,
+   hat das PACS die Instanz angenommen — dann liegt es am PACS, nicht am Broker.
+   `eingereiht`/`fehlgeschlagen` mit Fehlertext → weiter mit der Store-Queue.
+2. **Store-Queue** (Seite *Store-Warteschlange*): Einträge mit Status
    *wartend*/*aufgegeben* ansehen — dort steht der **letzte Fehler** im Klartext.
-2. **Ziel erreichbar?** Store-Ziele → C-ECHO in der Zeile.
-3. **Routing prüfen:** Übersicht → *Fall prüfen* mit der Zugangsnummer. Es wird
+3. **Ziel erreichbar?** Store-Ziele → C-ECHO in der Zeile.
+4. **Routing prüfen:** Übersicht → *Fall prüfen* mit der Zugangsnummer. Es wird
    die Quelle, die Regel und das Ziel genannt. Kein Treffer → es greift das
    **Standard-Ziel**; ist keines gesetzt, wird das Bild **abgewiesen** (Health
    meldet `no_default_target`).
-4. **Aufgegebene Bilder erneut senden:** Store-Warteschlange → *Alle erneut
+5. **Aufgegebene Bilder erneut senden:** Store-Warteschlange → *Alle erneut
    senden* (oder einzeln *Jetzt erneut senden*). Das ist auditiert.
-5. **Spool voll?** Health-Finding `spool_full` bzw. Badge in der Karte
+6. **Spool voll?** Health-Finding `spool_full` bzw. Badge in der Karte
    *C-STORE-Spool*. Platz schaffen (alte, zugestellte Einträge räumt die
    Aufbewahrung) oder `spool_max_items`/`spool_max_bytes` erhöhen.
    **Wichtig:** Bei vollem Spool weist der Broker neue Bilder **ab** — die
@@ -102,7 +119,13 @@ eine `deny`-Regel greift.
    nc -zv <ris-host> 2575          # erreichbar?
    ```
 
-4. Offene Meldungen erneut senden:
+4. Offene Meldungen erneut senden — **alle** oder **einzeln**: in der Karte
+   *Durchgeführte Schritte* die Liste öffnen (*Schritte anzeigen*) und in der
+   Zeile des betroffenen Schritts **„Erneut senden"** drücken (auditiert). Genau
+   das ist der Fall, den „alle nachmelden" nicht löst: wenn **ein** Schritt vom
+   RIS abgelehnt wird, während die übrigen längst angekommen sind.
+
+   Alle auf einmal per API:
 
    ```bash
    curl -X POST http://127.0.0.1:18081/api/v1/mpps/forward-pending \

@@ -107,3 +107,31 @@ cd orthanc-explorer-3-usable && npx vitest run --coverage
 node orthanc-explorer-3-usable/e2e/stack/verify-screens.cjs   # einzeln, gegen den laufenden Stack
 node orthanc-explorer-3-usable/e2e/stack/verify-ui.cjs        # DOM-Audit
 ```
+
+## Nachtrag 23.09.2026
+
+Seit dem 21.09. sind HA (B1), HL7/PIR/OMI/ADT (F2a), die externen Interop-Nachweise
+(E1) und mehrere Oberflächen-Elemente dazugekommen. Neu gemessen:
+
+| Ebene | 21.09. | **23.09.** |
+|---|---|---|
+| `pytest` (Backend) | 432 | **626** |
+| `vitest` (Frontend) | 522 | **606** |
+| Playwright (Stack-Lauf) | 25 | **30** |
+| `verify-ui.cjs` (DOM-Audit) | 133 | **154** |
+| `verify-screens.cjs` | 225 | **225** (+ 52 Bilder) |
+
+Neue Verträge, die dabei entstanden sind:
+
+| Test | Wofür |
+|---|---|
+| `tests/test_api_ui_contract.py` | Route ↔ UI, Feld ↔ Formular, Client-Methode ↔ Aufrufer — **in beide Richtungen**, mit begründeter Ausnahmeliste. Ein neuer Endpunkt ohne UI-Element lässt die Suite fehlschlagen |
+| `tests/test_audit_entity_labels.py` | jede Entity des Änderungsprotokolls braucht eine Beschriftung (die Liste kommt per AST aus dem Code) |
+| `tests/test_settings_ui_labels.py` | jede Einstellung braucht Label + Beschreibung (en/de) |
+| `tests/test_interop_findings.py` | die von Fremdsoftware gefundenen Fälle (mehrwertige Attribute, Cache-Fehler, `QueryRetrieveLevel`) |
+
+Was die Audits in dieser Zeit **gefunden** haben (und was behoben ist): ein
+**500** im Store-Log bei Altzeilen (`applied_transforms = NULL`), vier Entities
+ohne Beschriftung im Änderungsprotokoll, 15 Einstellungen ohne Label, ein
+FK-Fehler beim Löschen einer Quelle mit Cache-Snapshot und drei API-Fähigkeiten
+ohne UI-Element (MPPS-Einzelschritt, Cache je Quelle, Store-Log).

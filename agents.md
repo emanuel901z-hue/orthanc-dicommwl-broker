@@ -37,7 +37,7 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d
 
 # Broker-Tests (ohne Docker; DIMSE-Tests nutzen ephemere Ports + sqlite)
 cd mwl-broker && python -m pytest tests -q
-# …mit Coverage (aktuell 96 %)
+# …mit Coverage (aktuell 95 %)
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 
 # RBAC + Retention (laufender Stack)
@@ -130,7 +130,7 @@ npm install
 npm run dev                 # Vite-Proxy: /orthanc-proxy, /broker-api
 npm run test && npm run lint
 npx tsc --noEmit -p tsconfig.app.json
-npx vitest run --coverage    # Broker-UI-Coverage (aktuell 98,9 %)
+npx vitest run --coverage    # Broker-UI-Coverage (23.09.2026: lib 98 %, hooks 97 %, pages 95 %, api/broker.ts 89 %)
 
 # Werkzeug-Lückenanalyse (welche Fremdsoftware uns fehlt und warum): docs/interop-tools.md
 # Externe Kompatibilität gegen Fremdsoftware (DCMTK ist ein apt-Paket):

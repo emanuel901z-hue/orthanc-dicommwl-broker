@@ -27,6 +27,12 @@ Begründung.
 | **IID** (Invoke Image Display, RAD-106) in der UI | vorhanden — OE3 öffnet den Viewer über den IHE-Einstiegspunkt (Study- **und** Patient-basiert) |
 | **Auftragskontext** (`GET /orders/context`) | vorhanden — Korrelationsdienst für einen MADO-Manifest-Erzeuger |
 | **MADO** (Manifest-basierter Zugriff) | **bewusst kein Akteur** — Content-Access ist PACS/VNA-Aufgabe; Einordnung und Berührungspunkte in der [IHE-Aussage §6](ihe-profile-statement.md#6-mado-manifest-based-access-to-dicom-objects--einordnung) |
+| **MWL-Interop-Schalter** je Quelle (`QueryRetrieveLevel` weglassen) | vorhanden — für fremde SCPs, die darauf matchen und sonst **nichts** liefern; Standard aus |
+| **Store-Log** in der Oberfläche (Zeit, Calling-AET, Zugangsnr., Status, Fehler) | vorhanden — die zweite Hälfte der Nachvollziehbarkeit neben dem Abfrage-Log, PHI-frei |
+| **MPPS: einzelner Schritt** nachmeldbar | vorhanden — je Zeile „Erneut senden" (auditiert) |
+| **Cache je Quelle** verwerfbar | vorhanden — Ausfallüberbrückung gezielt abschalten |
+| **OE3 allein betreibbar** (Broker abschaltbar, Einstellungen vorbelegbar und gesperrt) | vorhanden — [`orthanc-explorer-3-usable/docs/oe3-standalone.md`](../orthanc-explorer-3-usable/docs/oe3-standalone.md) |
+| **API↔UI-Vertrag** automatisch geprüft (Route/Feld/Methode in beide Richtungen) | vorhanden — `tests/test_api_ui_contract.py` |
 | Werkzeuge: Vorschau, C-FIND-Test, Trockenläufe, Health, Bootstrap, Tests aller Ebenen | vorhanden |
 | **Hochverfügbarkeit** | zweite Instanz (Profil `ha`) auf gemeinsamer DB und gemeinsamem Spool-Volume, atomarer Spool-Claim, Instanz-Heartbeat in UI + Health-Prüfung ([`ha.md`](ha.md)) |
 | **Betriebsdokumente** | Runbook, Support-/SLA-Vorlage, Schulungsunterlagen — alle per Test an Code, Alarme, Skripte und Hilfeseiten gebunden |

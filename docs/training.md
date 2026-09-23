@@ -225,3 +225,49 @@ Zum Abschluss des 1st-Level-Kurses (Lösungen in [`runbook.md`](runbook.md)):
    Statusmeldung rausgegangen ist?
 5. Der Broker antwortet auf allen Seiten 500, im Log steht `column … does not
    exist`. Was ist die Ursache, und was ist die Maßnahme?
+
+### Ü10 — Einen einzelnen Schritt nachmelden
+
+**Ziel:** den Unterschied zwischen „alle nachmelden" und „diesen einen Schritt
+nachmelden" kennen.
+**Vorgehen:** MPPS-Karte → *Schritte anzeigen* → bei einem Schritt mit
+Fehlertext in der Spalte *Meldung an RIS* auf **Erneut senden** klicken.
+**Erwartet:** Erfolgsmeldung; die Spalte wechselt auf *zugestellt*.
+**Geht schief, wenn:** die MLLP-Verbindung zum RIS noch gestört ist — dann erst
+Abschnitt 4 des Runbooks (`nc -zv`, `mpps_forward_*`), danach erneut.
+
+### Ü11 — „Ist das Bild angekommen?"
+
+**Ziel:** die zweite Hälfte der Nachvollziehbarkeit benutzen — nicht nur das
+Abfrage-, sondern das **Store-Log**.
+**Vorgehen:** ein Bild senden (`storescu` gegen `127.0.0.1:11113`, AET
+`MWLBROKER`), dann Übersicht → Karte *Ausgelieferte Bilder (Store-Log)*.
+**Erwartet:** eine Zeile mit Zeit, aufrufender AET, Zugangsnummer und Status
+*ausgeliefert*. Fehlertexte stehen im Klartext in der letzten Spalte.
+**Geht schief, wenn:** der Status *eingereiht* bleibt → Store-Warteschlange
+(Runbook §3).
+
+### Ü12 — Nur den Cache **einer** Quelle verwerfen
+
+**Ziel:** die Ausfallüberbrückung gezielt abschalten, ohne allen Quellen den
+Cache zu nehmen.
+**Vorgehen:** Worklist-Cache-Karte → in der Zeile einer Quelle mit Einträgen den
+Papierkorb klicken; dann den Zustand der anderen Zeilen vergleichen.
+**Erwartet:** nur diese Quelle ist *leer*; die anderen behalten ihre Einträge.
+Die Aktion steht im Änderungsprotokoll.
+**Geht schief, wenn:** die Zeile keinen Papierkorb zeigt — dann hat sie keine
+Einträge (oder die Rolle darf nicht schreiben).
+
+### Ü13 — Ein fremdes RIS liefert nichts
+
+**Ziel:** die Eigenheit „`QueryRetrieveLevel` als Matching-Schlüssel" erkennen
+und mit dem Schalter beheben.
+**Vorgehen:** eine Quelle anlegen, deren Gegenstelle auf `QueryRetrieveLevel`
+matcht (im Labor: der DVTk-RIS-Emulator, siehe
+`deploy/interop/dvtk/README.md`). Der **C-FIND-Test** (Lupe) liefert Treffer, die
+**Aggregation** für die Modalität bleibt leer. Dann in der Quelle
+*„MWL-Interoperabilität → QueryRetrieveLevel weglassen"* einschalten und erneut
+abfragen.
+**Erwartet:** vorher 0 Einträge aus dieser Quelle, nachher die Treffer.
+**Geht schief, wenn:** auch der C-FIND-Test leer bleibt — dann ist es kein
+`QueryRetrieveLevel`-Problem, sondern Netz/AET/Filter (Runbook §2).

@@ -511,8 +511,8 @@ Gemessen mit `pytest-cov` bzw. `vitest --coverage`:
 
 | Bereich | Statements | Anmerkung |
 |---|---|---|
-| Backend `mwl_broker/` | **96 %** | tls 95 %, station_rules 100 %, atna 97 %, local_worklist 97 %, hl7 96 %, notify 100 %, cache 99 %, api 97 %, main 100 %, settings_service/schemas/models/metrics 100 %, routing 100 %, breaker 99 %, audit 97 %, config_io 96 %, health_checks 98 %, echo 96 %, dimse 93 % |
-| Frontend Broker-UI | **98 %** | `api/broker.ts` 100 %, Diff-Helfer/Panels 100 %, Seiten 95-100 % |
+| Backend `mwl_broker/` | **95 %** | gemessen 23.09.2026 mit `pytest --cov` (626 Tests): station_rules/routing/transforms/orders/rbac/metrics/models/settings_service 100 %, upstream 99 %, schemas 99 %, merges 96 %, retention 96 %, tls 91 %, hl7 95 %, local_worklist 95 %, notify 93 %, spool 94 %, stats 94 %, mpps 89 %, main 88 % |
+| Frontend Broker-UI | **89–98 %** je Ordner | gemessen 23.09.2026 mit `vitest --coverage` (606 Tests): `features/broker/lib` 98,2 %, `hooks` 96,9 %, `pages` 94,7 %, `api/broker.ts` 88,6 % (die restlichen SPA-Bereiche sind bewusst nicht Teil dieses Slices) |
 
 Ergänzte Tests für zuvor ungedeckte Pfade: Rules-Update/Delete, Target-Echo,
 Log-Filter + Pagination-Validierung, `/metrics`, Lifespan (Seed + SCP-Bind),
