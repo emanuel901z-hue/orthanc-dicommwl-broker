@@ -240,9 +240,14 @@ Token rotieren = nur die Store-Datei neu schreiben:
 ## Regeln für den Broker (`mwl-broker/`)
 
 - **Löschpfade räumen Abhängigkeiten auf.** `DELETE /sources|targets/{id}`
-  entfernt zuvor Regeln, Transforms, `seen_items` und Breaker-Zustand in
-  derselben Transaktion (`before_delete`-Hook in `api._crud`) — sonst schlägt
-  der Delete auf Postgres mit einem FK-Verstoß fehl.
+  entfernt zuvor Regeln, Transforms, `seen_items`, Breaker-Zustand **und
+  `worklist_cache`** in derselben Transaktion (`before_delete`-Hook in
+  `api._crud`) — sonst schlägt der Delete auf Postgres mit einem FK-Verstoß fehl.
+  Der Cache war genau so eine Lücke: eine Quelle, die schon einmal geantwortet
+  hatte, ließ sich nicht mehr löschen (HTTP 500 nach Minuten, im Browser ein
+  abgebrochener Request). **Jede neue Tabelle mit `source_id`/`target_id` gehört
+  in `_drop_source_dependencies`/`_drop_target_dependencies`** — und ein Test, der
+  eine Quelle *mit* Daten löscht, nicht nur eine frische.
 - **SQLite-Tests erzwingen Fremdschlüssel** (`PRAGMA foreign_keys=ON` in
   `db.get_engine`), damit sich Tests wie Postgres verhalten.
 - **Simulation und Echtbetrieb teilen den Code.** Zielauflösung liegt in

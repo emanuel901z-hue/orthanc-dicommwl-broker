@@ -23,6 +23,7 @@ from .models import (
     RoutingRule,
     SeenItem,
     StoreLog,
+    WorklistCache,
 )
 from .schemas import (
     AtnaSampleOut,
@@ -383,12 +384,19 @@ def _crud(router: APIRouter, path: str, model, in_schema, out_schema, kind: str,
 
 
 def _drop_source_dependencies(s: Session, source_id: int) -> None:
-    """Remove everything that references a source before it is deleted."""
+    """Remove everything that references a source before it is deleted.
+
+    `worklist_cache` belongs in this list: a source that answered a C-FIND has a
+    cached snapshot, and without this the delete dies on the foreign key
+    (`worklist_cache_source_id_fkey`) — the operator sees "Internal error" and
+    the source stays. Found on a stack whose sources had served real queries.
+    """
     for model, column in (
         (RoutingRule, RoutingRule.source_id),
         (TransformRule, TransformRule.source_id),
         (SeenItem, SeenItem.source_id),
         (SourceBreaker, SourceBreaker.source_id),
+        (WorklistCache, WorklistCache.source_id),
     ):
         for row in s.scalars(select(model).where(column == source_id)).all():
             s.delete(row)

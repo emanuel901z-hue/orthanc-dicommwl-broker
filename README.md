@@ -194,7 +194,7 @@ fehlenden Zeile scheitert. Zwei Berührungspunkte sind umgesetzt:
 Der Vergleich mit kommerziellen MWL-Brokern (Funktionslücken, priorisierte
 Sprints) steht in [`docs/commercial-comparison.md`](docs/commercial-comparison.md).
 
-Die Test-Abdeckung (pytest, vitest, Playwright, Chrome-headless-DOM-Audit (149 Checks) und
+Die Test-Abdeckung (pytest, vitest, Playwright, Chrome-headless-DOM-Audit (150 Checks) und
 der Screenshot-Walk über alle Views) ist in
 [`docs/test-coverage-audit.md`](docs/test-coverage-audit.md) dokumentiert.
 
@@ -212,14 +212,14 @@ Parametern und Fehlerantworten (der Vertrag wird per Test erzwungen).
 UI-Härtung aus der DAU-Gap-Analyse, die MFA-Testumgebung und die i18n-Aufräumung.
 Die OpenAPI-Dokumentation ist vollständig (78 Operationen, jede mit Beschreibung,
 Parametern und Fehlerantworten). Aktuelle Zahlen:
-607 Backend-Tests (96 %), 594 Frontend-Tests, 55 Browser-E2E-Tests, 149 Checks
+610 Backend-Tests (96 %), 595 Frontend-Tests, 55 Browser-E2E-Tests, 150 Checks
 im Deep-Audit — alles in `./ci-local.sh` verdrahtet.
 
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 607 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
-cd orthanc-explorer-3-usable && npm run test      # 594 Tests
+cd mwl-broker && python -m pytest tests -q        # 610 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
+cd orthanc-explorer-3-usable && npm run test      # 595 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):

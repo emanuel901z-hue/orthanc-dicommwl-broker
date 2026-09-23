@@ -1818,3 +1818,43 @@ def test_oversized_request_bodies_are_refused(client):
               "PID|1||P-1||Muster^Max\rORC|NW|ACC-1\rOBR|1|ACC-1||CT\r")
     assert client.post("/api/v1/hl7/orm?dry_run=true", content=normal,
                        headers={"Content-Type": "text/plain"}).status_code == 200
+
+
+def test_deleting_a_source_that_has_a_cached_snapshot(client):
+    """A source that answered a C-FIND owns a `worklist_cache` row.
+
+    Without removing it first the delete dies on the foreign key
+    (`worklist_cache_source_id_fkey`): the operator gets "Internal error — see
+    the broker log" and the source stays. Found on a stack whose sources had
+    served real queries; the audit that deletes a freshly created source never
+    saw it, because that one has no snapshot yet.
+    """
+    from pydicom.dataset import Dataset
+
+    from mwl_broker import cache
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import WorklistCache
+
+    source = client.post("/api/v1/sources", json={
+        "name": "cache-owner", "aet": "CACHE_OWNER", "host": "127.0.0.1",
+        "port": 11197, "calling_aet": "MWLBROKER",
+    }).json()
+
+    answer = Dataset()
+    answer.AccessionNumber = "ACC-CACHE-DEL"
+    answer.PatientID = "P-CACHE"
+    answer.StudyInstanceUID = "1.2.3.4.5.6"
+    sps = Dataset()
+    sps.Modality = "CT"
+    sps.ScheduledProcedureStepID = "SPS-CACHE"
+    answer.ScheduledProcedureStepSequence = [sps]
+    cache.store_snapshot(source["id"], [answer])
+
+    with session_factory()() as s:
+        assert s.query(WorklistCache).filter_by(source_id=source["id"]).count() == 1
+
+    deleted = client.delete(f"/api/v1/sources/{source['id']}")
+    assert deleted.status_code == 204, deleted.text
+
+    with session_factory()() as s:
+        assert s.query(WorklistCache).filter_by(source_id=source["id"]).count() == 0

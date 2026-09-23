@@ -77,9 +77,9 @@ verdrahtet und prüfen Verhalten, nicht Implementierung.
 
 | Ebene | Umfang | Was sie belegt |
 |---|---|---|
-| `pytest` (Backend) | 607 Tests | DIMSE-Verhalten über echte Assoziationen (C-FIND, C-STORE, C-ECHO, MPPS N-CREATE/N-SET/**N-GET**), MLLP über echte Sockets, TLS/mTLS, RBAC, Aufbewahrung, Aggregation/Merge, Patienten-Zusammenführung, Reporting, UPS-RS, Auftragskontext (MADO-Korrelation), ADT-Ereignisse (A08/A24/A40/A47) und Aufträge (ORM^O01/OMG^O19/OMI^O23) und Patientendaten-Aktualisierungen (A08/A31) über REST und MLLP, Ablehnung von Nicht-Aufträgen (ORU^R01), Nebenläufigkeit (Breaker/Cache unter parallelen Abfragen), Hochverfügbarkeit (Spool-Claim, Instanz-Heartbeat), die Betriebsdokumente (Alarmnamen, Runbook-Anker, Skripte, Hilfeseiten), Interoperabilität gegen Fremdsoftware (mehrwertige Attribute, Cache-Fehler), Schema-Migrationen |
-| `vitest` (Frontend) | 594 Tests | jede Broker-Seite und -Karte, Fehlerpfade, Berechtigungslogik, IID-Einstiegspunkt (RAD-106) |
-| `verify-ui.cjs` | 149 Checks | jede Seite in Desktop und Mobil: keine Konsolen-/Netzwerkfehler, genau ein `<h1>`, kein Overflow, erwartete Inhalte |
+| `pytest` (Backend) | 610 Tests | DIMSE-Verhalten über echte Assoziationen (C-FIND, C-STORE, C-ECHO, MPPS N-CREATE/N-SET/**N-GET**), MLLP über echte Sockets, TLS/mTLS, RBAC, Aufbewahrung, Aggregation/Merge, Patienten-Zusammenführung, Reporting, UPS-RS, Auftragskontext (MADO-Korrelation), ADT-Ereignisse (A08/A24/A40/A47) und Aufträge (ORM^O01/OMG^O19/OMI^O23) und Patientendaten-Aktualisierungen (A08/A31) über REST und MLLP, Ablehnung von Nicht-Aufträgen (ORU^R01), Nebenläufigkeit (Breaker/Cache unter parallelen Abfragen), Hochverfügbarkeit (Spool-Claim, Instanz-Heartbeat), die Betriebsdokumente (Alarmnamen, Runbook-Anker, Skripte, Hilfeseiten), Interoperabilität gegen Fremdsoftware (mehrwertige Attribute, Cache-Fehler), Schema-Migrationen |
+| `vitest` (Frontend) | 595 Tests | jede Broker-Seite und -Karte, Fehlerpfade, Berechtigungslogik, IID-Einstiegspunkt (RAD-106) |
+| `verify-ui.cjs` | 150 Checks | jede Seite in Desktop und Mobil: keine Konsolen-/Netzwerkfehler, genau ein `<h1>`, kein Overflow, erwartete Inhalte |
 | `verify-screens.cjs` | 225 Checks + 52 Bilder | jede Ansicht und jeder Dialog, inkl. Rohschlüssel-Erkennung |
 | Playwright | 55 Tests | echte Bedienabläufe gegen den laufenden Stack (Konfiguration, MFA-Reise, Audit/Rollback, Spool) |
 | `backup-roundtrip-test.sh` | 1 Ablauf | Sicherung → Daten zerstören → Wiederherstellung → Daten wieder da |
