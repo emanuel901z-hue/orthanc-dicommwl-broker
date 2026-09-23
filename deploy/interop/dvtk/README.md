@@ -103,6 +103,31 @@ validiert jeden gegen die Definition-Dateien. Der Weg dahin hatte vier Fallen:
 Damit lief es durch: der Broker lieferte zwei Bilder (aus dem Spool) an den
 Emulator, DVTk validierte sie mit **0 Fehlern** und legte sie als Media ab.
 
+## RIS-Emulator: über SSH nicht fahrbar (gemessen)
+
+Der **RIS Emulator** (`RIS Emulator.exe`) ist DVTks fremdes RIS: er bedient
+**Modality Worklist C-FIND** und **MPPS N-CREATE/N-SET** als SCP. Er ist
+**GUI-only** — `DVTCmd` kennt dafür keinen Modus (`-estscp`/`-estscu` sind
+Storage, `-m`/`-d` Medien, `-c` VBS-Skripte) — und über SSH nicht ansprechbar:
+
+| Versuch | Ergebnis |
+|---|---|
+| Prozess starten (`Start-Process -WindowStyle Minimized`) | läuft (18 Threads), **kein** Fenster (`MainWindowTitle` leer) |
+| Fenster/Knöpfe per Win32 auflisten (`dvtk_gui.py --list`) | **0 Controls** — SSH-Sitzungen haben keinen sichtbaren Desktop (eigene Window Station) |
+| Von selbst lauschen? | **nein** — kein lauschender Port; die Registry (`HKCU\Software\DVTk\DVTk RIS Emulator`) bleibt leer, die Ports/AETs setzt man im Worklist-Tab |
+| Worklist-Daten vorlegen (`data\worklist`) | möglich (kopiert), ändert aber nichts am fehlenden „Start" |
+
+**Was das gekostet hätte:** eine Sitzung am Gerät (Konsole oder RDP) — dann ist
+`dvtk_gui.py` das Werkzeug dafür.
+
+**Was dadurch nicht fehlt:** die Richtung „fremdes RIS" ist bereits abgedeckt —
+mit **DCMTK `wlmscpfs`** liest unser Broker eine fremde Arbeitsliste
+(`deploy/interop-test.sh`: „unser Upstream-Client liest die fremde Worklist —
+Antworten: 10"). Und der **MPPS-SCP** des RIS-Emulators ist für uns ohne Wert:
+unser Broker ist selbst MPPS-**SCP** (die Modalität meldet bei ihm), er sendet
+keine MPPS weiter — die Statusmeldung an das RIS geht als **HL7 `ORU^R01`**
+(die dcm4che-Prüfung deckt das ab).
+
 ## Was das nicht ist
 
 DVTk prüft gegen den **DICOM-Standard**, nicht gegen *unsere*
