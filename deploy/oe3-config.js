@@ -15,5 +15,9 @@ window.__OE3_CONFIG__ = {
     enableModalityConfig: true,
     enableUpload: true,
   },
+  // Die Viewer-Liste kann hier vorgegeben und mit viewersLocked: true
+  // schreibgeschützt werden — siehe orthanc-explorer-3-usable/docs/oe3-standalone.md
+  // viewers: [{ id: "ohif", url: "/ohif/viewer", enabled: true }],
+  // viewersLocked: false,
   branding: { title: "MWL Broker Console", logoUrl: "/logo/oe3-logo-128.png" },
 };
