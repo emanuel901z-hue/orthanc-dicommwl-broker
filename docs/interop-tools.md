@@ -112,10 +112,32 @@ echten RIS.
 | `C:\Program Files\sendscu\SendSCU.exe` (+ `sendscu.cfg`, binär) | ein **Hersteller-C-STORE-SCU** — als fremde Modalität einsetzbar |
 | **kein** DVTk, **kein** lauschender DICOM-Port (104/2762/4242/11112) | die PACS-Server laufen dort nicht; es sind Clients/Viewer |
 
-Das ist die Grundlage für einen **Vendor-Test im Haus**: `SendSCU.exe` als fremde
-Modalität gegen den Broker, ein Carestream/Philips-Client als Gegenprobe. Was
-fehlt, ist ein *laufender* Fremd-Server (PACS/RIS) — dafür braucht es die
-jeweilige Installation samt Lizenz, oder einen Connectathon.
+#### Versuch, dort tatsächlich zu testen — und was genau fehlt
+
+Die Maschine wurde per SSH benutzt (der Nutzer ist lokaler Administrator). Der
+Netzweg steht: `Test-NetConnection 10.0.1.47 -Port 11113` **→ True**, unser
+Broker ist von dort erreichbar. Die Werkzeuge fehlen — und zwar aus konkreten
+Gründen:
+
+| Vorhaben | Befund | Was es bräuchte |
+|---|---|---|
+| **DVTk installieren** | Die Installer liegen bei dvtk.org **hinter einer (kostenlosen) Registrierung**; auf GitHub gibt es nur Quellcode, keine Release-Assets | einen dvtk.org-Account (Registrierung) → dann kann ich den Installer per SSH einspielen |
+| **DVTk aus dem Quellcode bauen** | geklont ✓ (`C:\Users\Manu\dvtk-src`), MSBuild (VS Build Tools 18) ✓, .NET-4.8-Developer-Pack installiert ✓ — aber: die **DVT**-Solution enthält ein **`.vcproj`** (C++-Projekt, „DVTk Managed Code Adapter"), das modernes MSBuild ablehnt, und der **Modality Emulator** zielt auf **.NET Framework 4.0** (Targeting Pack fehlt) | Visual Studio mit C++-Workload auf der Maschine — dafür ist der Installer-Weg der kürzere |
+| **Emulatoren fahren** | **keine** `GetCommandLineArgs` in den Quellen: Modality Emulator, Storage SCU/SCP- und RIS-Emulator sind **GUI-gesteuert** | eine Sitzung am Gerät (oder RDP), nicht SSH |
+| **DVT zur Validierung** | `DVT Command Line` (Konsole, `DVTCmd.exe`) existiert, hängt aber an derselben Solution; die DICOM-`.def`-Dateien liegen im Repo ✓, die **2024a-Standard-Definition-Files sind kommerziell** | Build + ggf. die kommerziellen Definition Files |
+| **`SendSCU.exe` als fremde Modalität** | Delphi-**GUI**-App, Konfiguration **binär** (`sendscu.cfg`, nicht patchbar); die Logs zeigen `Sent H:\FILES\…` — **`H:` existiert nicht mehr** (nur C, D) | Neu-Konfiguration über die Oberfläche am Gerät |
+| **Carestream-/Philips-Client als Gegenprobe** | nur `DicomXMLBrowser.exe` (Viewer) — **kein** CLI-DICOM-Werkzeug in den Herstellerordnern | ein laufender Fremd-Server (Lizenz) oder ein Hersteller-Testtool |
+
+**Fazit:** Der Vendor-Test im Haus ist **vorbereitet, aber nicht durchführbar**,
+solange kein *bedienbares* Fremdwerkzeug dort liegt. Zwei Wege, beide brauchen
+einen Menschen: **(a)** dvtk.org-Registrierung (2 Minuten) → ich installiere die
+DVTk-Installer per SSH und fahre RIS-/Modality-Emulator in einer Sitzung;
+**(b)** `SendSCU` am Gerät auf den Broker umkonfigurieren. Für die Validierung
+gegen unser Conformance Statement bleibt DVT der einzige Kandidat — und es
+braucht die kommerziellen Definition Files.
+
+Der Netzweg ist jedenfalls bewiesen: **jedes** Fremdwerkzeug auf dieser Maschine
+erreicht den Broker unter `10.0.1.47:11113`.
 
 ## 5. Was die Werkzeuge gefunden haben
 
