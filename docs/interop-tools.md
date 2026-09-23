@@ -122,24 +122,26 @@ Gründen:
 
 | Vorhaben | Befund | Was es bräuchte |
 |---|---|---|
-| **DVTk installieren** | Die Installer liegen bei dvtk.org **hinter einer (kostenlosen) Registrierung**; auf GitHub gibt es nur Quellcode, keine Release-Assets | einen dvtk.org-Account (Registrierung) → dann kann ich den Installer per SSH einspielen |
+| **DVTk installieren** | **erledigt** — DVTk liegt auf der Maschine (Arbeitsordner unter `D:\Projekte\orthanc-dicommwl-broker\DVTk*`): RIS-Emulator, Storage SCU/SCP, Q/R-SCP-Emulator, `DVTCmd`, DICOM Network Analyzer, DICOM Compare. (Der Weg über die dvtk.org-Registrierung war nur nötig, solange ich `C:\Program Files` durchsucht hatte — die Tools lagen in `Program Files (x86)` und in den Projektordnern.) | nichts |
 | **DVTk aus dem Quellcode bauen** | geklont ✓ (`C:\Users\Manu\dvtk-src`), MSBuild (VS Build Tools 18) ✓, .NET-4.8-Developer-Pack installiert ✓ — aber: die **DVT**-Solution enthält ein **`.vcproj`** (C++-Projekt, „DVTk Managed Code Adapter"), das modernes MSBuild ablehnt, und der **Modality Emulator** zielt auf **.NET Framework 4.0** (Targeting Pack fehlt) | Visual Studio mit C++-Workload auf der Maschine — dafür ist der Installer-Weg der kürzere |
-| **Emulatoren fahren** | **keine** `GetCommandLineArgs` in den Quellen: Modality Emulator, Storage SCU/SCP- und RIS-Emulator sind **GUI-gesteuert** | eine Sitzung am Gerät (oder RDP), nicht SSH |
+| **Emulatoren fahren** | Die Emulatoren **mit** Oberfläche (RIS, Storage SCU/SCP, Q/R) müssen **gestartet** werden — danach sind sie über den SSH-Tunnel erreichbar (der RIS-Emulator lief so, mit dir am Gerät). Der **Storage-SCP ist zusätzlich ohne Oberfläche** fahrbar: `DVTCmd -estscp` + `dvtk_emulator.py` (hält stdin offen) | einmal starten (Klick), dann läuft es |
 | **DVT zur Validierung** | `DVT Command Line` (Konsole, `DVTCmd.exe`) existiert, hängt aber an derselben Solution; die DICOM-`.def`-Dateien liegen im Repo ✓, die **2024a-Standard-Definition-Files sind kommerziell** | Build + ggf. die kommerziellen Definition Files |
 | **`SendSCU.exe` als fremde Modalität** | Delphi-**GUI**-App, Konfiguration **binär** (`sendscu.cfg`, nicht patchbar); die Logs zeigen `Sent H:\FILES\…` — **`H:` existiert nicht mehr** (nur C, D) | Neu-Konfiguration über die Oberfläche am Gerät |
 | **Carestream-/Philips-Client als Gegenprobe** | nur `DicomXMLBrowser.exe` (Viewer) — **kein** CLI-DICOM-Werkzeug in den Herstellerordnern | ein laufender Fremd-Server (Lizenz) oder ein Hersteller-Testtool |
 
 **Fazit:** Der Vendor-Test **läuft** — über `DVTCmd.exe`, die Konsolenvariante von
-DVT. Sie ist per SSH fahrbar (die GUI-Emulatoren nicht), validiert jede
-empfangene Nachricht gegen die DICOM-Definition-Dateien und liefert
-XML-Berichte. Ergebnisse und die beiden dabei gefundenen Punkte stehen in
-[`interop.md`](interop.md) §2b; die Skripte liegen in `deploy/interop/dvtk/`.
+DVT, die per SSH fahrbar ist und jede empfangene Nachricht gegen die
+DICOM-Definition-Dateien validiert (XML-Berichte). **Fünf Szenarien PASSED**
+(C-ECHO, MWL C-FIND, C-STORE eingehend, MPPS, C-STORE ausgehend); dazu der
+RIS-Emulator als fremde MWL-Quelle. Ergebnisse stehen in
+[`interop.md`](interop.md) §2b und in `deploy/interop/dvtk/README.md`; die
+Skripte liegen in `deploy/interop/dvtk/`.
 
-Was weiterhin einen Menschen braucht: die **GUI-Emulatoren** (RIS/Modality/
-Storage-Emulator — keine Kommandozeilensteuerung in den Quellen) und
-**`SendSCU`** (binäre Konfiguration, `H:` existiert nicht mehr). Für die
-Validierung gegen *unser* Conformance Statement bräuchte DVT zusätzlich eine
-eigene Definition-Datei unseres Systems.
+Was einen Menschen braucht: die Emulatoren **mit Oberfläche** müssen einmal
+**gestartet** werden (danach erreichbar), und **`SendSCU`** (binäre
+Konfiguration, `H:` existiert nicht mehr). Für die Validierung gegen *unser*
+Conformance Statement bräuchte DVT zusätzlich eine eigene Definition-Datei
+unseres Systems — **das** ist der offene Punkt, nicht die Emulatoren.
 
 Der Netzweg ist bewiesen: **jedes** Fremdwerkzeug auf dieser Maschine erreicht
 den Broker unter `10.0.1.47:11113`.

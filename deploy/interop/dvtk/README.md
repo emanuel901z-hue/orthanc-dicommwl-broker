@@ -175,11 +175,23 @@ Operator-Vorschau-Trockenlauf log, weil er `collect()` benutzt. Das Duplikat ist
 entfernt; ein Test (`test_c_find_runs_the_shared_aggregation`) erzwingt, dass der
 Live-C-FIND die geteilte Aggregation nutzt.
 
-## Was das nicht ist
+## Was noch offen ist
 
-DVTk prüft gegen den **DICOM-Standard**, nicht gegen *unsere*
-Conformance-Erklärung: dafür bräuchte es eine eigene Definition-Datei unseres
-Systems (die 2024a-Standard-Dateien sind kommerziell). Die GUI-Emulatoren
-(RIS/Modality/Storage-SCP) sind über SSH nicht fahrbar — sie haben keine
-Kommandozeilensteuerung, und `DVTCmd -estscp` verlangt ein dauerhaft offenes
-stdin.
+**Nicht** geprüft ist DVTk gegen *unsere* Conformance-Erklärung: dafür bräuchte
+es eine eigene Definition-Datei unseres Systems (die 2024a-Standard-Dateien sind
+kommerziell). DVTk prüft gegen den **DICOM-Standard** — das ist der Nachweis, den
+die Tabelle oben führt.
+
+**Was einen Menschen braucht:** die Emulatoren mit Oberfläche müssen **gestartet**
+werden (Klick am Gerät) — danach sind sie über den SSH-Tunnel erreichbar, der
+RIS-Emulator lief genau so. Der **Storage-SCP braucht keine Oberfläche**:
+`DVTCmd -estscp` fährt ihn aus der Konsole, `dvtk_emulator.py` hält dabei das
+stdin offen (das war die eigentliche Hürde, nicht die fehlende
+Kommandozeilensteuerung).
+
+**Was auf dieser Maschine (noch) nicht liegt:** der *Modality Emulator* — seine
+Rolle (fremde Modalität: MWL + MPPS + C-STORE) decken zwei Werkzeuge ab, die
+schon laufen: DVTks Skriptmodus als SCU und DCMTK. Der *Query/Retrieve
+SCP Emulator* ist vorhanden, aber für uns ohne Anwendung: der Broker ist kein
+Q/R-SCU (das macht OE3/OHIF). Ungenutzt und jederzeit verfügbar sind außerdem
+der **DICOM Network Analyzer** und **DICOM Compare**.
