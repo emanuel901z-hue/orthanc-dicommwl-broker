@@ -35,6 +35,7 @@ def _source(row: MwlSource) -> dict:
         "cache_refresh_s": row.cache_refresh_s,
         "tls": row.tls,
         "tls_verify": row.tls_verify,
+        "strip_query_retrieve_level": row.strip_query_retrieve_level,
     }
 
 

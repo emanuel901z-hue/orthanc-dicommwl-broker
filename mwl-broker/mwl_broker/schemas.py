@@ -103,6 +103,17 @@ class SourceIn(BaseModel):
                     "self-signed lab system — the connection is then encrypted "
                     "but the peer is not authenticated.",
     )
+    strip_query_retrieve_level: bool = Field(
+        default=False,
+        description="Leave QueryRetrieveLevel (0008,0052) out of the identifier "
+                    "forwarded to this source. Some foreign MWL SCPs treat that "
+                    "attribute as a matching key and then answer nothing, "
+                    "although it is not part of the Modality Worklist "
+                    "information model (DVTk's RIS emulator does this). "
+                    "Measured live through the broker: switch off = 3 entries, "
+                    "switch on = 7 entries (4 of them from the foreign RIS). "
+                    "Off = the modality's query is forwarded unchanged.",
+    )
 
 
 class SourceOut(SourceIn):

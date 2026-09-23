@@ -96,6 +96,19 @@ Modality, ScheduledStationAETitle, SPS-Datum/-Zeit, RequestedProcedureID,
 ScheduledProcedureStepID). Nicht unterstützte Schlüssel werden ignoriert
 (kein Fehler).
 
+**Weiterleitung an die Quellen (SCU):** Der Broker reicht den Identifier der
+Modalität **unverändert** an die Quelle weiter (nur `SpecificCharacterSet` wird
+je Quelle gesetzt) — ein Filter der Modalität darf nicht verschwinden. Einzige
+Ausnahme ist ein **ausdrücklicher Schalter je Quelle**
+(`mwl_source.strip_query_retrieve_level`, Standard **aus**): er lässt
+`QueryRetrieveLevel (0008,0052)` weg. Nötig ist das für fremde MWL-SCPs, die
+dieses Attribut als Matching-Schlüssel verwenden und dann **nichts** liefern —
+obwohl es nicht zum Modality-Worklist-Informationsmodell gehört (nachgewiesen
+mit dem DVTk-RIS-Emulator: 6 Antworten ohne das Attribut, 0 mit ihm). Wer es
+sendet, ist Implementierungssache — ein pynetdicom-SCU tat es, DCMTK's
+`findscu -W` **nicht**; durch den Broker gemessen: Schalter aus 3 Einträge,
+Schalter an 7. Es wird **nie** stillschweigend umgeschrieben.
+
 **Antwortaufbau:** Fan-out an alle aktiven Quellen (parallel, Timeout je Quelle
 `upstream_timeout_s`, Standard 10 s) → Merge nach Priorität → Dedupe über
 `(PatientID, AccessionNumber, ScheduledProcedureStepID)` → Feldregeln

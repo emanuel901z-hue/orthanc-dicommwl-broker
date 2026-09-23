@@ -39,6 +39,14 @@ class MwlSource(Base):
     # DICOM TLS for this node (off = the LAN/VPN default)
     tls: Mapped[bool] = mapped_column(Boolean, default=False)
     tls_verify: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Leave QueryRetrieveLevel (0008,0052) out of the identifier we forward to
+    # this source. The attribute is not part of the Modality Worklist
+    # information model, but some foreign MWL SCPs match on it and then answer
+    # nothing. Some implementations send the attribute (measured: a pynetdicom
+    # SCU did, DCMTK's `findscu -W` does not), so a real modality can hit it.
+    # Off by default: forwarding stays unchanged unless an operator decides
+    # otherwise for a specific source.
+    strip_query_retrieve_level: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 

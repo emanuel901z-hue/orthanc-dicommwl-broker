@@ -88,6 +88,7 @@ def enabled_sources() -> list[SourceCfg]:
                 id=r.id, name=r.name, aet=r.aet, host=r.host, port=r.port,
                 calling_aet=r.calling_aet, charset=r.charset, timeout_s=r.timeout_s,
                 priority=r.priority, tls=r.tls, tls_verify=r.tls_verify,
+                strip_query_retrieve_level=r.strip_query_retrieve_level,
             )
             for r in rows
         ]
@@ -103,6 +104,7 @@ def source_config(source_id: int) -> SourceCfg | None:
             id=r.id, name=r.name, aet=r.aet, host=r.host, port=r.port,
             calling_aet=r.calling_aet, charset=r.charset, timeout_s=r.timeout_s,
             priority=r.priority, tls=r.tls, tls_verify=r.tls_verify,
+            strip_query_retrieve_level=r.strip_query_retrieve_level,
         )
 
 

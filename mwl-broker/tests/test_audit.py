@@ -172,7 +172,7 @@ def test_audit_never_contains_patient_data(client):
     assert set(entry.after_json) == {
         "name", "aet", "host", "port", "calling_aet", "charset", "enabled",
         "timeout_s", "priority", "cache_stale_on_error", "cache_refresh_s",
-        "tls", "tls_verify",
+        "tls", "tls_verify", "strip_query_retrieve_level",
     }
 
 

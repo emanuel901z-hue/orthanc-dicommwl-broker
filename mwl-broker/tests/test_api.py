@@ -56,6 +56,22 @@ def test_source_crud(client):
     assert client.get("/api/v1/sources").json() == []
 
 
+def test_source_can_leave_out_query_retrieve_level(client):
+    """The MWL interoperability switch survives the API round trip.
+
+    The UI sets it per source; the default must stay "forward unchanged", so a
+    modality's query is never rewritten without the operator asking for it.
+    """
+    row = client.post("/api/v1/sources", json=SOURCE).json()
+    assert row["strip_query_retrieve_level"] is False
+
+    r = client.put(f"/api/v1/sources/{row['id']}",
+                   json={**SOURCE, "strip_query_retrieve_level": True})
+    assert r.status_code == 200
+    assert r.json()["strip_query_retrieve_level"] is True
+    assert client.get("/api/v1/sources").json()[0]["strip_query_retrieve_level"] is True
+
+
 def test_rule_requires_existing_rows(client):
     r = client.post("/api/v1/rules", json={"source_id": 99, "target_id": 99})
     assert r.status_code == 404

@@ -17,7 +17,7 @@ from pydicom.multival import MultiValue
 from mwl_broker import aggregation, cache, settings_service
 from mwl_broker.db import session_factory
 from mwl_broker.models import MwlSource, SeenItem, WorklistCache
-from mwl_broker.upstream import meta_text
+from mwl_broker.upstream import meta_text, outgoing_identifier
 
 
 def _source(name: str = "foreign-ris", priority: int = 1) -> int:
@@ -144,3 +144,62 @@ def test_a_broken_cache_does_not_open_the_breaker(client, monkeypatch):
         aggregation.collect(Dataset())
 
     assert breaker.is_available(source_id) is True
+
+
+def test_query_retrieve_level_is_forwarded_unchanged_by_default():
+    """The modality's identifier goes upstream as it came in.
+
+    Keeping it unchanged is the whole point of the fan-out: a filter the
+    modality set must not disappear because we felt like cleaning up.
+    """
+    ident = Dataset()
+    ident.QueryRetrieveLevel = "MODALITY WORKLIST"
+    ident.PatientID = "P1001"
+
+    out = outgoing_identifier(ident, "ISO_IR 100")
+
+    assert out.QueryRetrieveLevel == "MODALITY WORKLIST"
+    assert out.PatientID == "P1001"
+    # the incoming dataset is never touched
+    assert ident.QueryRetrieveLevel == "MODALITY WORKLIST"
+
+
+def test_query_retrieve_level_can_be_left_out_per_source():
+    """Some foreign MWL SCPs match on (0008,0052) and then answer nothing.
+
+    DVTk's RIS emulator does exactly that. The attribute is not part of the
+    Modality Worklist information model, so leaving it out is conforming; it is
+    a per-source switch (default off), not a silent rewrite.
+
+    Measured: directly against the emulator 6 answers without it and 0 with it;
+    through our broker with a QRL-sending modality 3 entries (switch off) vs 7
+    (switch on, 4 of them from the foreign RIS).
+    """
+    ident = Dataset()
+    ident.QueryRetrieveLevel = "MODALITY WORKLIST"
+    ident.PatientID = "P1001"
+
+    out = outgoing_identifier(ident, "ISO_IR 100", strip_query_retrieve_level=True)
+
+    assert "QueryRetrieveLevel" not in out
+    assert out.PatientID == "P1001"
+
+
+def test_the_switch_reaches_the_upstream_client(client, monkeypatch):
+    """The flag on the source row must arrive at the C-FIND SCU."""
+    source_id = _source(name="dvtk-ris", priority=1)
+    with session_factory()() as s:
+        row = s.get(MwlSource, source_id)
+        row.strip_query_retrieve_level = True
+        s.commit()
+
+    seen: dict = {}
+
+    def fake_query_source(src, identifier):
+        seen["flag"] = src.strip_query_retrieve_level
+        return []
+
+    monkeypatch.setattr(aggregation, "query_source", fake_query_source)
+    aggregation.query_one(aggregation.source_config(source_id), Dataset())
+
+    assert seen["flag"] is True

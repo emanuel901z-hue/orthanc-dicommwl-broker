@@ -126,7 +126,28 @@ Prüfung, die unsere eigenen Tests nicht leisten können. Die Skripte liegen in
 | **C-STORE** (DVTk erzeugt ein Secondary-Capture-Bild im Skript) | **PASSED**; der Store liegt nachweislich im Broker (`/logs/stores`: `DVTK_SCU … success`) |
 | **MPPS** `N-CREATE` + `N-SET` (eigenes Skript mit gültiger UID) | **PASSED** — 0 Validierungsfehler |
 | **Ausgehender C-STORE** (unser Broker → DVTk als PACS) | **PASSED** — 0 Validierungsfehler; DVTk legte die empfangenen Objekte als Media ab |
-| **Fremdes RIS** (DVTk RIS-Emulator als MWL-Quelle) | **6 Antworten** direkt, **7 Einträge** aggregiert durch unseren Broker; Cache der Quelle gefüllt |
+| **Fremdes RIS** (DVTk RIS-Emulator als MWL-Quelle) | **6 Antworten** direkt, **7 Einträge** aggregiert durch unseren Broker; Cache der Quelle gefüllt — der Emulator verlangt dafür den Schalter unten |
+
+**Der Interop-Schalter.** DVTks RIS-Emulator behandelt `QueryRetrieveLevel
+(0008,0052)` als **Matching-Schlüssel** und antwortet dann **nichts** (gemessen,
+je 3 Läufe: ohne das Attribut 6 Antworten, mit ihm 0) — obwohl es nicht zum
+Modality-Worklist-Informationsmodell gehört und ein leerer Wert universelles
+Matching bedeutet (PS3.4 C.2.2.2). **Gemessen**: direkt am Emulator 6 Antworten
+ohne das Attribut, **0** mit ihm (je 3 Läufe) — und durch unseren Broker mit einer
+QRL-sendenden Modalität **3 Einträge** (Schalter aus) gegen **7** (Schalter an,
+davon 4 aus dem fremden RIS). Wer das Attribut sendet, ist Implementierungssache:
+ein pynetdicom-SCU tat es, **DCMTK's `findscu -W` nicht** (geprüft). Unser Broker
+reicht den Identifier
+bewusst unverändert weiter; für solche Quellen gibt es den ausdrücklichen
+Schalter je Quelle:
+
+| Feld | Standard | Wirkung |
+|---|---|---|
+| `strip_query_retrieve_level` | **aus** | lässt `(0008,0052)` vor dem Weiterleiten an **diese** Quelle weg |
+
+Er steht als Klartext-Schalter mit Hinweis in der UI (Reiter *Sources* → *Add/
+Edit source* → „MWL-Interoperabilität"), ist pro Quelle, und die Voreinstellung
+schreibt **nichts** um.
 
 Damit ist die **komplette SWF-Kette** — Arbeitsliste, Bildannahme,
 Schrittmeldung, Lebenszeichen — von einem fremden, herstellergeprägten Werkzeug

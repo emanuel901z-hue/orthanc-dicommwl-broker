@@ -144,11 +144,14 @@ Deterministisch gemessen (je 3 Läufe):
 DVTk behandelt `(0008,0052)` als **Matching-Schlüssel**; seine Arbeitslisten-
 einträge haben das Attribut nicht, also passt nichts. Nach DICOM gehört
 `QueryRetrieveLevel` **nicht** zum Modality-Worklist-Informationsmodell, und ein
-leerer Wert bedeutet *universelles* Matching (PS3.4, C.2.2.2). Praktische Folge:
-**DCMTK's eigenes `findscu -W` sendet `QueryRetrieveLevel`** — eine so gebaute
-Modalität bekommt von diesem Emulator eine **leere Arbeitsliste**. Unser Broker
-reicht den Identifier der Modalität unverändert weiter (genau richtig, sonst
-gingen Filter verloren), also schlägt das Verhalten der Fremdseite durch.
+leerer Wert bedeutet *universelles* Matching (PS3.4, C.2.2.2). Wer das Attribut
+sendet, ist Implementierungssache: ein **pynetdicom**-SCU tat es in der Messung,
+**DCMTK's `findscu -W` nicht** (direkt gegen den Emulator: 6 Antworten). Eine
+Modalität, die es sendet, bekommt von diesem Emulator eine **leere Arbeitsliste**
+— durch unseren Broker gemessen: **3 Einträge** mit unverändert weitergegebenem
+Identifier gegen **7** mit dem Schalter `strip_query_retrieve_level` (4 davon aus
+dem fremden RIS). Unser Broker reicht den Identifier standardmäßig unverändert
+weiter (genau richtig, sonst gingen Filter verloren).
 
 ### Fund 2 (unser Broker): doppelte Schlüssel sprengten den Cache-Upsert
 

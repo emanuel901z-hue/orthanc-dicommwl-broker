@@ -31,6 +31,8 @@ class SourceCfg:
     # DICOM TLS towards this source
     tls: bool = False
     tls_verify: bool = True
+    # see MwlSource.strip_query_retrieve_level
+    strip_query_retrieve_level: bool = False
 
 
 def meta_text(value, limit: int) -> str:
@@ -83,10 +85,23 @@ def merge_answers(
     return merged
 
 
-def outgoing_identifier(incoming: Dataset, charset: str) -> Dataset:
+def outgoing_identifier(incoming: Dataset, charset: str,
+                        strip_query_retrieve_level: bool = False) -> Dataset:
     """Copy the incoming query identifier and retarget the charset for
-    this specific upstream source."""
+    this specific upstream source.
+
+    With `strip_query_retrieve_level` the copy loses `QueryRetrieveLevel`
+    (0008,0052). Some foreign MWL SCPs use that attribute as a **matching key**
+    and then answer nothing, because their worklist items do not carry it (the
+    DVTk RIS emulator does exactly that; some SCUs send the attribute, DCMTK's
+    `findscu -W` does not). It is not part of the Modality Worklist information
+    model, so
+    removing it changes no filter — but it stays a per-source decision
+    (`mwl_source.strip_query_retrieve_level`, default off).
+    """
     ident = copy.deepcopy(incoming)
+    if strip_query_retrieve_level and "QueryRetrieveLevel" in ident:
+        del ident.QueryRetrieveLevel
     ident.SpecificCharacterSet = charset
     if hasattr(ident, "set_original_encoding"):
         try:
@@ -113,7 +128,8 @@ def query_source(src: SourceCfg, incoming_identifier: Dataset) -> list[Dataset]:
     ae.acse_timeout = src.timeout_s
     ae.dimse_timeout = src.timeout_s
     ae.network_timeout = src.timeout_s
-    ident = outgoing_identifier(incoming_identifier, src.charset)
+    ident = outgoing_identifier(incoming_identifier, src.charset,
+                                getattr(src, "strip_query_retrieve_level", False))
     assoc = ae.associate(src.host, src.port, ae_title=src.aet,
                          tls_args=_tls_args(getattr(src, "tls", False),
                                             getattr(src, "tls_verify", True), src.host))

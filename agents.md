@@ -262,6 +262,16 @@ Token rotieren = nur die Store-Datei neu schreiben:
   DVTk-RIS-Emulator; `test_c_find_runs_the_shared_aggregation` hält es fest.
   **Vor dem Umbau von Pfaden: `grep -c "def <name>"` — doppelte Methodennamen
   sind stumm.
+- **Den Identifier der Modalität nie stillschweigend umschreiben.** Der
+  C-FIND-Fan-out reicht ihn unverändert weiter (nur `SpecificCharacterSet` je
+  Quelle) — ein Filter der Modalität darf nicht verschwinden. Der einzige
+  Eingriff ist der **ausdrückliche Schalter je Quelle**
+  `mwl_source.strip_query_retrieve_level` (Default aus), der
+  `QueryRetrieveLevel (0008,0052)` weglässt: fremde SCPs matchen darauf und
+  liefern dann nichts (DVTk RIS-Emulator). Gemessen: direkt am Emulator 6 vs.
+  0 Antworten, durch den Broker 3 vs. 7 Einträge.
+  Neue „Kompatibilitäts"-Eingriffe nur in dieser Form: pro Quelle, sichtbar in
+  der UI (Label + Hinweis in den Referenzsprachen en/de), mit Test und Doku.
 - **Konfigurationsmutationen werden protokolliert** (`audit.record` in der
   API-Schicht, Before/After-Snapshot). Neue Mutationen ohne Audit-Eintrag sind
   unvollständig.
