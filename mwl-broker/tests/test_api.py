@@ -1874,3 +1874,26 @@ def test_deleting_a_source_that_has_a_cached_snapshot(client):
 
     with session_factory()() as s:
         assert s.query(WorklistCache).filter_by(source_id=source["id"]).count() == 0
+
+
+def test_store_log_tolerates_legacy_null_transforms(client):
+    """A row written before the column existed must not break the endpoint.
+
+    `GET /api/v1/logs/stores` answered **500** for any limit that reached such a
+    row (`ResponseValidationError: Input should be a valid list`) — nobody
+    noticed, because no view read the endpoint until the store log got its UI.
+    """
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import StoreLog
+
+    with session_factory()() as s:
+        s.add(StoreLog(calling_aet="LEGACY", sop_instance_uid="1.2.3", study_uid="1.2.3.4",
+                       accession="ACC-LEGACY", status="success", error="",
+                       applied_transforms=None))
+        s.commit()
+
+    r = client.get("/api/v1/logs/stores?limit=50")
+
+    assert r.status_code == 200
+    row = next(row for row in r.json() if row["calling_aet"] == "LEGACY")
+    assert row["applied_transforms"] == []

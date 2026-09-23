@@ -254,3 +254,35 @@ ein Diff-Werkzeug gehört in ein Betriebs-Skript, nicht in die API).
 Sprint-4-Abschnitt) — sie stehen als Betriebs-Skript-Thema, nicht als Lücke.
 Die Test-Abdeckung wurde anschließend separat geprüft:
 [`docs/test-coverage-audit.md`](test-coverage-audit.md).
+
+## 3. Nachtrag 23.09.2026 — erneut gemessen (nach B1, F2a, E1)
+
+Die Prüfung oben ist vom 21.09. Seitdem sind HA, HL7/PIR, OMI/ADT,
+`/orders/context`, der MWL-Interop-Schalter und weitere Endpunkte dazugekommen.
+Neu gemessen gegen die **laufende** OpenAPI (78 Routen) und den Client:
+
+| Prüfung | Ergebnis |
+|---|---|
+| **Kein UI-Aufruf ohne Route** | 68 Pfade im Client, **0** ohne Route |
+| **Keine tote Route** | 11 Routen ohne UI-Aufruf — **alle** mit Begründung (Monitoring, UPS-RS, ADT-Intake, MADO-Auftragskontext, Einzel-MPPS-Detail) |
+| **Kein Write-Feld ohne UI** | jedes Feld der `*In`-Schemas ist im UI erreichbar; Ausnahme nur das Import-Dokument (wird als Datei übergeben) |
+| **Quellen/Ziele vollständig** | `SourceIn` 14/14, `TargetIn` 9/9 Felder im Dialog |
+| **Keine Client-Methode ohne Aufrufer** | 2 Ausnahmen (`get` je Ressource, `simulate.route` — die Routing-Entscheidung liefert `/simulate/transform` mit) |
+
+Dieser Stand ist jetzt **testbar** statt nur dokumentiert:
+`tests/test_api_ui_contract.py` prüft alle vier Richtungen (Route ↔ UI, Feld ↔
+Formular, Methode ↔ Aufrufer) mit einer begründeten Ausnahmeliste. Ein neuer
+Endpunkt ohne UI-Element lässt den Test fehlschlagen, bis entschieden ist.
+
+### Drei echte Lücken, die dabei gefunden wurden
+
+| # | Lücke | Wirkung | Status |
+|---|---|---|---|
+| **A7** | `POST /mpps/{step_id}/forward` hatte kein UI | Die Karte zeigte, **welcher** Schritt vom RIS abgelehnt wurde — nachmelden konnte man nur **alle** | **behoben** (Knopf je Zeile) |
+| **A8** | `DELETE /cache/sources/{id}` hatte kein UI | Der Cache-Zustand steht je Quelle in der Karte, verwerfen konnte man nur **alles** | **behoben** (Knopf je Zeile) |
+| **A9** | `GET /logs/stores` hatte kein UI — **und war kaputt** | Ältere Zeilen tragen `NULL` in `applied_transforms`, das Antwortmodell verlangt eine Liste → **HTTP 500** bei jedem Limit, das so eine Zeile erreicht. Unbemerkt, weil keine Ansicht den Endpunkt las | **behoben** (Schema koerziert `NULL → []`, Migration `0016` füllt die Daten, Regressionstest) |
+
+**A9 ist der Beleg für die Frage:** eine Route ohne UI kann jahrelang falsch
+antworten, ohne dass es auffällt. Das Store-Log ist jetzt als Karte sichtbar
+(Zeit, Calling-AET, Accession, Status, Fehler) — die zweite Hälfte der
+Nachvollziehbarkeit neben dem Abfrageprotokoll.

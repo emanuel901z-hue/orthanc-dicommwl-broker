@@ -934,6 +934,17 @@ class StoreLogOut(BaseModel):
         description="Names of the transform rules applied to this instance.",
     )
 
+    @field_validator("applied_transforms", mode="before")
+    @classmethod
+    def _null_becomes_empty_list(cls, value):
+        """Rows written before the column existed carry NULL.
+
+        Without this the whole store log answered **500** for any limit that
+        reached such a row (`ResponseValidationError: Input should be a valid
+        list`) — invisible while no view read the endpoint.
+        """
+        return value or []
+
 
 class BreakerStateOut(BaseModel):
     """Circuit-breaker state of one upstream source."""
