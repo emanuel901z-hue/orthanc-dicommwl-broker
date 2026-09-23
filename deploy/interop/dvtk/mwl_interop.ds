@@ -1,0 +1,44 @@
+## Modality Worklist C-FIND gegen den Broker — die Antwortattribute sind
+## explizit deklariert (leerer Wert = beliebig), damit DVTks Validator sie
+## gegen die DICOM-Definition prüfen kann statt sie als "unerwartet" zu melden.
+SEND ASSOCIATE-RQ (
+PRESENTATION-CONTEXT-ITEMS
+("Modality Worklist Information Model - FIND SOP Class", "Implicit VR Little Endian")
+)
+RECEIVE ASSOCIATE-AC (
+PRESENTATION-CONTEXT-ITEMS
+("Modality Worklist Information Model - FIND SOP Class", 0, "Implicit VR Little Endian")
+)
+SEND C-FIND-RQ "Modality Worklist Information Model - FIND SOP Class"(
+(0x00000003, "Modality Worklist Information Model - FIND SOP Class")
+(0x00080052, CS, "MODALITY WORKLIST")
+(0x00080050, SH, "")
+(0x00100010, PN, "")
+(0x00400100, SQ, "")
+)
+RECEIVE C-FIND-RSP "Modality Worklist Information Model - FIND SOP Class"(
+(0x00000900, 0xFF00)
+(0x00080005, CS, "")
+(0x00080050, SH, "")
+(0x00100010, PN, "")
+(0x00100020, LO, "")
+(0x00100030, DA, "")
+(0x00100040, CS, "")
+(0x0020000D, UI, "")
+(0x00321060, LO, "")
+(0x00400100, SQ,
+>(0x00080060, CS, "")
+>(0x00400001, AE, "")
+>(0x00400002, DA, "")
+>(0x00400003, TM, "")
+>(0x00400006, PN, "")
+>(0x00400007, LO, "")
+>(0x00400009, SH, "")
+>(0x00401001, SH, "")
+)
+)
+RECEIVE C-FIND-RSP(
+(0x00000900, 0x0000)
+)
+SEND RELEASE-RQ
+RECEIVE RELEASE-RP

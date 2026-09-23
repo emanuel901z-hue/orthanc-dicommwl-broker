@@ -110,7 +110,8 @@ echten RIS.
 | `C:\Program Files\Carestream\PACS\{hstpacs, ruepacs}`, `C:\Program Files\Philips\PACS\hstpacs` | **Hersteller-PACS-Clients** (zwei Standorte) |
 | `medavisAgentService`, `medavisTsUsbService`, `DicomPacsWatcher` | Dienste eines deutschen RIS-Herstellers (medavis) und ein DICOM-Watcher |
 | `C:\Program Files\sendscu\SendSCU.exe` (+ `sendscu.cfg`, binär) | ein **Hersteller-C-STORE-SCU** — als fremde Modalität einsetzbar |
-| **kein** DVTk, **kein** lauschender DICOM-Port (104/2762/4242/11112) | die PACS-Server laufen dort nicht; es sind Clients/Viewer |
+| **DVTk ist installiert** | `C:\Program Files (x86)\DVTk` **und** fertige Arbeitsordner im Projektverzeichnis (`D:\Projekte\orthanc-dicommwl-broker\DVTk{risemu,storagescu,storagescp,qrscpemu,dvt,dicomnetworkanalyzer}`) — mein erster Suchlauf hatte nur `C:\Program Files` geprüft, das war falsch |
+| **kein** lauschender DICOM-Port (104/2762/4242/11112) | die PACS-Server laufen dort nicht; es sind Clients/Viewer |
 
 #### Versuch, dort tatsächlich zu testen — und was genau fehlt
 
@@ -128,16 +129,20 @@ Gründen:
 | **`SendSCU.exe` als fremde Modalität** | Delphi-**GUI**-App, Konfiguration **binär** (`sendscu.cfg`, nicht patchbar); die Logs zeigen `Sent H:\FILES\…` — **`H:` existiert nicht mehr** (nur C, D) | Neu-Konfiguration über die Oberfläche am Gerät |
 | **Carestream-/Philips-Client als Gegenprobe** | nur `DicomXMLBrowser.exe` (Viewer) — **kein** CLI-DICOM-Werkzeug in den Herstellerordnern | ein laufender Fremd-Server (Lizenz) oder ein Hersteller-Testtool |
 
-**Fazit:** Der Vendor-Test im Haus ist **vorbereitet, aber nicht durchführbar**,
-solange kein *bedienbares* Fremdwerkzeug dort liegt. Zwei Wege, beide brauchen
-einen Menschen: **(a)** dvtk.org-Registrierung (2 Minuten) → ich installiere die
-DVTk-Installer per SSH und fahre RIS-/Modality-Emulator in einer Sitzung;
-**(b)** `SendSCU` am Gerät auf den Broker umkonfigurieren. Für die Validierung
-gegen unser Conformance Statement bleibt DVT der einzige Kandidat — und es
-braucht die kommerziellen Definition Files.
+**Fazit:** Der Vendor-Test **läuft** — über `DVTCmd.exe`, die Konsolenvariante von
+DVT. Sie ist per SSH fahrbar (die GUI-Emulatoren nicht), validiert jede
+empfangene Nachricht gegen die DICOM-Definition-Dateien und liefert
+XML-Berichte. Ergebnisse und die beiden dabei gefundenen Punkte stehen in
+[`interop.md`](interop.md) §2b; die Skripte liegen in `deploy/interop/dvtk/`.
 
-Der Netzweg ist jedenfalls bewiesen: **jedes** Fremdwerkzeug auf dieser Maschine
-erreicht den Broker unter `10.0.1.47:11113`.
+Was weiterhin einen Menschen braucht: die **GUI-Emulatoren** (RIS/Modality/
+Storage-Emulator — keine Kommandozeilensteuerung in den Quellen) und
+**`SendSCU`** (binäre Konfiguration, `H:` existiert nicht mehr). Für die
+Validierung gegen *unser* Conformance Statement bräuchte DVT zusätzlich eine
+eigene Definition-Datei unseres Systems.
+
+Der Netzweg ist bewiesen: **jedes** Fremdwerkzeug auf dieser Maschine erreicht
+den Broker unter `10.0.1.47:11113`.
 
 ## 5. Was die Werkzeuge gefunden haben
 

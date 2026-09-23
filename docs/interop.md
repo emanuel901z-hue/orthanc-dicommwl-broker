@@ -110,6 +110,36 @@ Radiologie-Auftragsnachricht, in den fremden Beispieldaten enthalten) und
 und `ADT^A31` (Update Person Information, Variante von A08) werden jetzt
 angenommen — beides direkt gegen die fremden Nachrichten geprüft.
 
+## 2b. DVTk auf einer Windows-Workstation (Teil 3, läuft)
+
+**DVTk** (DICOM Validation Toolkit, Philips/ICT Group) ist das Werkzeug, auf dem
+auch die IHE-RO-Validierung aufsetzt. Auf einer erreichbaren Windows-Maschine ist
+es installiert; die Konsolenvariante **`DVTCmd.exe`** ist per SSH fahrbar und
+validiert jede empfangene Nachricht gegen die **DICOM-Definition-Dateien** — eine
+Prüfung, die unsere eigenen Tests nicht leisten können. Die Skripte liegen in
+[`../deploy/interop/dvtk/`](../deploy/interop/dvtk/README.md).
+
+| Szenario | Ergebnis |
+|---|---|
+| **C-ECHO** (DVTk-Beispiel) | **PASSED** — 0 Validierungsfehler |
+| **C-STORE** (DVTk erzeugt ein Secondary-Capture-Bild im Skript) | **PASSED**; der Store liegt nachweislich im Broker (`/logs/stores`: `DVTK_SCU … success`) |
+| **MPPS** `N-CREATE` + `N-SET` (eigenes Skript mit gültiger UID) | **PASSED** — 0 Validierungsfehler |
+| **MWL `C-FIND`** (eigenes Skript) | Der Broker antwortet (3 Einträge, aus zwei Quellen aggregiert — im Query-Log und im DVTk-Protokoll nachweisbar); DVTks *Testskript* meldet Wertabweichungen, weil es exakte Referenzwerte erwartet. **Strukturell keine VR-/Typfehler** |
+
+**Zwei Befunde aus diesem Lauf:**
+
+1. **DVTks eigenes MPPS-Beispiel ist fehlerhaft.** Es sendet und erwartet die
+   SOP-Instanz-UID `"MppsUID"` — keine gültige DICOM-UID. DVTks *eigener*
+   Validator beanstandet genau das (`Attribute (0000,1000) value should start
+   with digit(s)`). Unser Broker hat korrekt geantwortet (DIMSE verlangt, die
+   angeforderte UID zurückzugeben); mit einer echten UID läuft dasselbe Szenario
+   fehlerfrei durch.
+2. **Unser MPPS-SCP ist bewusst nachsichtig:** ein `N-SET` ohne vorheriges
+   `N-CREATE` wird angenommen und der Schritt gespeichert, statt mit `0x0112`
+   (No Such SOP Instance) zu antworten. DICOM erlaubt die Ablehnung — DVTks
+   Beispiel macht aber genau diesen Fall, und die Nachsicht rettet die
+   Information für das RIS. Steht so im Conformance Statement.
+
 ## 3. Was das **nicht** belegt
 
 - **Keine HL7-*Validierung*:** dcm4che prüft den Nachrichtenaufbau so weit, dass
@@ -123,6 +153,9 @@ angenommen — beides direkt gegen die fremden Nachrichten geprüft.
   mTLS sind gegen DCMTK geprüft, aber mit selbst erzeugten Zertifikaten (Gazelle
   Security Suite würde eine echte Test-PKI liefern).
 - **Keine Dauerlast** (dafür gibt es [`loadtest.md`](loadtest.md)).
+- **Keine Validierung gegen *unsere* Conformance-Erklärung:** DVTk prüft gegen
+  den DICOM-Standard; für „System gegen eigene Definition-Datei" bräuchte es
+  eine solche Datei (und die kommerziellen 2024a-Definition-Files).
 
 ## 4. Teil 2: Gazelle (vorbereitet, nicht durchgeführt)
 

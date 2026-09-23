@@ -251,6 +251,21 @@ ist die Auftragskorrelation, die ein Manifest-Erzeuger braucht
 | HL7 MLLP (eingehend) | 2575 | `hl7_mllp_port` |
 | ATNA (Syslog/TLS) | 6514 | `atna_syslog_port` |
 
+## 9d. MPPS: bewusste Abweichung bei `N-SET` ohne `N-CREATE`
+
+DICOM erlaubt einem MPPS-SCP, ein `N-SET` für eine unbekannte SOP-Instanz mit
+`0x0112` (No Such SOP Instance) abzulehnen. **Der Broker tut das nicht:** er legt
+den Schritt an und speichert, was die Modalität meldet (`mpps.record_update`,
+Kommentar „a modality that never sent N-CREATE (or the broker restarted):
+record what we have instead of losing the event").
+
+Begründung: Der Broker kann zwischen „Modalität hat das `N-CREATE` nie gesendet"
+und „der Broker wurde dazwischen neu gestartet" nicht unterscheiden. Ein
+abgelehntes `N-SET` bedeutet für das RIS eine Untersuchung, die nie abgeschlossen
+wurde — ein angenommener Schritt mit den gemeldeten Daten ist die robustere
+Wahl. **Belegt** wurde dieser Fall von DVTk: dessen eigenes MPPS-Beispielskript
+sendet ein `N-SET` ohne vorheriges `N-CREATE` (siehe [`interop.md`](interop.md) §2b).
+
 ## 10a. Wogegen geprüft wurde (externe Kompatibilität)
 
 Die Aussagen dieses Dokuments sind durch Tests an den Code gebunden. Darüber
@@ -269,6 +284,7 @@ eine der verbreitetsten DICOM-Implementierungen:
 | `hl7rcv` (dcm4che) | fremder HL7-Empfänger | unsere MPPS-Statusmeldung (ORU^R01) wird angenommen |
 | `storescp +tls` (DCMTK) | fremder TLS-Server, verlangt ein Client-Zertifikat | unser **mTLS-Client** liefert ein Bild dorthin (mTLS in beide Richtungen) |
 | `echoscu +tla`, `storescu +tla` (DCMTK) | fremder TLS-Client | unser TLS-Listener: C-ECHO und C-STORE über TLS |
+| **DVTk** (`DVTCmd.exe`) | Validierung gegen die **DICOM-Definition-Dateien** | C-ECHO, C-STORE und MPPS (N-CREATE/N-SET) **PASSED**; MWL-Antwort strukturell fehlerfrei ([`interop.md`](interop.md) §2b) |
 
 Nachweis: `./deploy/interop-test.sh` (**23 Prüfungen**, DCMTK + dcm4che) und
 [`interop.md`](interop.md). **Noch nicht** geprüft: eine HL7-*Profilvalidierung*
