@@ -122,9 +122,22 @@ Prüfung, die unsere eigenen Tests nicht leisten können. Die Skripte liegen in
 | Szenario | Ergebnis |
 |---|---|
 | **C-ECHO** (DVTk-Beispiel) | **PASSED** — 0 Validierungsfehler |
+| **Modality Worklist `C-FIND`** | **PASSED** — 0 Validierungsfehler (Skript aus einer echten Antwort erzeugt, s. u.) |
 | **C-STORE** (DVTk erzeugt ein Secondary-Capture-Bild im Skript) | **PASSED**; der Store liegt nachweislich im Broker (`/logs/stores`: `DVTK_SCU … success`) |
 | **MPPS** `N-CREATE` + `N-SET` (eigenes Skript mit gültiger UID) | **PASSED** — 0 Validierungsfehler |
-| **MWL `C-FIND`** (eigenes Skript) | Der Broker antwortet (3 Einträge, aus zwei Quellen aggregiert — im Query-Log und im DVTk-Protokoll nachweisbar); DVTks *Testskript* meldet Wertabweichungen, weil es exakte Referenzwerte erwartet. **Strukturell keine VR-/Typfehler** |
+
+Damit ist die **komplette SWF-Kette** — Arbeitsliste, Bildannahme,
+Schrittmeldung, Lebenszeichen — von einem fremden, herstellergeprägten Werkzeug
+gegen die DICOM-Definition-Dateien geprüft.
+
+**Zwei Dinge, die dafür nötig waren** (beide im Generator dokumentiert):
+DVTks Skriptmodus vergleicht die *Werte*, und unser Arbeitslisten-Answer enthält
+Werte, die nur der laufende Stack kennt (der Mock-RIS erzeugt seine Study
+Instance UIDs beim Start, das Untersuchungsdatum ist „heute + Versatz") — das
+Skript wird deshalb aus einer echten C-FIND-Antwort **erzeugt**
+(`deploy/interop/dvtk/generate_mwl_script.py`). Und der Antwortblock muss auch
+die **Kommando-Elemente** deklarieren (`(0000,0002)` Affected SOP Class UID),
+sonst meldet DVTk sie als „not present in reference object".
 
 **Zwei Befunde aus diesem Lauf:**
 
