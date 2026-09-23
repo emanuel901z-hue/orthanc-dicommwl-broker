@@ -152,6 +152,24 @@ und eine PR-Vorlage) liegen fertig in
 - **Tabellenzeilen waren nicht klickbar**: ein Klick (oder Enter/Leertaste) auf
   eine Zeile öffnet jetzt die Bearbeitung — in allen Broker-Listen.
 
+## OE3 ohne Broker betreiben (optional)
+
+Der Broker ist **optional**. Wer nur OE3 (mit dem mitgelieferten Orthanc)
+braucht, schaltet ihn in `deploy/oe3-config.js` ab — `brokerUrl` weglassen
+**und** `features.enableMwlBroker: false`; dann verschwindet der Abschnitt aus
+der Navigation und die Routen zeigen eine Erklärung statt einer Konsole, deren
+jede Anfrage scheitert.
+
+In derselben Datei lassen sich **alle** Einstellungen vorbelegen und
+schreibgeschützt machen: Feature-Flags blenden Schreibaktionen aus
+(`enableUpload`, `enableSend`, `enableDelete`, `enableModify`, `enableAnonymize`,
+`editLabels`), `branding` setzt Titel/Logo, und die **Viewer-Liste** kommt aus
+`viewers` (mit `viewersLocked: true` unveränderbar) — vorher lag sie nur im
+Browser jedes Anwenders.
+
+Vollständige Referenz mit fertigem Beispiel:
+[orthanc-explorer-3-usable/docs/oe3-standalone.md](orthanc-explorer-3-usable/docs/oe3-standalone.md).
+
 ## Betrieb, Support und Schulung
 
 | Dokument | Wofür |
