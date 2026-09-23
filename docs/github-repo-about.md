@@ -17,29 +17,36 @@ gh repo edit emanuel901z-hue/orthanc-dicommwl-broker \
 **Description** (GitHub erlaubt ~350 Zeichen):
 
 ```text
-DICOM Modality Worklist broker for hospitals: queries several RIS/KIS sources,
-merges and caches their worklists, serves them to the modalities, and routes the
-stored images to the right PACS. Optional OHIF viewer and OE3 configuration UI
-included — Docker deployment, Prometheus metrics, audit trail, TLS/mTLS.
+DICOM Modality Worklist broker for hospitals: aggregates several RIS/KIS
+worklists, serves them to the modalities, reports MPPS back to the RIS, takes HL7
+orders (ORM/OMG/OMI) and ADT patient updates (incl. PIR), and routes the images
+to the right PACS. Postgres-backed and HA-capable, audited, with an optional OE3
+console and OHIF viewer — Docker deployment, Prometheus metrics, TLS/mTLS.
+Verified against DCMTK, dcm4che and DVTk.
 ```
 
 **Topics:**
 
 ```text
-dicom  dcm4che  pynetdicom  modality-worklist  mwl  worklist-broker  ris  kis
-pacs  c-find  c-store  hl7  orm  mllp  atna  ihe  tls  mtls  prometheus
-fastapi  postgresql  docker  orthanc  ohif  python
+dicom  dcm4che  dcmtk  dvtk  pynetdicom  modality-worklist  mwl  mpps
+worklist-broker  ris  kis  pacs  c-find  c-store  hl7  orm  adt  mllp  atna
+ihe  ihe-swf  pir  tls  mtls  prometheus  fastapi  postgresql  docker  orthanc
+ohif  high-availability  python  interop
 ```
 
-**Homepage:** leer lassen (interne Installation) — oder die Doku verlinken:
-`https://github.com/emanuel901z-hue/orthanc-dicommwl-broker/blob/main/docs/roadmap-worklist-broker.md`
+**Homepage:** die Dokumentationsübersicht verlinken:
+`https://github.com/emanuel901z-hue/orthanc-dicommwl-broker/blob/main/README.md`
+(alternativ der Runbook-Einstieg: `…/blob/main/docs/runbook.md`)
 
 **Kurzbeschreibung für ein Release („What's new"):**
 
 ```text
-Sprint 1–8 der Roadmap: Circuit Breaker, Worklist-Cache, C-STORE-Spool,
-Simulation/Config-Audit, Alerting, lokale Worklist + HL7-ORM, Stationsregeln,
-ATNA-Export, DICOM-TLS/mTLS, RBAC und Aufbewahrungskonzepte. 626 Backend-Tests.
+MWL-Aggregation über mehrere RIS/KIS mit Cache und Circuit Breaker, C-STORE-
+Routing mit Spool, MPPS-SCP mit Statusmeldung an das RIS, HL7 (ORM/OMG/OMI) und
+ADT/PIR, lokale Worklist, Stationsregeln, ATNA, DICOM-TLS/mTLS, RBAC,
+Aufbewahrung, Statistik, UPS-RS-Subset, Auftragskontext für MADO-Manifeste,
+Hochverfügbarkeit auf gemeinsamer DB — 626 Backend-Tests, extern verifiziert mit
+DCMTK, dcm4che und DVTk (23/23 bzw. fünf PASSED-Szenarien).
 ```
 
 ---
@@ -103,3 +110,52 @@ Falls der Fork als PR angeboten wird, passt dieser Text:
 - Playwright: 30 Tests im Stack-Lauf (Desktop + Mobile), `verify-ui.cjs`: 154 Checks
 - Backend des Brokers: 626 pytest-Tests (95 % Coverage) im Schwester-Repo
 ```
+
+---
+
+## 2. `orthanc-explorer-3-usable` (OE3-Fork mit Broker-Konsole)
+
+Das Fork-About steht heute noch auf dem **Upstream-Text** („Modernes
+React/TypeScript-Frontend …") — es nennt den MWL-Broker inzwischen zwar, aber
+nicht die Rollen, die dazugekommen sind (MPPS, HL7/ADT+PIR, IID, UPS-RS) und
+nicht die Betriebsseite (Vorbelegung/Sperre, Interop-Nachweis). Empfehlung:
+ersetzen durch:
+
+**Description** (GitHub erlaubt ~350 Zeichen):
+
+```text
+Production-ready Orthanc Explorer 3 fork: audited writes, RBAC, 9 languages,
+mobile views, IHE image display (RAD-106) and the full MWL broker console —
+worklist fan-out, MPPS, HL7, store routing, TLS, ATNA, retention. The deployment
+can preset and lock its configuration for standalone use.
+```
+
+**Topics:**
+
+```text
+orthanc  dicom  dicomweb  ohif  react  typescript  vite  ihe  mwl  mpps
+worklist  pacs  radiology  rbac  i18n  playwright  vitest  pwa  audit
+```
+
+**Homepage:** `https://github.com/emanuel901z-hue/orthanc-dicommwl-broker`
+(der Broker-Stack, zu dem diese Oberfläche gehört)
+
+**Befehl (falls `gh` verfügbar):**
+
+```bash
+gh repo edit emanuel901z-hue/orthanc-explorer-3-usable \
+  --description "Production-ready Orthanc Explorer 3 fork: audited writes, RBAC, 9 languages, mobile views, IHE image display (RAD-106) and the full MWL broker console — worklist fan-out, MPPS, HL7, store routing, TLS, ATNA, retention. The deployment can preset and lock its configuration for standalone use." \
+  --homepage "https://github.com/emanuel901z-hue/orthanc-dicommwl-broker" \
+  --add-topic orthanc --add-topic dicom --add-topic dicomweb --add-topic ohif \
+  --add-topic react --add-topic typescript --add-topic ihe --add-topic mwl \
+  --add-topic mpps --add-topic worklist --add-topic pacs --add-topic rbac \
+  --add-topic i18n --add-topic playwright --add-topic audit
+```
+
+### Und die **About-Seite in der App** selbst?
+
+Sie war gepflegt (20 Fork- + 11 Broker-Fähigkeiten), nannte aber **MPPS,
+HL7/ADT+PIR, IID (RAD-106) und UPS-RS nicht** und beschrieb den Broker auf dem
+Stand vor diesen Rollen. Aktualisiert in allen neun Sprachen
+(`about.description` + sechs neue Einträge unter `about.features`:
+`mwlMpps`, `mwlPir`, `mwlIid`, `mwlUps`, `mwlStats`, `interop`).
