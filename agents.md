@@ -253,10 +253,24 @@ Token rotieren = nur die Store-Datei neu schreiben:
 - **Simulation und Echtbetrieb teilen den Code.** Zielauflösung liegt in
   `routing.py`, Modify-Regeln in `transforms.py` — beides wird vom C-STORE-Pfad
   *und* von `simulate.py` aufgerufen. Nie eine zweite Auflösung implementieren,
-  sonst ist der Dry-Run wertlos.
+  sonst ist der Dry-Run wertlos. **Der C-FIND-Pfad ist der Beleg dafür:**
+  `dimse.BrokerSCP.handle_find` existierte zweimal (Python nimmt die letzte), die
+  zweite Kopie rechnete inline statt über `aggregation.collect` — und ihr fehlte
+  die Absicherung um `cache.store_snapshot`. Ein Cache-Schreibfehler wurde so zum
+  Quellenfehler, der Breaker öffnete und eine gesunde Quelle fiel aus der
+  Arbeitsliste, während die Vorschau etwas anderes zeigte. Gefunden mit dem
+  DVTk-RIS-Emulator; `test_c_find_runs_the_shared_aggregation` hält es fest.
+  **Vor dem Umbau von Pfaden: `grep -c "def <name>"` — doppelte Methodennamen
+  sind stumm.
 - **Konfigurationsmutationen werden protokolliert** (`audit.record` in der
   API-Schicht, Before/After-Snapshot). Neue Mutationen ohne Audit-Eintrag sind
   unvollständig.
+- **Der Cache-Upsert muss eindeutige Schlüssel sehen.** `store_snapshot` schreibt
+  eine Momentaufnahme als *ein* `INSERT … ON CONFLICT DO UPDATE`; zwei Zeilen mit
+  demselben `(source_id, dedupe_key)` lassen PostgreSQL die **ganze** Anweisung
+  abbrechen (`CardinalityViolation`). Eine Antwort mit mehreren Scheduled
+  Procedure Steps oder ohne Accession/Schritt-ID erzeugt solche Doppel —
+  vor dem Schreiben deduplizieren (erster Treffer gewinnt), mit Test.
 - **Cache-Semantik nicht aufweichen.** Eine erfolgreiche Quell-Antwort
   *ersetzt* den Snapshot (`cache.store_snapshot`), sie wird nie gemergt — sonst
   bleiben abgeschlossene Aufträge liegen. Stale nur bei Fehler/offenem Breaker,

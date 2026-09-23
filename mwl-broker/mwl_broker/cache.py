@@ -133,6 +133,15 @@ def store_snapshot(source_id: int, answers: list[Dataset]) -> int:
     rows: list[dict] = []
     for ds in answers:
         key = "|".join(dedupe_key(ds))
+        if key in seen:
+            # One answer can carry the same (Patient ID, accession, first step
+            # ID) twice: a foreign RIS sends several Scheduled Procedure Steps in
+            # one response, or leaves accession/step ID empty for different
+            # orders (the DVTk RIS emulator does both). The bulk upsert may only
+            # touch a row once, so a duplicate key made PostgreSQL abort the
+            # whole statement (`CardinalityViolation`) — the snapshot was lost.
+            # First one wins, exactly like the merge.
+            continue
         seen.add(key)
         meta = _describe(ds)
         rows.append({

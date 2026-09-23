@@ -5,7 +5,6 @@ fresh DB session per operation, never hold ORM objects across threads.
 """
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pydicom.dataset import Dataset
 from pydicom.uid import generate_uid
@@ -128,24 +127,6 @@ class BrokerSCP:
         allowed = settings_service.get_aets()
         return not allowed or calling_aet in allowed
 
-    def _enabled_sources(self) -> list[SourceCfg]:
-        with session_factory()() as s:
-            rows = s.scalars(
-                select(MwlSource)
-                .where(MwlSource.enabled.is_(True))
-                .order_by(MwlSource.priority, MwlSource.id)
-            ).all()
-        return [
-            SourceCfg(
-                id=r.id, name=r.name, aet=r.aet, host=r.host, port=r.port,
-                calling_aet=r.calling_aet, charset=r.charset, timeout_s=r.timeout_s,
-                priority=r.priority,
-                tls=r.tls,
-                tls_verify=r.tls_verify,
-            )
-            for r in rows
-        ]
-
     # ------------------------------------------------------------------
     def handle_find(self, event):
         """C-FIND: fan out to all enabled sources, merge, stream answers.
@@ -185,115 +166,6 @@ class BrokerSCP:
             keys["SPS"] = {k: str(sps_seq[0].get(k)) for k in LOGGABLE_SPS_KEYS if sps_seq[0].get(k)}
         return keys
 
-    # ------------------------------------------------------------------
-    def handle_find(self, event):
-        """C-FIND: fan out to all enabled sources, merge, stream answers."""
-        calling = event.assoc.requestor.ae_title
-        started = time.monotonic()
-        identifier = event.identifier
-
-        if not self._calling_allowed(calling):
-            log.warning("C-FIND rejected: calling AET %r not allowed", calling)
-            atna.audit(atna.EVENT_SECURITY, outcome="8", broker_aet=self.settings.broker_aet,
-                       source_aet=calling, query="C-FIND rejected (calling AET not allowed)",
-                       event_type=("ITI-19", "Node Authentication"))
-            yield S_OUT_OF_RESOURCES, None
-            return
-
-        sources = self._enabled_sources()
-        per_source: dict[str, int | str] = {}
-        collected: list[tuple[SourceCfg, list[Dataset]]] = []
-        served_stale: list[str] = []
-
-        # Per-station rules: the console's priority override decides who wins the
-        # dedupe, and its visibility filter is applied after the merge.
-        station = station_rules.query_station(identifier)
-        rule = station_rules.matching_rule(station)
-        sources = station_rules.order_sources(sources, rule)
-
-        # Circuit breaker: skip sources that are known to be down instead of
-        # paying their timeout on every single query.
-        active = [src for src in sources if breaker.is_available(src.id)]
-        for src in sources:
-            if src in active:
-                continue
-            # Known to be down: skip the timeout — but serve the snapshot if we
-            # have one, because that is exactly the outage case the cache is for.
-            cached, _age = cache.stale_answers(src.id)
-            if cached:
-                per_source[src.name] = len(cached)
-                served_stale.append(src.name)
-                collected.append((src, cached))
-            else:
-                per_source[src.name] = breaker.SKIPPED
-
-        if active:
-            with ThreadPoolExecutor(max_workers=len(active)) as pool:
-                futures = {
-                    pool.submit(query_source, src, identifier): src for src in active
-                }
-                for fut in as_completed(futures):
-                    src = futures[fut]
-                    try:
-                        answers = fut.result(timeout=src.timeout_s + 5)
-                        per_source[src.name] = len(answers)
-                        metrics.UPSTREAM_ANSWERS.labels(source=src.name).inc(len(answers))
-                        breaker.record_success(src.id)
-                        # a live answer replaces the cached snapshot — completed
-                        # orders disappear with it (the RIS is the truth)
-                        cache.store_snapshot(src.id, answers)
-                        collected.append((src, answers))
-                    except Exception as exc:  # dead RIS must not break the query
-                        log.warning("upstream %s query failed: %s", src.name, exc)
-                        breaker.record_failure(src.id, str(exc))
-                        cached, age = cache.stale_answers(src.id)
-                        if cached:
-                            per_source[src.name] = len(cached)
-                            served_stale.append(src.name)
-                            collected.append((src, cached))
-                        else:
-                            per_source[src.name] = "error"
-
-        # Local items (emergencies) participate with the highest priority — the
-        # pseudo source is not part of the fan-out, so it sorts first.
-        local = local_worklist.answers_for(identifier)
-        if local is not None:
-            collected.append(local)
-            per_source[local[0].name] = len(local[1])
-            metrics.UPSTREAM_ANSWERS.labels(source=local[0].name).inc(len(local[1]))
-
-        # restore priority order for deterministic merge
-        order = {src.id: i for i, src in enumerate(sources)}
-        collected.sort(key=lambda t: order.get(t[0].id, local_worklist.local_priority()))
-        merged = merge_answers(collected)
-
-        merged, hidden = station_rules.filter_merged(merged, rule)
-        if hidden:
-            log.info("C-FIND for station %s: %d answer(s) hidden by rule '%s'",
-                     station or "(any)", hidden, rule["name"])
-
-        self._record_seen_items(merged)
-
-        duration_ms = int((time.monotonic() - started) * 1000)
-        # "error" (query failed) and "breaker_open" (skipped) are both
-        # non-answer outcomes; any int means a source actually answered.
-        bad = [v for v in per_source.values() if isinstance(v, str)]
-        answered = [v for v in per_source.values() if isinstance(v, int)]
-        status = (
-            "success" if not bad and not served_stale
-            else "partial" if answered
-            else "failed"
-        )
-        metrics.CFIND_REQUESTS.labels(result=status).inc()
-        metrics.CFIND_DURATION.observe(duration_ms / 1000)
-        self._write_query_log(calling, identifier, len(merged), per_source, duration_ms,
-                              status, served_stale)
-
-        self._audit_query(calling, identifier, merged)
-
-        for ds, _src in merged:
-            yield S_PENDING, ds
-        yield S_SUCCESS, None
 
     def _audit_query(self, calling: str, identifier: Dataset,
                      merged: list[tuple[Dataset, SourceCfg]]) -> None:

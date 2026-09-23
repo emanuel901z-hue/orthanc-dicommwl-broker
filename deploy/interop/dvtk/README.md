@@ -103,30 +103,74 @@ validiert jeden gegen die Definition-Dateien. Der Weg dahin hatte vier Fallen:
 Damit lief es durch: der Broker lieferte zwei Bilder (aus dem Spool) an den
 Emulator, DVTk validierte sie mit **0 Fehlern** und legte sie als Media ab.
 
-## RIS-Emulator: über SSH nicht fahrbar (gemessen)
+## RIS-Emulator: getestet — und drei echte Fehler gefunden
 
 Der **RIS Emulator** (`RIS Emulator.exe`) ist DVTks fremdes RIS: er bedient
 **Modality Worklist C-FIND** und **MPPS N-CREATE/N-SET** als SCP. Er ist
-**GUI-only** — `DVTCmd` kennt dafür keinen Modus (`-estscp`/`-estscu` sind
-Storage, `-m`/`-d` Medien, `-c` VBS-Skripte) — und über SSH nicht ansprechbar:
+**GUI-only** — `DVTCmd` kennt dafür keinen Modus —, also muss ihn jemand **am
+Gerät** starten (Konsole/RDP): Reiter *Worklist* → Local AE `DVTK_MWL_SCP`,
+Port, Remote AE `DVTK_MWL_SCU` (das ist unser Broker als Aufrufer) → *Start*.
+Der Datenordner liegt unter
+`%USERPROFILE%\Documents\DVTk\RIS Emulator\Data\Worklist\`; daraus baut er
+sein Informationsmodell (Reiter *DICOM Files* → „View information model…").
 
-| Versuch | Ergebnis |
+**Netzweg:** die Box blockt eingehende Verbindungen vom Linux-Host, deshalb wie
+beim Storage-SCP eine **SSH-Portweiterleitung** auf `127.0.0.1:<DVT-PORT>`
+(nicht `localhost` — Windows löst das zuerst als `::1` auf). Danach ist das
+fremde RIS für den Broker eine **Quelle** wie jede andere:
+
+```text
+Ziel: AET DVTK_MWL_SCP, Host <gateway>, Port <tunnel>, calling_aet DVTK_MWL_SCU
+```
+
+### Ergebnis
+
+| Prüfung | Ergebnis |
 |---|---|
-| Prozess starten (`Start-Process -WindowStyle Minimized`) | läuft (18 Threads), **kein** Fenster (`MainWindowTitle` leer) |
-| Fenster/Knöpfe per Win32 auflisten (`dvtk_gui.py --list`) | **0 Controls** — SSH-Sitzungen haben keinen sichtbaren Desktop (eigene Window Station) |
-| Von selbst lauschen? | **nein** — kein lauschender Port; die Registry (`HKCU\Software\DVTk\DVTk RIS Emulator`) bleibt leer, die Ports/AETs setzt man im Worklist-Tab |
-| Worklist-Daten vorlegen (`data\worklist`) | möglich (kopiert), ändert aber nichts am fehlenden „Start" |
+| Fremde Arbeitsliste direkt gelesen | **6 Antworten** (Three^/Two^/One^Secondary Capture Image, `SC-I3/I2/I1`, `pidP645` + `AccessionNumber 00000187`) |
+| Durch unseren Broker aggregiert (C-FIND einer Modalität) | **7 Einträge** — die 3 Mock-Patienten **plus** die 4 fremden (`SC-I3/I2/I1`, `pidP645`) |
+| Cache der Quelle danach | **4 Einträge, available** (6 Antworten → 4 eindeutige Schlüssel) |
 
-**Was das gekostet hätte:** eine Sitzung am Gerät (Konsole oder RDP) — dann ist
-`dvtk_gui.py` das Werkzeug dafür.
+### Fund 1 (fremde Seite): `QueryRetrieveLevel` tötet die Antwort
 
-**Was dadurch nicht fehlt:** die Richtung „fremdes RIS" ist bereits abgedeckt —
-mit **DCMTK `wlmscpfs`** liest unser Broker eine fremde Arbeitsliste
-(`deploy/interop-test.sh`: „unser Upstream-Client liest die fremde Worklist —
-Antworten: 10"). Und der **MPPS-SCP** des RIS-Emulators ist für uns ohne Wert:
-unser Broker ist selbst MPPS-**SCP** (die Modalität meldet bei ihm), er sendet
-keine MPPS weiter — die Statusmeldung an das RIS geht als **HL7 `ORU^R01`**
-(die dcm4che-Prüfung deckt das ab).
+Deterministisch gemessen (je 3 Läufe):
+
+| Identifier der Anfrage | Antworten |
+|---|---|
+| `{PatientName, PatientID, AccessionNumber}` (leer) | **6, 6, 6** |
+| `{SPS-Sequenz}` (leer) | **6, 6, 6** |
+| `{SPS-Sequenz}` + `QueryRetrieveLevel = "MODALITY WORKLIST"` | **0, 0, 0** |
+
+DVTk behandelt `(0008,0052)` als **Matching-Schlüssel**; seine Arbeitslisten-
+einträge haben das Attribut nicht, also passt nichts. Nach DICOM gehört
+`QueryRetrieveLevel` **nicht** zum Modality-Worklist-Informationsmodell, und ein
+leerer Wert bedeutet *universelles* Matching (PS3.4, C.2.2.2). Praktische Folge:
+**DCMTK's eigenes `findscu -W` sendet `QueryRetrieveLevel`** — eine so gebaute
+Modalität bekommt von diesem Emulator eine **leere Arbeitsliste**. Unser Broker
+reicht den Identifier der Modalität unverändert weiter (genau richtig, sonst
+gingen Filter verloren), also schlägt das Verhalten der Fremdseite durch.
+
+### Fund 2 (unser Broker): doppelte Schlüssel sprengten den Cache-Upsert
+
+DVTks Antwort enthält **drei Einträge mit demselben `dedupe_key`**
+(`SC-I1||` — Patient gleich, Accession und Schritt-ID leer). Der Cache schreibt
+seine Momentaufnahme als **ein** `INSERT … ON CONFLICT DO UPDATE`; PostgreSQL
+bricht das ab (`CardinalityViolation: cannot affect row a second time`) und die
+**ganze** Momentaufnahme war verloren. Die Dedupe-Menge im Code war toter Code.
+Behoben (erster Treffer gewinnt, wie beim Merge) + Regressionstest
+(`tests/test_cache.py`). Nicht exotisch: eine Antwort mit **mehreren
+Scheduled Procedure Steps** erzeugt denselben Schlüssel ebenfalls.
+
+### Fund 3 (unser Broker): eine zweite `handle_find` überschrieb die geteilte Aggregation
+
+`dimse.py` hatte **zwei** Methoden `handle_find`; Python nimmt die letzte. Die
+zweite implementierte den Fan-out **inline** statt über `aggregation.collect` —
+und ihr fehlte die Absicherung um `cache.store_snapshot`. Damit wurde aus einem
+**Cache-Schreibfehler ein Quellenfehler**: der Breaker öffnete, die gesunde
+Quelle verschwand aus der Arbeitsliste (`status: partial`), und der
+Operator-Vorschau-Trockenlauf log, weil er `collect()` benutzt. Das Duplikat ist
+entfernt; ein Test (`test_c_find_runs_the_shared_aggregation`) erzwingt, dass der
+Live-C-FIND die geteilte Aggregation nutzt.
 
 ## Was das nicht ist
 

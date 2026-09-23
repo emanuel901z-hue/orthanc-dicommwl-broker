@@ -126,6 +126,7 @@ Prüfung, die unsere eigenen Tests nicht leisten können. Die Skripte liegen in
 | **C-STORE** (DVTk erzeugt ein Secondary-Capture-Bild im Skript) | **PASSED**; der Store liegt nachweislich im Broker (`/logs/stores`: `DVTK_SCU … success`) |
 | **MPPS** `N-CREATE` + `N-SET` (eigenes Skript mit gültiger UID) | **PASSED** — 0 Validierungsfehler |
 | **Ausgehender C-STORE** (unser Broker → DVTk als PACS) | **PASSED** — 0 Validierungsfehler; DVTk legte die empfangenen Objekte als Media ab |
+| **Fremdes RIS** (DVTk RIS-Emulator als MWL-Quelle) | **6 Antworten** direkt, **7 Einträge** aggregiert durch unseren Broker; Cache der Quelle gefüllt |
 
 Damit ist die **komplette SWF-Kette** — Arbeitsliste, Bildannahme,
 Schrittmeldung, Lebenszeichen — von einem fremden, herstellergeprägten Werkzeug

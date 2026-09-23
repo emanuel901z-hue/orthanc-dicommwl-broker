@@ -1028,3 +1028,50 @@ def test_breaker_reopens_only_after_the_cooldown(broker, mwl_scp, hanging_port):
 
     _cfind(broker, _wildcard_query())
     assert _last_query_log().per_source["hanging"] == "error"
+
+
+def test_c_find_runs_the_shared_aggregation(broker, monkeypatch):
+    """The live C-FIND must go through `aggregation.collect` — the same function
+    the operator's preview calls.
+
+    A second, inline implementation of the fan-out once shadowed it (two methods
+    with the same name; Python keeps the last one). Preview and modality then
+    disagreed, and the inline copy was missing the guard that keeps a failing
+    cache write from counting as a source failure: a foreign RIS answer with two
+    identical dedupe keys opened the breaker and took that source out of the
+    worklist. Found with the DVTk RIS emulator.
+    """
+    from mwl_broker import aggregation
+
+    with session_factory()() as s:
+        row = MwlSource(name="dvtk-ris", aet="DVTK_MWL_SCP", host="127.0.0.1", port=1,
+                        calling_aet="MWLBROKER", charset="ISO_IR 100", enabled=True)
+        s.add(row)
+        s.commit()
+        source_id = row.id
+    src = aggregation.source_config(source_id)
+    assert src is not None
+
+    sentinel = Dataset()
+    sentinel.PatientID = "SENTINEL"
+    sps = Dataset()
+    sps.ScheduledProcedureStepID = "SPS-SENTINEL"
+    sentinel.ScheduledProcedureStepSequence = [sps]
+
+    result = aggregation.AggregationResult()
+    result.items = [sentinel]
+    result.merged = [(sentinel, src)]
+    result.per_source = {src.name: 1}
+
+    calls: list[Dataset] = []
+
+    def fake_collect(identifier, **kwargs):
+        calls.append(identifier)
+        return result
+
+    monkeypatch.setattr(aggregation, "collect", fake_collect)
+
+    answers = _cfind(broker, _wildcard_query())
+
+    assert calls, "the live C-FIND did not use aggregation.collect"
+    assert [answer.get("PatientID") for answer in answers] == ["SENTINEL"]

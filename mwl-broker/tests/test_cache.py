@@ -302,3 +302,38 @@ def test_refresh_failure_is_silent(monkeypatch):
 
     assert cache.refresh(cfg) == 0
     assert cache.items() == []
+
+
+def test_duplicate_dedupe_keys_never_reach_the_bulk_upsert(monkeypatch):
+    """A foreign RIS can send the same (patient, accession, step ID) twice.
+
+    The DVTk RIS emulator does exactly that: one response carries several
+    Scheduled Procedure Steps, or different orders arrive without accession and
+    step ID. The bulk upsert may only touch a row once — PostgreSQL aborted the
+    whole statement (`CardinalityViolation … cannot affect row a second time`)
+    and the snapshot was lost, although the live answer had been fine. Found by
+    the DVTk RIS emulator interop test; the guard is asserted here because
+    SQLite (the test database) tolerates the duplicate.
+    """
+    source_id = _source()
+    captured: list[list[dict]] = []
+    real_upsert = cache.db.upsert
+
+    def spy(session, model, rows, **kwargs):
+        captured.append(list(rows))
+        return real_upsert(session, model, rows, **kwargs)
+
+    monkeypatch.setattr(cache.db, "upsert", spy)
+
+    stored = cache.store_snapshot(source_id, [
+        _item(),                                       # P1 / ACC-1 / SPS-1
+        _item(),                                       # same key again
+        _item(patient="P2", accession="", sps_id=""),  # order without accession
+        _item(patient="P2", accession="", sps_id=""),  # same key again
+        _item(accession="ACC-2", sps_id="SPS-2"),
+    ])
+
+    keys = [row["dedupe_key"] for row in captured[0]]
+    assert len(keys) == len(set(keys)), "duplicate keys would abort the upsert"
+    assert stored == 3
+    assert sorted(row["accession"] for row in cache.items()) == ["", "ACC-1", "ACC-2"]
