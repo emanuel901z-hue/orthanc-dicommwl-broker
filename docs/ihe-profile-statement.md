@@ -73,9 +73,15 @@ wir zusagen.
 
 ## 5. Bewusste Grenzen (im Statement dokumentiert)
 
-Nicht Teil dieses Brokers: MRN-Merge/PIX-PDQ, Retrieve (C-MOVE/C-GET), Storage
-Commitment, Prefetch von Voraufnahmen, Transkodierung, De-Identifikation,
-UPS/UPS-RS (geplant), Zertifikat-zu-AET-Mapping im ATNA-Sinn.
+Nicht Teil dieses Brokers: MRN-Merge/PIX-PDQ, Storage Commitment, Transkodierung,
+De-Identifikation, Zertifikat-zu-AET-Mapping im ATNA-Sinn. UPS/UPS-RS ist
+inzwischen **teilweise** umgesetzt (siehe [Conformance Statement §9a](dicom-conformance-statement.md)).
+
+Query/Retrieve (C-MOVE/C-GET) **bietet** der Broker weiterhin nicht an. Als
+**Client** nutzt er C-MOVE für den **Voraufnahmen-Prefetch** (Studien-C-FIND +
+C-MOVE auf ein Ziel, [Conformance Statement §9e](dicom-conformance-statement.md)):
+ein Werkzeug auf Anforderung, kein Akteur im Scheduled Workflow — die
+Bildverteilung bleibt C-STORE.
 
 Diese Punkte sind im [Conformance Statement §9](dicom-conformance-statement.md)
 mit Begründung aufgeführt — sie sind Aufgabe von PACS, VNA oder eines Routers,

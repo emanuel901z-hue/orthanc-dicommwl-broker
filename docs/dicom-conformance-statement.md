@@ -183,8 +183,9 @@ Angeboten, wenn `mpps_enabled` (Standard an):
 
 | Dienst | Status | Begründung |
 |---|---|---|
-| UPS / UPS-RS (Unified Procedure Step, DICOMweb) | **teilweise** | REST-Worklist unter `/api/v1/dicom-web/workitems` (Suche, Abruf, Anlegen, Statuswechsel) — **ohne** Subscriptions/WebSocket-Ereignisse und ohne den vollständigen UPS-Attributsatz; die Suche umfasst die lokalen Work Items |
-| C-MOVE / C-GET (Query/Retrieve) | nicht | Der Broker verteilt Bilder per C-STORE, nicht per Retrieve |
+| UPS / UPS-RS (Unified Procedure Step, DICOMweb) | **teilweise** | REST-Worklist unter `/api/v1/dicom-web/workitems` (Suche inkl. Upstream-Quellen, Abruf, Anlegen, Statuswechsel, Subscriptions + WebSocket-Ereignisse) — Grenzen: eigener Ereigniskanal statt Kanal-URL, kein Löschen über UPS-RS; siehe §9a |
+| C-GET (Retrieve als Dienst) | nicht | Der Broker verteilt Bilder per C-STORE, nicht per Retrieve |
+| C-MOVE als Dienst (SCP) | nicht | Auf dem Broker-Port wird **kein** Presentation Context für C-MOVE angenommen — niemand kann den Broker bitten, etwas zu verschieben. Als **Client** nutzt er C-MOVE ausschließlich für den Voraufnahmen-Prefetch (§9d) |
 | Storage Commitment (N-ACTION) | nicht | Aufgabe des Archivs/PACS |
 | Basic Study Content Notification | nicht | Aufgabe des PACS |
 | N-EVENT-REPORT / N-ACTION allgemein | nicht | keine Empfänger-Rolle implementiert |
@@ -192,7 +193,6 @@ Angeboten, wenn `mpps_enabled` (Standard an):
 | Print Management | nicht | kein Druckdienst |
 | Transkodierung / Pixel-Manipulation | nicht | Der Broker ändert keine Bilddaten |
 | De-Identifikation (PS3.15) | nicht | gehört in einen Router mit Pseudonym-Verwaltung |
-| Prefetch von Voraufnahmen | nicht | Aufgabe von PACS/VNA |
 | Manifest-basierter Zugriff (IHE MADO) | nicht | Content-Access-Profil (Manifest + WADO-RS) — Aufgabe von PACS/VNA/Viewer. Der Broker liefert nur die Auftragskorrelation, siehe §9c und [IHE-Aussage §6](ihe-profile-statement.md) |
 
 ## 9a. UPS-RS (DICOMweb-Worklist)
@@ -201,14 +201,30 @@ Der Broker bietet einen **pragmatischen Teil** von PS3.18 §11 an:
 
 | Transaktion | Pfad | Anmerkung |
 |---|---|---|
-| Search | `GET /api/v1/dicom-web/workitems?AccessionNumber=…` | DICOM-JSON-Antwort; Suchschlüssel: AccessionNumber, PatientID, PatientName, ScheduledStationAETitle, Modality, ScheduledProcedureStepStartDate, ScheduledProcedureStepID, StudyInstanceUID, ProcedureStepState |
-| Retrieve | `GET /api/v1/dicom-web/workitems/{uid}` | UID stabil je Work Item |
+| Search | `GET /api/v1/dicom-web/workitems?AccessionNumber=…` | DICOM-JSON-Antwort; Suchschlüssel: AccessionNumber, PatientID, PatientName, PatientBirthDate, ScheduledStationAETitle, Modality, ScheduledProcedureStepStartDate/-Time, ScheduledProcedureStepID/RequestedProcedureID, RequestedProcedureDescription, StudyInstanceUID, ProcedureStepState/UnifiedProcedureStepState. Trägt die Suche mindestens einen DICOM-Schlüssel, werden auch die **Upstream-Quellen** über dieselbe Aggregation befragt wie der DIMSE-Pfad (`?include_upstream=`, Default an) — eine reine Auflistung ohne Schlüssel bleibt lokal |
+| Retrieve | `GET /api/v1/dicom-web/workitems/{uid}` | UID stabil je **lokalem** Work Item |
 | Create | `POST /api/v1/dicom-web/workitems` | legt einen lokalen Auftrag an (AccessionNumber Pflicht) |
 | Change state | `PUT /api/v1/dicom-web/workitems/{uid}/state` | SCHEDULED, IN PROGRESS, COMPLETED, CANCELED; COMPLETED/CANCELED nehmen den Eintrag aus der Arbeitsliste |
+| Subscribe | `POST /api/v1/dicom-web/workitems/subscriptions` | Subscriber (AE-Titel), optional auf ein Work Item begrenzt, optional `deletion_lock` |
+| List subscriptions | `GET /api/v1/dicom-web/workitems/subscriptions` | |
+| Unsubscribe | `DELETE /api/v1/dicom-web/workitems/subscriptions/{subscriber_aet}` | |
+| Event channel | `WS /api/v1/dicom-web/workitems/ws?subscriber=<AET>` | Ereignisse `workitem-created` / `workitem-state-change` als JSON an verbundene Subscriber |
 
-**Nicht enthalten:** Subscriptions und Ereignisberichte (WebSocket), der
-vollständige UPS-Attributsatz, Suche über Upstream-Quellen (die werden weiterhin
-per C-FIND mit dem Identifier der Modalität abgefragt).
+**Attributsatz:** AccessionNumber, PatientID/PatientName/PatientBirthDate/PatientSex,
+StudyInstanceUID, Modality, ScheduledStationAETitle,
+ScheduledProcedureStepStartDate/-Time, ScheduledProcedureStepID/RequestedProcedureID,
+RequestedProcedureDescription und ScheduledProcedureStepDescription. Der Zustand
+steht in `(0040,4041)` **und** im UPS-Standardattribut `(0074,1000)` — beides wird
+geliefert, damit Standard-Clients den richtigen Tag finden und bestehende
+Konsumenten unverändert weiterlaufen.
+
+**Grenzen:** Der Ereigniskanal ist die **eigene WebSocket** des Brokers; die vom
+Subscriber mitgegebene Kanal-URL aus PS3.18 §11.6 (vollständiger
+DICOM-Ereignisbericht) ist **nicht** umgesetzt. Der `deletion_lock` wird
+gespeichert, aber nicht durchgesetzt: der Broker löscht Work Items nicht über
+UPS-RS (dafür gibt es keinen Endpunkt). Upstream-Einträge sind über die Suche
+sichtbar, haben aber keine stabile Abruf-UID (sie liegen nicht in der Datenbank
+des Brokers).
 
 ## 9b. Patient identifier reconciliation (IHE PIR)
 
@@ -278,6 +294,27 @@ abgelehntes `N-SET` bedeutet für das RIS eine Untersuchung, die nie abgeschloss
 wurde — ein angenommener Schritt mit den gemeldeten Daten ist die robustere
 Wahl. **Belegt** wurde dieser Fall von DVTk: dessen eigenes MPPS-Beispielskript
 sendet ein `N-SET` ohne vorheriges `N-CREATE` (siehe [`interop.md`](interop.md) §2b).
+
+## 9e. Voraufnahmen-Prefetch (Query/Retrieve als Client)
+
+`POST /api/v1/prefetch` zieht einem Patienten seine früheren Studien auf ein
+Ziel, damit sie am Befundplatz vorliegen. Der Broker ist dabei **Query/Retrieve-
+Client**, nie Server:
+
+| Schritt | Dienst | Rolle | Anmerkung |
+|---|---|---|---|
+| Studien suchen | Study-Root **C-FIND** | SCU | `PatientID` (optional `ModalitiesInStudy`), Rückgabe neueste zuerst, `exclude_study_uid` lässt die aktuell gelesene Studie aus |
+| Studien ziehen | Study-Root **C-MOVE** | SCU | Ziel ist der **AE-Titel** eines PACS-Ziels; der abgefragte Knoten muss diesen AE-Titel als Move-Destination kennen (das prüft der Broker nicht — es ist PACS-Konfiguration) |
+
+Beide Knoten sind `pacs_target`-Zeilen (Name im Aufruf): der **Abfrageknoten**
+sucht und führt das C-MOVE aus, das **Ziel** empfängt die Bilder. Ohne
+`dry_run=false` passiert nichts. Die Antwort ist PHI-frei: die Patient-ID ist die
+Abfrage, sie wird nie zurückgegeben (nur Studien-UID, Datum, Beschreibung).
+
+**Abgrenzung:** Der Broker *bietet* weiterhin kein C-MOVE/C-GET an (kein SCP,
+kein Presentation Context auf dem eigenen Port, siehe §9). Die Antwort auf „wer
+verteilt Bilder?" bleibt C-STORE. Der Prefetch ist ein Werkzeug auf Anforderung,
+kein automatischer Hintergrundlauf.
 
 ## 10a. Wogegen geprüft wurde (externe Kompatibilität)
 

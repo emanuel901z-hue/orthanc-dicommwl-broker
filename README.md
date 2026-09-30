@@ -6,7 +6,7 @@ Interface und Monitoring, aufgebaut auf:
 | Komponente | Pfad | Zweck |
 |---|---|---|
 | `orthanc-explorer-3-usable/` | Frontend (Submodule) | OE3-Fork (React SPA) — Konfigurations- und Monitoring-UI für den Broker |
-| `mwl-broker/` | Backend | Python-Service (FastAPI + pynetdicom): MWL-SCP (C-FIND-Proxy/Aggregator), C-STORE-SCP mit Quellen-Routing, Config-API, Query-/Store-Log, Prometheus-Metriken |
+| `mwl-broker/` | Backend | Python-Service (FastAPI + pynetdicom): MWL-SCP (C-FIND-Proxy/Aggregator), C-STORE-SCP mit Quellen-Routing, Config-API, Query-/Store-Log, Prometheus-Metriken — dazu HL7-ORM/ADT, GDT/BDT-Intake, UPS-RS (Subscriptions + WebSocket-Ereignisse) und Voraufnahmen-Prefetch |
 | `docker-compose.yml` | Stack | Orthanc + Postgres-Index + Broker + OE3 (produktionsfähige Basis) |
 | `docker-compose.demo.yml` | Overlay | Zwei Mock-RIS-Quellen + zweites PACS zum Testen des Routings |
 | `setup.sh` | Erstinbetriebnahme | Geführter Produktiv-Bootstrap: prüft Umgebung/`.env`/Ports, füllt fehlende oder schwache Werte, startet den Stack, richtet RBAC/AET-Whitelist/TLS/Alarmierung/Aufbewahrung ein — mit Sicherung und Rückfragen ([Details](docs/production-setup.md)) |
@@ -224,21 +224,37 @@ Swagger UI: `http://<broker>:8081/docs` · ReDoc: `/redoc` ·
 Spezifikation: `/openapi.json` — jede Operation mit Beschreibung, dokumentierten
 Parametern und Fehlerantworten (der Vertrag wird per Test erzwungen).
 
+### Schnittstellen für Fremdsysteme
+
+Neben der Konfigurations-API spricht der Broker mehrere Interface-Protokolle:
+
+| Interface | Weg | Zweck |
+|---|---|---|
+| **HL7 v2** (ORM/OMG/OMI + ADT) | `POST /hl7/orm`, `POST /hl7/adt`, optional MLLP-Listener | Aufträge und Patientendaten aus RIS/KIS |
+| **GDT/BDT** (deutsches XDT) | `POST /gdt/order` | Praxen ohne HL7 — nur Satzart `6302` ist ein Auftrag, Feldzuordnung über `gdt_field_map` |
+| **UPS-RS** (DICOMweb) | `/dicom-web/workitems`, Subscriptions + `WS /dicom-web/workitems/ws` | Arbeitsliste per REST für moderne Clients |
+| **Query/Retrieve (Client)** | `POST /prefetch` | Voraufnahmen per Studien-C-FIND + C-MOVE ans Befundziel ziehen |
+
+Grenzen (z. B. eigener Ereigniskanal statt Kanal-URL, kein angebotenes C-MOVE)
+stehen im [Conformance Statement](docs/dicom-conformance-statement.md) (§9, §9a, §9e).
+
 ## Stand
 
 **Broker v1.0.0** — alle Roadmap-Themen (P0/P1/P2) sind umgesetzt, dazu die
-UI-Härtung aus der DAU-Gap-Analyse, die MFA-Testumgebung und die i18n-Aufräumung.
-Die OpenAPI-Dokumentation ist vollständig (78 Operationen, jede mit Beschreibung,
+UI-Härtung aus der DAU-Gap-Analyse, die MFA-Testumgebung, die i18n-Aufräumung und
+die Schnittstellen-Ausbaustufen GDT/BDT, UPS-RS (Subscriptions + Ereigniskanal)
+und der Voraufnahmen-Prefetch.
+Die OpenAPI-Dokumentation ist vollständig (107 Operationen, jede mit Beschreibung,
 Parametern und Fehlerantworten). Aktuelle Zahlen:
-626 Backend-Tests (95 %), 606 Frontend-Tests, 30 Playwright-Tests im Stack-Lauf,
+656 Backend-Tests (95 %), 696 Frontend-Tests, 30 Playwright-Tests im Stack-Lauf,
 154 Checks im Deep-Audit und 225 im Screenshot-Walk — alles in `./ci-local.sh`
 verdrahtet.
 
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 626 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/ATNA/UPS-RS/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
-cd orthanc-explorer-3-usable && npm run test      # 606 Tests
+cd mwl-broker && python -m pytest tests -q        # 656 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/GDT/ATNA/UPS-RS inkl. Subscriptions/Voraufnahmen-Prefetch/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
+cd orthanc-explorer-3-usable && npm run test      # 696 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -250,7 +266,7 @@ npx playwright test --config=e2e/stack/playwright.stack.config.ts
 # läuft parallel zum regulären Stack; up → C-FIND-Smoke → Playwright → down -v):
 ./test-stack.sh          # alles; --keep lässt ihn laufen, --down räumt ab
 
-# Coverage (Broker-Code): backend 95 % (626 Tests), frontend Broker-UI siehe vitest --coverage
+# Coverage (Broker-Code): backend 95 % (656 Tests), frontend Broker-UI siehe vitest --coverage
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 cd orthanc-explorer-3-usable && npx vitest run --coverage
 

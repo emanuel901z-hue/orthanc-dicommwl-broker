@@ -98,6 +98,10 @@ PHI-Leitlinie: `PatientName` nie in Logs; `PatientID` nur wo für Matching nöti
 - `GET /notify/events`, `POST /notify/test` — Alerting (Webhook)
 - `GET/POST /local-items`, `PUT/DELETE /local-items/{id}` — lokale Worklist-Items
 - `POST /hl7/orm?dry_run=`, `GET /hl7/messages` — HL7-ORM-Schnittstelle (MLLP-Listener optional)
+- `POST /gdt/order?dry_run=` — GDT/BDT-Aufträge (Praxen ohne HL7); nur Satzart `6302`
+- `GET/POST /dicom-web/workitems`, `PUT …/{uid}/state`, `GET/POST/DELETE /dicom-web/workitems/subscriptions`,
+  `WS /dicom-web/workitems/ws` — UPS-RS (DICOMweb-Worklist inkl. Subscriptions und Ereigniskanal)
+- `POST /prefetch?dry_run=` — Voraufnahmen-Prefetch (Studien-C-FIND + C-MOVE als Client)
 - `GET/POST /station-rules`, `PUT/DELETE /station-rules/{id}` — Per-Station-Regeln
 - `POST /simulate/station` — Vorschau: welche Quellen sieht eine Konsole?
 - `GET /atna/stats`, `POST /atna/test`, `GET /atna/sample` — ATNA-Audit-Trail
@@ -288,6 +292,55 @@ beide. `NW` legt an, `XO`/`SC` ändert, `CA`/`OC` storniert; unmappbare Felder
 erscheinen als Warnung statt als halber Eintrag. Der Audit-Snapshot lokaler
 Einträge enthält bewusst **keine Patientendaten** (sonst läge PHI im
 Konfigurations-Export).
+
+### GDT/BDT (Praxen ohne HL7)
+
+Praxissysteme ohne HL7-Schnittstelle senden Aufträge im deutschen
+**GDT/BDT-Format** (XDT: eine Zeile je Feld, `<3-stellige Länge><4-stellige
+Feldnummer><Inhalt>`, die Länge zählt CR+LF mit). `POST /gdt/order` (mit
+Trockenlauf) nimmt einen solchen Satz entgegen.
+
+**Nur `6302` („Neue Untersuchung anfordern") ist ein Auftrag.** `6300`/`6301`
+tragen Stammdaten, `6310`/`6311` Untersuchungsergebnisse — sie werden mit
+Begründung abgewiesen (dieselbe Logik wie die `ORU^R01`-Prüfung auf dem
+HL7-Pfad). Der Patiententeil ist standardisiert (3000, 3101/3102, 3103, 3110,
+8402), eine **Auftragsnummer hat aber kein Standardfeld** — Hersteller machen
+sie konfigurierbar. Sie kommt deshalb aus der Einstellung `gdt_field_map` (JSON,
+semantische Schlüssel wie `accession`/`modality` oder beliebige DICOM-Keywords
+für Zusatzfelder); fehlt sie, wird eine stabile Nummer aus Sender, Patient und
+Tag abgeleitet und das gemeldet. Der Satz wird **nie roh gespeichert** (PHI) —
+der Intake-Log führt nur Metadaten. Die Satzart `gdt` erscheint im bestehenden
+HL7-Nachrichtenlog; beide Quellen münden in `local_worklist.apply_order`, damit
+HL7 und GDT nicht auseinanderlaufen.
+
+### UPS-RS (DICOMweb-Worklist)
+
+Moderne Clients holen die Arbeitsliste per REST statt DIMSE. Der Broker bietet
+einen pragmatischen Teil von PS3.18 §11: **Suche** (mit DICOM-Schlüsseln fragt
+sie die Upstream-Quellen über **dieselbe Aggregation** wie der DIMSE-Pfad ab —
+ein REST-Client sieht nie eine andere Liste als eine Modalität), **Abruf**,
+**Anlegen**, **Statuswechsel** sowie **Subscriptions** und einen eigenen
+**WebSocket-Ereigniskanal** (`workitem-created`/`workitem-state-change`).
+
+Der Work-Item-Antwortkörper trägt den vollständigen Attributsatz; der Zustand
+steht in `(0040,4041)` **und** im UPS-Standardattribut `(0074,1000)`. Grenzen
+(Kanal-URL aus PS3.18 §11.6, `deletion_lock`, Abruf-UID für Upstream-Einträge)
+stehen im [Conformance Statement §9a](docs/dicom-conformance-statement.md).
+
+### Voraufnahmen-Prefetch (Query/Retrieve als Client)
+
+Radiologen brauchen die Voraufnahmen am Befundplatz. `POST /prefetch` sucht einem
+Patienten seine früheren Studien am **Abfrageknoten** (Study-Root C-FIND, neueste
+zuerst, optional auf eine Modalität begrenzt, die aktuell gelesene Studie
+auslassbar) und zieht sie per **C-MOVE** auf ein **Ziel** — beides sind
+`pacs_target`-Zeilen (Name im Aufruf); der Abfrageknoten muss den Ziel-AE-Titel
+als Move-Destination kennen. Mit `dry_run` passiert nichts.
+
+Der Broker ist dabei **Client**, nie Server: er *bietet* kein C-MOVE/C-GET an
+(kein Presentation Context auf dem eigenen Port) — Bilder verteilt er weiterhin
+per C-STORE. Die Antwort ist PHI-frei (Studien-UID, Datum, Beschreibung; die
+Patient-ID ist die Abfrage und wird nicht zurückgegeben). Details und die
+angepasste Grenze: [Conformance Statement §9e](docs/dicom-conformance-statement.md).
 
 ### Per-Station-Filter und -Priorität
 
@@ -595,7 +648,8 @@ Gefundene und behobene Defekte:
 | 24 | **Feldweiser Merge** + konfigurierbares **HL7→DICOM-Mapping** | ✅ |
 | 25 | **DICOM Conformance Statement** + IHE-Aussage (durch Tests an den Code gebunden) | ✅ |
 | 26 | **Statistik/Reporting** (Auslastung, Fehler, Tagesreihe) + Migration-Guard | ✅ |
-| 27 | **UPS-RS** (DICOMweb-Worklist: Suche/Abruf/Anlegen/Statuswechsel) als Subset | ✅ |
+| 27 | **UPS-RS** (DICOMweb-Worklist: Suche inkl. Upstream, Abruf, Anlegen, Statuswechsel, Subscriptions + WebSocket-Ereignisse) | ✅ |
+| 28 | **GDT/BDT-Intake** (`POST /gdt/order`, nur Satzart `6302`) + **Voraufnahmen-Prefetch** (C-FIND/C-MOVE als Client) | ✅ |
 
 Die nächsten Ausbaustufen stehen in
 [docs/next-steps.md](docs/next-steps.md) (Funktion, Betrieb, Nachweise,

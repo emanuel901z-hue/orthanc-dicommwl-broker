@@ -23,8 +23,9 @@ Begründung.
 | **Feldweiser Merge + HL7→DICOM-Mapping** | vorhanden (Sprint 2) |
 | **DICOM Conformance Statement + IHE-Aussage** | vorhanden (Sprint 3) |
 | **Statistik/Reporting** | vorhanden (Sprint 4) |
-| **UPS-RS** (Suche/Abruf/Anlegen/Status) | vorhanden, **Subset** (Sprint 5) |
+| **UPS-RS** (Suche inkl. Upstream, Abruf, Anlegen, Status, Subscriptions + WebSocket-Events) | vorhanden (Sprint 5 + F3) |
 | **IID** (Invoke Image Display, RAD-106) in der UI | vorhanden — OE3 öffnet den Viewer über den IHE-Einstiegspunkt (Study- **und** Patient-basiert) |
+| **Voraufnahmen-Prefetch** | vorhanden (F4) — Studien-C-FIND + C-MOVE als **Client** auf ein Ziel; der Broker bietet kein C-MOVE an |
 | **Auftragskontext** (`GET /orders/context`) | vorhanden — Korrelationsdienst für einen MADO-Manifest-Erzeuger |
 | **MADO** (Manifest-basierter Zugriff) | **bewusst kein Akteur** — Content-Access ist PACS/VNA-Aufgabe; Einordnung und Berührungspunkte in der [IHE-Aussage §6](ihe-profile-statement.md#6-mado-manifest-based-access-to-dicom-objects--einordnung) |
 | **MWL-Interop-Schalter** je Quelle (`QueryRetrieveLevel` weglassen) | vorhanden — für fremde SCPs, die darauf matchen und sonst **nichts** liefern; Standard aus |
@@ -44,10 +45,10 @@ Begründung.
 |---|---|---|---|
 | F1 | ~~MRN-Merge / Identifier-Reconciliation~~ — **erledigt**: `ADT^A40` und manueller Eintrag, rücknehmbar, wirkt auf Arbeitsliste **und** Routing-Herkunft (Kette zyklensicher). Offen: A24/A47-Links und PIX/PDQ | — | ✅ |
 | F2a | ~~ADT `A08`/`A24`/`A47`, dazu `OMG^O19`~~ — **erledigt**: `A08` schreibt die Demografie der eigenen Arbeitslisten-Einträge um (nur die Felder, die die Nachricht trägt), `A24` speichert eine **Verknüpfung** (beide IDs bleiben gültig — es wird *nichts* umgeschrieben) und `A47` nimmt sie zurück. Beides über REST **und** MLLP; ein `A40` nach einem `A24` stuft zur Zusammenführung hoch. Offen: PIX/PDQ (siehe F2c) | — | ✅ |
-| F2b | **Weitere Datenquellen ohne HL7**: GDT/BDT, strukturierte Textdateien | Praxen und Häuser ohne HL7-Schnittstelle (GDT ist der deutsche Sonderweg) | mittel (je Quelle ein Adapter) |
+| F2b | ~~**Weitere Datenquellen ohne HL7**: GDT/BDT~~ — **erledigt**: `POST /gdt/order` nimmt einen GDT/BDT-Satz (deutsches XDT-Format) an, mit Trockenlauf. Nur Satzart `6302` („Neue Untersuchung anfordern") ist ein Auftrag; `6300`/`6301` (Stammdaten) und `6310`/`6311` (Befund) werden mit Begründung abgewiesen. Der Patiententeil ist standardisiert, die Auftragsnummer (kein Standardfeld) kommt aus `gdt_field_map` oder wird stabil abgeleitet. Beide Interfaces münden in `local_worklist.apply_order` — kein zweiter Schreibpfad. Offen: generische strukturierte Textdateien (GDT deckt den deutschen Sonderweg ab) | — | ✅ |
 | F2c | **PIX/PDQ** (Patient-Index abfragen statt auf ADT warten) | **Kandidat, bewusst nicht gebaut.** Nur sinnvoll, wenn im Haus ein Patient-Index steht (PIX-/PDQ-Supplier) — sonst toter Code; viele Häuser senden stattdessen ADT, und das ist seit F2a abgedeckt. Überschneidet sich mit PIR: `A40` ist das *Ereignis*, PIX die *Abfrage*. Wenn gebaut, dann **FHIR zuerst** (PIXm/PDQm, ITI-83/78: HTTP+JSON statt MLLP+HL7-Builder) — die v2-Varianten (ITI-9/21) nur für ein Haus mit altem v2-Index. Einsatzorte wären: Demografie für lokale Einträge nachladen, ID-Auflösung als Fallback in der C-FIND-Antwort, Betreiber-Werkzeug „ID auflösen" | mittel (v2), klein-mittel (FHIR) |
-| F3 | **UPS-RS vervollständigen**: Subscriptions/WebSocket-Events, vollständiger Attributsatz, Suche über Upstream | Für Clients, die den Standard voll ausreizen; heute bewusst als Grenze dokumentiert | groß |
-| F4 | **Voraufnahmen-Prefetch** (relevante Voruntersuchungen auf Anforderung ziehen) | Radiologen brauchen Voraufnahmen am Befundplatz; heute Aufgabe von PACS/VNA | groß (eigenes Werkzeug) |
+| F3 | ~~**UPS-RS vervollständigen**: Subscriptions/WebSocket-Events, vollständiger Attributsatz, Suche über Upstream~~ — **erledigt**: Subscriptions (REST: anlegen/listen/löschen, optional auf ein Work Item begrenzt) und ein **eigener WebSocket-Ereigniskanal** (`/dicom-web/workitems/ws`) für `workitem-created`/`workitem-state-change`; der Work-Item-Antwortkörper trägt den vollständigen Attributsatz, der Zustand steht in `(0040,4041)` **und** im UPS-Standardattribut `(0074,1000)`; die Suche fragt mit DICOM-Schlüsseln die **Upstream-Quellen über dieselbe Aggregation** wie der DIMSE-Pfad ab. Grenzen (im Conformance Statement §9a): die vom Subscriber mitgegebene Kanal-URL aus PS3.18 §11.6 ist nicht umgesetzt, `deletion_lock` wird gespeichert aber nicht durchgesetzt (kein UPS-RS-Löschen), Upstream-Einträge haben keine stabile Abruf-UID | — | ✅ |
+| F4 | ~~**Voraufnahmen-Prefetch**~~ — **erledigt**: `POST /api/v1/prefetch` (Studien-C-FIND + C-MOVE auf ein Ziel, mit Trockenlauf). Der Broker ist dabei Query/Retrieve-**Client** — er bietet weiterhin kein C-MOVE an (kein SCP). Zwei PACS-Ziele je Aufruf (Abfrageknoten + Ziel), die aktuell gelesene Studie auslassbar, Antwort PHI-frei. Grenze im [Conformance Statement §9e](dicom-conformance-statement.md) angepasst (vorher „Aufgabe von PACS/VNA") | — | ✅ |
 | F5 | **Tag-Morphing über Felder hinaus**: Sequenz-Operationen, Private Tags, Encoding-Transkodierung | Für Häuser mit exotischen Empfängern. **Getrennt halten:** Private Tags und Sequenzen sind machbar; Transkodierung widerspricht dem heutigen Statement („der Broker ändert keine Pixel") und ist die Stelle, an der man Bilddaten beschädigen kann — nur mit eigener Entscheidung | mittel |
 | F6 | ~~MPPS N-GET (Status zurücklesen) und MPPS-Statistik je Modalität~~ — **erledigt**: N-GET über echte Assoziation geprüft, `by_modality` in `/mpps/stats` + in der Karte | — | ✅ |
 | F7 | ~~Arbeitslisten-Vorschau für mehrere Stationen gleichzeitig~~ — **erledigt**: `POST /simulate/stations` + Matrix-Karte (sichtbare/verborgene Quellen je Station, Warnung bei leerer Liste) | — | ✅ |
@@ -190,9 +191,14 @@ DCMTK) ist gefahren; Teil 2 braucht einen IHE-Zugang.
     und [`training.md`](training.md), beide per Test an Alarme, Runbook-Kapitel,
     Skripte und die Hilfeseiten gebunden. Was bleibt, ist Betreiberarbeit:
     Reaktionszeiten und Eskalationswege ausfüllen.
-11. **F2b (GDT/BDT)**, **F5 (Tag-Morphing)** — nach Bedarf, je Haus.
-12. **F3/F4** nur, wenn ein konkreter Kunde sie verlangt. **C1** bleibt
-    zurückgestellt, **C5** bleibt Beobachtungsposten.
+11. ~~**F2b (GDT/BDT)**~~ — **erledigt**: `POST /gdt/order`, eine Satzart-Prüfung
+    (nur `6302` ist ein Auftrag) und `gdt_field_map` für den Standort; HL7 und
+    GDT teilen sich `apply_order`. **F5 (Tag-Morphing)** — nach Bedarf, je Haus.
+12. ~~**F3 (UPS-RS)**~~ — **erledigt**: Subscriptions + eigener WebSocket-
+    Ereigniskanal, vollständiger Attributsatz, Suche über Upstream. ~~**F4
+    (Prefetch)**~~ — **erledigt**: C-FIND/C-MOVE als Client, Grenze im
+    Conformance Statement angepasst. **C1** bleibt zurückgestellt, **C5** bleibt
+    Beobachtungsposten.
 13. ~~**B7 (Upstream-Basis)**~~ — **entschieden (30.09.2026): kein
     Upstream-Tracking mehr.** Der `upstream`-Remote ist entfernt, die Fork-README
     sagt es, MIT-Attribution bleibt. Die Option „eigenes Repo" bleibt
@@ -200,8 +206,8 @@ DCMTK) ist gefahren; Teil 2 braucht einen IHE-Zugang.
 
 ## 7. Was bewusst außerhalb bleibt
 
-Prefetch von Voraufnahmen, Transkodierung, De-Identifikation (PS3.15),
-Storage Commitment, C-MOVE/C-GET, Print — das sind Aufgaben von PACS, VNA oder
-einem Router. Sie sind im
+Transkodierung, De-Identifikation (PS3.15), Storage Commitment, C-MOVE/C-GET als
+*Dienst*, Print — das sind Aufgaben von PACS, VNA oder einem Router. Sie sind im
 [Conformance Statement §9](dicom-conformance-statement.md) mit Begründung
-aufgeführt.
+aufgeführt. **Prefetch** ist seit F4 umgesetzt — als Client (C-FIND/C-MOVE),
+nicht als angebotener Dienst (§9e).

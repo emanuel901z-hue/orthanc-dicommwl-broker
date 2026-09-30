@@ -359,6 +359,16 @@ Workspace betrifft:
 - **HL7-Feldindizes sind HL7-Feldnummern.** MSH ist die Ausnahme: MSH-1 *ist*
   das Trennzeichen, deshalb `_field(seg, n, msh=True)` (Index n−1). Alle anderen
   Segmente sind 1-basiert.
+- **Neue Auftragsquellen münden in `local_worklist.apply_order`.** Der
+  transport-spezifische Adapter entscheidet nur, *ob* eine Nachricht ein Auftrag
+  ist (HL7: `is_order_message`, GDT/BDT: `is_order_record` — nur `6302`); der
+  Schreibpfad ist einer. Zwei Adapter mit eigener Upsert-Logik driften
+  garantiert auseinander. Die Ablehnungsbegründung gehört in den Adapter
+  (`describe_message_type`/`describe_record_type`) und wird im Klartext geloggt.
+- **GDT-Zeilen sind `<Länge(3)><Feldnummer(4)><Inhalt>`**, und die Länge zählt
+  CR+LF mit (2 Zeichen). Die Auftragsnummer hat im GDT **kein Standardfeld** —
+  sie kommt aus `gdt_field_map` (JSON) oder wird stabil abgeleitet; nichts raten.
+  Den GDT-Satz nie roh speichern (PHI), nur Metadaten im Intake-Log.
 - **Lokale Einträge nie mit Patientendaten ins Änderungsprotokoll.** Der
   Audit-Snapshot enthält nur Termindaten; sonst landet PHI im
   Konfigurations-Export. Die Tabelle selbst ist der PHI-Speicher.
@@ -489,6 +499,16 @@ Workspace betrifft:
   `timeout_s`; ein toter RIS darf die Antwort an die Modality nicht verzögern.
 - **SpecificCharacterSet** je Quelle aus Config setzen (Default `ISO_IR 100`).
 - Metriken nur über `metrics.py` — keine ad-hoc-Prometheus-Clients.
+
+- **Der Broker bietet kein C-MOVE/C-GET an — er ist dort Client.** Kein
+  Presentation Context für C-MOVE auf dem eigenen Port; Bilder verteilt er per
+  C-STORE. Der **Voraufnahmen-Prefetch** (`prefetch.py`) ist die Ausnahme in der
+  anderen Richtung: Study-Root-C-FIND + C-MOVE als **SCU**. Wer dort etwas baut,
+  hält die Trennung ein und pflegt sie im Conformance Statement (§9/§9e) —
+  `tests/test_conformance_docs.py` bindet „C-MOVE" an das Dokument.
+- **Voraufnahmen-Prefetch ist PHI-frei in der Antwort.** Die Patient-ID ist die
+  Abfrage, nie das Ergebnis (nur Studien-UID, Datum, Beschreibung). Der
+  Audit-Snapshot enthält Knotennamen und Zähler, keine Patientendaten.
 
 ## Regeln für das Frontend
 
