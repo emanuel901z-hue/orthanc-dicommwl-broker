@@ -202,6 +202,31 @@ außerhalb des Repos zeigt (mode 600):
 Token rotieren = nur die Store-Datei neu schreiben:
 `printf 'https://<user>:<token>@github.com\n' > ~/.config/git/credentials-broker && chmod 600 …`
 
+## Regeln für den OE3-Fork (geteilte Basis mit einem zweiten Produkt)
+
+`orthanc-explorer-3-usable/` ist **nicht nur unser UI-Slice**: derselbe Fork ist
+die OE3-Basis eines zweiten, internen PACS-Projekts, das seinen eigenen privaten
+Stack parallel betreibt. Beide pushen auf `main` und konsumieren dieselben
+Komponenten. Die verbindlichen Regeln stehen im Fork selbst
+(`orthanc-explorer-3-usable/CLAUDE.md` → „Releases & Governance" und
+`orthanc-explorer-3-usable/docs/release-process.md`); hier nur, was den
+Workspace betrifft:
+
+- **Der Pin ist ein Tag, kein Branch-Head.** Das Submodule wird auf einen
+  getaggten Release-Commit (`vX.Y.Z`) gepinnt, nie auf `main`. Genau der rohe
+  Commit-Pin hat uns elf Commits Rückstand unbemerkt eingebracht.
+- **Erst Fork, dann Workspace — auch bei Tags.** Der Tag muss auf dem
+  öffentlichen Remote liegen, bevor der Pin im Workspace committet wird.
+- **Kein Produktname des anderen Projekts in unseren Dateien.** Fremde,
+  projekt-spezifische Integrationen (z. B. Quarantäne gegen ein Fremd-Backend)
+  bleiben im Fork **Opt-in** und werden im Broker-Stack **nicht** aktiviert —
+  sonst zeigt die Oberfläche einen Schalter, dessen Endpunkt hier 404 liefert.
+- **Fork-Änderungen und Tags nur über den Guard** (`./pre-push-fork.sh`).
+  Direktes `git push` auf den Fork ist untersagt.
+- **Beim Pin-Update mitverifizieren**: `docker compose up -d --build oe3`, dann
+  `node orthanc-explorer-3-usable/e2e/stack/verify-ui.cjs` gegen den laufenden
+  Stack — grün, bevor der Pin committet wird.
+
 ## Regeln für den OHIF-Viewer (`ohif-viewer/`, `extension-radiology-advanced/`)
 
 - **Build-Context ist das Repo-Root** (`context: .`, `dockerfile:
