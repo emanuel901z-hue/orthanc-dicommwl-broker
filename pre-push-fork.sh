@@ -5,12 +5,15 @@
 #   ./pre-push-fork.sh --repo .             # broker workspace repo
 #   ./pre-push-fork.sh --repo . --dry-run   # audit only
 #
-# Audits exactly what THIS push would publish (commits + files vs origin/main):
+# Audits exactly what THIS push would publish (commits + files + new tags vs
+# origin/main):
 #   1. clean worktree, correct remote (never upstream rhavekost/orthanc-explorer-3)
 #   2. file blacklist: .env*, databases, keys, screenshots, test-results, histories, …
 #   3. secret-pattern scan over the outgoing diff
 #   4. optional quick checks (--tests: tsc + vitest, fork only)
-# Then pushes only after explicit confirmation.
+# Then pushes the branch and any new annotated tags — after explicit confirmation.
+# Tags are part of the audit on purpose: the workspace pins the submodule to a
+# release tag, so the tag must exist on the public remote before the pin is pushed.
 #
 # Push order when both changed: fork FIRST (the workspace pins it as a
 # submodule — its commit must exist on the public remote before cloning works).
@@ -88,7 +91,15 @@ else
   STAT="$(git ls-files | wc -l) tracked files"
   DIFF_SOURCE="files"
 fi
-[ -n "$COMMITS" ] || { echo "── nothing to push ($BRANCH == $BASE_REF) ──"; exit 0; }
+# Annotated tags not yet on the remote (releases) — the workspace pins these.
+OUTGOING_TAGS=""
+while IFS= read -r t; do
+  [ -n "$t" ] || continue
+  git ls-remote --tags --exit-code origin "refs/tags/$t" >/dev/null 2>&1 || OUTGOING_TAGS="$OUTGOING_TAGS $t"
+done < <(git for-each-ref --merged HEAD --format='%(refname:short) %(objecttype)' refs/tags | awk '$2 == "tag" {print $1}')
+OUTGOING_TAGS="${OUTGOING_TAGS# }"
+
+[ -n "$COMMITS$OUTGOING_TAGS" ] || { echo "── nothing to push ($BRANCH == $BASE_REF) ──"; exit 0; }
 echo ""
 echo "── outgoing commits (would become public) ──"
 echo "$COMMITS" | sed 's/^/   /'
@@ -96,6 +107,12 @@ echo ""
 echo "── outgoing files ──"
 echo "$FILES" | sed 's/^/   /'
 echo "   ($STAT)"
+if [ -n "$OUTGOING_TAGS" ]; then
+  echo ""
+  echo "── outgoing tags (would become public) ──"
+  # shellcheck disable=SC2086
+  printf '%s\n' $OUTGOING_TAGS | sed 's/^/   /'
+fi
 
 # ── 4. file blacklist (outgoing diff only) ──────────────────────────────
 BLACKLIST='(^|/)\.env($|\.)|\.(db|sqlite|sqlite3)$|\.(pem|key|p12|pfx)$|(^|/)secrets?\.|(^|/)test-results/|(^|/)screenshots/|(^|/)shots/|(^|/)report/|(^|/)node_modules/|(^|/)\.venv/|(^|/)history_[0-9a-f]+\.md$|\.log$'
@@ -162,6 +179,15 @@ if [ "$ASSUME_YES" -eq 0 ]; then
 fi
 
 git push -u origin "$BRANCH"
+
+if [ -n "$OUTGOING_TAGS" ]; then
+  echo ""
+  echo "── pushing release tags ──"
+  # shellcheck disable=SC2086
+  printf '%s\n' $OUTGOING_TAGS | sed 's/^/   /'
+  # shellcheck disable=SC2086
+  git push origin $OUTGOING_TAGS
+fi
 
 REPO_PATH="$(echo "$ORIGIN_URL" | sed -E 's#(git@|https://)github.com[:/]##; s#\.git$##')"
 echo ""
