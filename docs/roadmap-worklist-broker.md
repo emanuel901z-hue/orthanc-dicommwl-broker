@@ -14,7 +14,7 @@ vollständige Konfigurations-UI in OE3. **Stand der Umsetzung: alle P0-, P1- und
 P2-Themen sind erledigt** (Sprints 1–8, siehe Umsetzungs-Log) plus die
 UI-Härtung aus der [DAU-Gap-Analyse](ui-dau-gap-analysis.md) (Sprints 9–11),
 die [MFA-Testumgebung](mfa-usability-test.md) und die i18n-Aufräumung.
-Aktuelle Zahlen (23.09.2026): **626** Backend-Tests (95 % Coverage), **606**
+Aktuelle Zahlen (23.09.2026): **701** Backend-Tests (95 % Coverage), **703**
 Frontend-Tests, **30** Playwright-Tests im Stack-Lauf, **154** Checks im
 Deep-Audit und **225** im Screenshot-Walk.
 

@@ -147,6 +147,43 @@ groups:
           description: "MLLP/Webhook-Konfiguration prüfen, offene Meldungen erneut senden."
           runbook: "docs/runbook.md#4-das-ris-bekommt-keine-statusmeldungen-mpps"
 
+      # ── Schnittstellen: Auftragsannahme und Voraufnahmen ─────────────────
+      - alert: MWLOrderIntakeRejected
+        expr: increase(mwl_hl7_messages_total{result="rejected"}[30m]) > 3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Der Broker weist HL7-Nachrichten ab"
+          description: "Ein RIS sendet etwas, das kein Auftrag ist (z. B. ORU^R01/Befunde) oder dem die Zugangsnummer fehlt. Nachrichtenprotokoll ansehen; wenn es Befunde sind, gehört der Versand beim RIS abgeschaltet."
+          runbook: "docs/runbook.md#10-auftragsannahme-und-prefetch"
+
+      - alert: MWLGdtRejected
+        expr: increase(mwl_gdt_records_total{result="rejected"}[30m]) > 3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Der Broker weist GDT-Sätze ab"
+          description: "Meist die falsche Satzart (nur 6302 ist ein Auftrag) oder ein fehlendes Patienten-/Auftragsmerkmal. Feldzuordnung (`gdt_field_map`) und Protokoll prüfen."
+          runbook: "docs/runbook.md#10-auftragsannahme-und-prefetch"
+
+      - alert: MWLPrefetchFailing
+        expr: increase(mwl_prefetch_total{result=~"error|busy"}[30m]) > 2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Voraufnahmen-Prefetch scheitert oder wird abgewiesen"
+          description: "`error`: der Abfrageknoten ist nicht erreichbar. `busy`: mehr Aufrufe als `prefetch_max_concurrency` — entweder ist gerade viel los oder ein Client ruft zu oft."
+          runbook: "docs/runbook.md#10-auftragsannahme-und-prefetch"
+
+      - alert: MWLPrefetchPartial
+        expr: increase(mwl_prefetch_studies_total{result="skipped"}[1h]) > 5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Prefetch bricht Studien wegen des Zeitbudgets ab"
+          description: "Studien wurden nicht geholt, weil `prefetch_timeout_s` aufgebraucht war. PACS-Laufzeit prüfen oder das Budget anheben."
+          runbook: "docs/runbook.md#10-auftragsannahme-und-prefetch"
+
       # ── Konfiguration / Zertifikate / Audit ──────────────────────────────
       - alert: MWLConfigError
         expr: mwl_config_findings{severity="error"} > 0

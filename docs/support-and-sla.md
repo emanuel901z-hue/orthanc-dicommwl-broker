@@ -33,7 +33,7 @@ ist bewusst konkret (jede Zeile ein Aufruf, kein Versprechen):
 | Fähigkeit | Wo | Wofür im Support |
 |---|---|---|
 | Health-Findings mit Ursache und Fix-Link | `GET /api/v1/health/config`, Seite *MWL Broker* | Fehlkonfiguration erkennen, **bevor** eine Modalität anruft |
-| 18 Alarmregeln + Grafana-Dashboard | `deploy/monitoring/` | Alarm → Runbook-Abschnitt (§4 unten) |
+| 22 Alarmregeln + Grafana-Dashboard | `deploy/monitoring/` | Alarm → Runbook-Abschnitt (§4 unten) |
 | Runbook mit den fünf echten Störungen | [`runbook.md`](runbook.md) | 1st-Level-Anleitung mit echten Befehlen |
 | C-ECHO-Matrix (Quellen *und* Ziele) | Seite *MWL Broker* | „Wer ist gerade nicht erreichbar?" |
 | C-FIND-Test je Quelle | Seite *Upstream sources* | „Liefert dieses RIS überhaupt eine Arbeitsliste?" |
@@ -44,6 +44,7 @@ ist bewusst konkret (jede Zeile ein Aufruf, kein Versprechen):
 | Query-/Store-Log (PHI-frei) | Seiten *MWL Broker*, *Store-Warteschlange* | „Kam die Abfrage an? Wurde das Bild weitergeleitet?" |
 | HL7-Nachrichtenprotokoll + Replay | Seite *Lokale Worklist* | „Hat das RIS den Auftrag geschickt?" — und erneut anwenden |
 | Spool-Seite: Retry je Eintrag, Verwerfen **mit Begründung** | Seite *Store-Warteschlange* | PACS-Ausfall nacharbeiten, ohne Bilder zu verlieren |
+| Voraufnahmen holen (Vorschau + C-MOVE), Ereignis-Abonnements | Seite *Voraufnahmen* | „Die alten Bilder fehlen am Befundplatz" — ohne Terminal |
 | Versionsnummer + Instanzname | `GET /api/v1/status` | „Welcher Build läuft? Welche Instanz antwortet?" |
 | OpenAPI/Swagger | `/docs`, `/openapi.json` | Integrationsfragen ohne Rückfrage klären |
 | Backup mit geprüftem Round-Trip | `deploy/backup.sh`, `deploy/backup-roundtrip-test.sh` | Wiederherstellung ist geübt, nicht gehofft |
@@ -87,6 +88,10 @@ Tabelle mit der Datei zusammen, damit sie nicht auseinanderläuft.
 | `MWLCertificateExpiring` | warning | Zertifikat erneuern (TLS-Karte), **vor** dem Ablauf | [§9](runbook.md#9-wo-man-nachsieht-kurzliste) |
 | `MWLAtnaDropping` | warning | Audit-Gegenstelle nicht erreichbar/zu langsam | [§9](runbook.md#9-wo-man-nachsieht-kurzliste) |
 | `MWLNotifyFailing` | warning | Webhook-Ziel prüfen — sonst bleibt jeder andere Alarm unbemerkt | [§9](runbook.md#9-wo-man-nachsieht-kurzliste) |
+| `MWLOrderIntakeRejected` | warning | Das RIS schickt Nachrichten, die keine Aufträge sind (Befunde?) — Protokoll lesen, Versand beim RIS klären | [§10](runbook.md#10-auftragsannahme-und-prefetch) |
+| `MWLGdtRejected` | warning | Falsche Satzart (nur `6302` ist ein Auftrag) oder fehlende Auftragsnummer — `gdt_field_map` prüfen | [§10](runbook.md#10-auftragsannahme-und-prefetch) |
+| `MWLPrefetchFailing` | warning | Abfrageknoten nicht erreichbar (`error`) oder zu viele gleichzeitige Aufrufe (`busy`) | [§10](runbook.md#10-auftragsannahme-und-prefetch) |
+| `MWLPrefetchPartial` | warning | Studien wurden wegen des Zeitbudgets nicht geholt — PACS-Laufzeit oder `prefetch_timeout_s` prüfen | [§10](runbook.md#10-auftragsannahme-und-prefetch) |
 
 ## 5. Wartung und Änderungen
 

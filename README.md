@@ -175,7 +175,7 @@ Vollständige Referenz mit fertigem Beispiel:
 | Dokument | Wofür |
 |---|---|
 | [`docs/runbook.md`](docs/runbook.md) | „was tun, wenn …" — die fünf echten Störungen mit Befehlen, Eskalationsgrenzen, Update-Ablauf |
-| [`docs/support-and-sla.md`](docs/support-and-sla.md) | Support-Konzept und SLA-**Vorlage**: Rollen, Störungsklassen, **Alarm → Maßnahme** (an die 18 Regeln gebunden), Wartung, Übergabe-Checkliste, was nicht abgedeckt ist |
+| [`docs/support-and-sla.md`](docs/support-and-sla.md) | Support-Konzept und SLA-**Vorlage**: Rollen, Störungsklassen, **Alarm → Maßnahme** (an die 22 Regeln gebunden), Wartung, Übergabe-Checkliste, was nicht abgedeckt ist |
 | [`docs/training.md`](docs/training.md) | Schulungsunterlagen: Zielgruppen, Abläufe (30 min bis 1 Tag), **12 Übungen mit überprüfbarem Ergebnis**, Abnahmekriterien, Kurztest |
 | [`docs/ha.md`](docs/ha.md) | Hochverfügbarkeit: was geteilt wird, der Spool-Claim, der Endpunkt, Grenzen |
 | [`docs/interop.md`](docs/interop.md) | Externe Kompatibilitätsprüfung: DCMTK + dcm4che als Fremdsoftware (23 Prüfungen, inkl. TLS/mTLS), Gazelle/Connectathon (offen), die gefundenen Fehler |
@@ -235,6 +235,10 @@ Neben der Konfigurations-API spricht der Broker mehrere Interface-Protokolle:
 | **UPS-RS** (DICOMweb) | `/dicom-web/workitems`, Subscriptions + `WS /dicom-web/workitems/ws` | Arbeitsliste per REST für moderne Clients |
 | **Query/Retrieve (Client)** | `POST /prefetch` | Voraufnahmen per Studien-C-FIND + C-MOVE ans Befundziel ziehen |
 
+Die Oberfläche hat dafür eine eigene Seite: **Voraufnahmen holen** (`/broker/prefetch`) —
+Patient suchen, Vorschau ansehen, dann holen; darunter die UPS-RS-Ereignis-Abonnements.
+Das GDT-Protokoll erscheint im HL7-Nachrichtenprotokoll (`transport: gdt`).
+
 Grenzen (z. B. eigener Ereigniskanal statt Kanal-URL, kein angebotenes C-MOVE)
 stehen im [Conformance Statement](docs/dicom-conformance-statement.md) (§9, §9a, §9e).
 
@@ -246,15 +250,15 @@ die Schnittstellen-Ausbaustufen GDT/BDT, UPS-RS (Subscriptions + Ereigniskanal)
 und der Voraufnahmen-Prefetch.
 Die OpenAPI-Dokumentation ist vollständig (107 Operationen, jede mit Beschreibung,
 Parametern und Fehlerantworten). Aktuelle Zahlen:
-656 Backend-Tests (95 %), 696 Frontend-Tests, 30 Playwright-Tests im Stack-Lauf,
+701 Backend-Tests (95 %), 703 Frontend-Tests, 30 Playwright-Tests im Stack-Lauf,
 154 Checks im Deep-Audit und 225 im Screenshot-Walk — alles in `./ci-local.sh`
 verdrahtet.
 
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 656 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/GDT/ATNA/UPS-RS inkl. Subscriptions/Voraufnahmen-Prefetch/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
-cd orthanc-explorer-3-usable && npm run test      # 696 Tests
+cd mwl-broker && python -m pytest tests -q        # 701 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/GDT/ATNA/UPS-RS inkl. Subscriptions/Voraufnahmen-Prefetch/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
+cd orthanc-explorer-3-usable && npm run test      # 703 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -266,7 +270,7 @@ npx playwright test --config=e2e/stack/playwright.stack.config.ts
 # läuft parallel zum regulären Stack; up → C-FIND-Smoke → Playwright → down -v):
 ./test-stack.sh          # alles; --keep lässt ihn laufen, --down räumt ab
 
-# Coverage (Broker-Code): backend 95 % (656 Tests), frontend Broker-UI siehe vitest --coverage
+# Coverage (Broker-Code): backend 95 % (701 Tests), frontend Broker-UI siehe vitest --coverage
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 cd orthanc-explorer-3-usable && npx vitest run --coverage
 

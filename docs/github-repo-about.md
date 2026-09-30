@@ -45,7 +45,7 @@ MWL-Aggregation über mehrere RIS/KIS mit Cache und Circuit Breaker, C-STORE-
 Routing mit Spool, MPPS-SCP mit Statusmeldung an das RIS, HL7 (ORM/OMG/OMI) und
 ADT/PIR, lokale Worklist, Stationsregeln, ATNA, DICOM-TLS/mTLS, RBAC,
 Aufbewahrung, Statistik, UPS-RS-Subset, Auftragskontext für MADO-Manifeste,
-Hochverfügbarkeit auf gemeinsamer DB — 626 Backend-Tests, extern verifiziert mit
+Hochverfügbarkeit auf gemeinsamer DB — 701 Backend-Tests, extern verifiziert mit
 DCMTK, dcm4che und DVTk (23/23 bzw. fünf PASSED-Szenarien).
 ```
 
@@ -106,9 +106,9 @@ Falls der Fork als PR angeboten wird, passt dieser Text:
 
 ## Tests
 
-- `npm run test` — 606 Unit-Tests (Vitest), `npm run i18n:check`, `tsc`, ESLint
+- `npm run test` — 703 Unit-Tests (Vitest), `npm run i18n:check`, `tsc`, ESLint
 - Playwright: 30 Tests im Stack-Lauf (Desktop + Mobile), `verify-ui.cjs`: 154 Checks
-- Backend des Brokers: 626 pytest-Tests (95 % Coverage) im Schwester-Repo
+- Backend des Brokers: 701 pytest-Tests (95 % Coverage) im Schwester-Repo
 ```
 
 ---

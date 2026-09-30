@@ -31,11 +31,12 @@ die **Form**: Zielgruppen, Ablauf, Übungen mit überprüfbarem Ergebnis.
 | Alarmregeln + Runbook-Zuordnung | [`support-and-sla.md`](support-and-sla.md) §4 | Alarm → Maßnahme |
 | Demo-/Test-Stack | `./build.sh --demo`, `./test-stack.sh` | Übungsplatz (nie produktiv) |
 
-Die zehn Seiten mit Hilfetext (ein Test hält diese Liste mit der Oberfläche
+Die elf Seiten mit Hilfetext (ein Test hält diese Liste mit der Oberfläche
 zusammen) — `overview` (Übersicht), `sources` (Quellen), `targets` (Ziele),
 `rules` (Routing-Regeln), `transforms` (Modify-Regeln), `stations`
 (Stationsregeln), `worklist` (lokale Worklist), `spool` (Store-Warteschlange),
-`audit` (Änderungsprotokoll), `settings` (Broker-Einstellungen).
+`prefetch` (Voraufnahmen holen), `audit` (Änderungsprotokoll), `settings`
+(Broker-Einstellungen).
 
 ## 3. Ablauf (Vorschlag)
 

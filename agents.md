@@ -436,6 +436,29 @@ Workspace betrifft:
   (MLLP-Listener, MPPS-SOP-Klasse) müssen die **Einstellung** lesen
   (`settings_service`), nicht nur den Env-Wert — sonst zeigt die UI einen
   wirkungslosen Schalter.
+- **Jede Einstellung muss den Container auch erreichen.** Es gibt kein
+  `env_file` — nur was in `x-broker-environment` (docker-compose.yml) steht,
+  kommt an; die ENV-Namen müssen `BROKER_` + Feldname in Großbuchstaben sein
+  (Feld `broker_aet` braucht deshalb einen Alias, sonst sucht pydantic
+  `BROKER_BROKER_AET` und `BROKER_AET` aus `.env`/`setup.sh` ist wirkungslos).
+  `tests/test_deployment_config.py` prüft beides: dokumentiert ⇒ durchgereicht,
+  und dokumentiert ⇒ wirklich gelesen (funktional, mit abweichendem Wert).
+- **Deployment-eigene Werte sind nicht per UI/Import änderbar.** `spool_dir`,
+  `tls_dir`, `tls_inbound_port`, `instance_id` (`settings_service.DEPLOYMENT_ONLY`)
+  müssen zum Compose-Mapping bzw. zum gemounteten Volume passen; ein Runtime-Wechsel
+  schreibt Bilder oder Zertifikate auf das ephemere Container-Dateisystem. Die API
+  antwortet 409, der Import überspringt sie, die UI zeigt sie schreibgeschützt.
+  Neue Volumes im Compose immer mitdenken (Spool **und** TLS).
+- **Wer einen `dry_run`-Schalter anbietet, gehört in `rbac.DRY_RUN_POST_PATTERNS`.**
+  Sonst ist ein Nur-Lese-Bediener im `enforce`-Modus von genau dem sicheren
+  Werkzeug ausgesperrt. `test_rbac.py` leitet die Liste aus der OpenAPI ab —
+  ein neuer Endpunkt mit `dry_run` fällt dort auf.
+- **Lange Operationen dürfen weder Worker noch DB-Pool blockieren.** Der
+  Prefetch hält bewusst **keine** Request-Session über den C-MOVE (nur eine
+  kurze Session für den Audit-Eintrag), hat ein Gesamtbudget und eine
+  Nebenläufigkeitsgrenze. Neue blockierende Integrationen genauso bauen —
+  ein Request-Handler, der minutenlang einen Worker hält, legt `/healthz` mit
+  und der Container startet neu, obwohl er nur beschäftigt ist.
 - **Fremdsoftware mit absolutem Pfad aufrufen.** `~/.local/bin` enthält
   **Python-Wrapper** mit den Namen der DCMTK-Werkzeuge (`findscu`, `storescu`,
   `echoscu`, `storescp` — es sind pynetdicom-CLI-Apps) und liegt **vor**

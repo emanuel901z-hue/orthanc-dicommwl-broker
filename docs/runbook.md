@@ -250,3 +250,60 @@ Datenbank defekt.
 | Wie ausgelastet ist der Broker? | Übersicht → *Auslastung und Fehler* (`/api/v1/stats/overview`) |
 | Ist etwas grundsätzlich falsch konfiguriert? | Übersicht → *Konfigurations-Check* (`/health/config`) |
 | Was macht die DICOM-Strecke gerade? | `/metrics` (Prometheus) |
+
+## 10. Auftragsannahme und Prefetch
+
+### 10a. „Das Praxissystem schickt Aufträge, sie kommen nicht an" (GDT/BDT)
+
+**Erkennung:** Alarm `MWLGdtRejected`, oder `POST /api/v1/gdt/order?dry_run=true` mit
+dem Originalsatz liefert `422` mit Begründung.
+
+1. **Ist es überhaupt ein Auftrag?** Nur Satzart `6302` („Neue Untersuchung
+   anfordern") wird angenommen. `6300`/`6301` sind Stammdaten, `6310`/`6311`
+   Befunde — die Antwort sagt das im Klartext. Schickt die Praxis die falsche
+   Satzart, ist die Einstellung dort zu korrigieren, nicht hier.
+2. **Fehlt die Auftragsnummer?** GDT hat dafür **kein Standardfeld**. Ohne
+   `gdt_field_map` (Broker-Einstellungen, JSON wie `{"accession":"6200"}`) wird
+   eine Nummer aus Sender, Patient und Tag abgeleitet; die Antwort nennt sie in
+   `warnings`. Soll die Praxisnummer erscheinen, die Feldnummer dort eintragen.
+3. **Feldnummern prüfen:** mit `dry_run=true` zeigt die Antwort unter `parsed`
+   jedes gelesene Feld — so sieht man, was der Parser gefunden hat, ohne zu
+   schreiben.
+4. **Protokoll:** Seite *Lokale Worklist* → HL7-Panel; GDT-Sätze stehen dort mit
+   `transport: gdt`.
+
+### 10b. „Das RIS schickt Nachrichten, der Broker weist sie ab" (HL7)
+
+**Erkennung:** Alarm `MWLOrderIntakeRejected`.
+
+- `ORU^R01` (Befund) und `ORM^O02`/`OMG^O20` (Auftragsantwort) werden **bewusst**
+  nicht angewandt — sie tragen OBR-Segmente und würden sonst Arbeitslisten-Einträge
+  erzeugen, die niemand bestellt hat. Die Antwort nennt den Grund. Wenn ein RIS
+  regelmäßig Befunde schickt: dort den Versand an den Broker abschalten.
+- `ADT^…` gehört auf `/api/v1/hl7/adt` (REST) bzw. wird über MLLP automatisch
+  dorthin geroutet.
+- Fehlt die Zugangsnummer, listet die Antwort die Parser-Warnungen
+  (`OBR-3`/`ORC-3`/`OBR-2` beim RIS prüfen).
+
+### 10c. „Die Voraufnahmen kommen nicht am Befundplatz an" (Prefetch)
+
+**Erkennung:** Alarm `MWLPrefetchFailing` (Fehler/abgewiesen) oder
+`MWLPrefetchPartial` (Zeitbudget aufgebraucht).
+
+1. **Erst schauen, dann holen:** `POST /api/v1/prefetch?dry_run=true` mit
+   `patient_id`, `query_node` und `destination` listet die gefundenen Studien.
+   Kommt die Liste leer, kennt der **Abfrageknoten** keine Voraufnahmen — dort
+   weitersuchen (nicht am Broker).
+2. **`422 unknown query node/destination`:** die Namen müssen `pacs_target`-Zeilen
+   sein (Seite *Ziele*).
+3. **`429`:** mehr Aufrufe als `prefetch_max_concurrency` (Standard 2). Das ist
+   Absicht — jeder Aufruf blockiert einen Request-Worker und eine
+   PACS-Assoziation. Kommt es häufig vor, ruft ein Client zu oft; nicht einfach
+   das Limit hochsetzen.
+4. **`skipped` in der Antwort:** das Zeitbudget (`prefetch_timeout_s`, Standard
+   120 s für den **ganzen** Aufruf) war aufgebraucht. Einzelne Studien erneut
+   holen oder das Budget anheben — aber im Blick behalten, dass das Budget einen
+   Worker bindet.
+5. **`ok=false` in `moved`:** der Statuscode steht im Klartext (`error`). Häufigster
+   Fall: `move destination unknown to the query node` — der Ziel-AE-Titel ist am
+   PACS nicht als Move-Ziel eingetragen. Das ist PACS-Konfiguration, nicht Broker.
