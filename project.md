@@ -467,10 +467,15 @@ Endpoint und Descriptions für die Kern-Schemas.
   - `pages/TargetsPage` — Store-Ziele CRUD (+ Default, C-ECHO)
   - `pages/RulesPage` — Routing-Regeln (Quelle → Ziel, Priorität, Toggle)
   - `pages/TransformsPage` — Modify-Regeln (Tag-Operationen, Scope, Priorität)
-  - `pages/BrokerSettingsPage` — Laufzeit-Settings (ENV-Default + Override/Reset)
+  - `pages/BrokerSettingsPage` — Laufzeit-Settings (ENV-Default + Override/Reset);
+    deployment-eigene Werte (Spool-Verzeichnis, TLS-Port, Instanzname) werden
+    **schreibgeschützt** angezeigt — sie müssen zum Compose-Mapping passen
+  - `pages/PrefetchPage` — **Voraufnahmen holen**: Patienten-ID, Abfrageknoten,
+    Ziel, Vorschau (C-FIND) und erst danach „Holen" (C-MOVE); darunter die
+    UPS-RS-Ereignis-Abonnements
   - `hooks/use-broker-writes` — auditierte Writes (BEFORE+AFTER, wie `src/actions/`)
-- Routen `/broker{,/sources,/targets,/rules,/transforms,/settings}` als
-  Sidebar-Untergruppe; i18n en/de (Rest per fallbackLng)
+- Routen `/broker{,/sources,/targets,/rules,/transforms,/settings,/spool,/worklist,/stations,/prefetch,/audit}`
+  als Sidebar-Untergruppe; i18n en/de (Rest per fallbackLng)
 
 ## Repo-Layout
 
