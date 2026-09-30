@@ -234,6 +234,13 @@ Workspace betrifft:
   denselben Commit zeigen. Weicht es ab: `git submodule update --init`.
 - **Der Branch `feat/mwl-broker` ist stillgelegt** (vollständig in `main`
   gemerged). Immer auf `main` arbeiten, nie auf der alten Linie.
+- **Der Upstream wird nicht mehr verfolgt** (Entscheidung 30.09.2026). Wir sind
+  weit voraus (105 Commits, Studien-/Serien-Ebene umgebaut, Broker-Slice ergänzt);
+  Upstreams spätere `dev`-Linie wird **bewusst nicht** geholt. Der
+  `upstream`-Remote ist entfernt — **nicht wieder hinzufügen und nicht mergen**.
+  Brauchen wir doch einen einzelnen Upstream-Fix: Remote temporär hinzufügen und
+  **gezielt cherry-picken**, nie mergen. MIT-Attribution und Copyright-Notiz
+  bleiben. Begründung und Randbedingungen: `docs/next-steps.md` (B7).
 
 ## Regeln für den OHIF-Viewer (`ohif-viewer/`, `extension-radiology-advanced/`)
 

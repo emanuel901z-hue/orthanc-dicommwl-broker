@@ -64,7 +64,7 @@ Begründung.
 | B4 | ~~Monitoring-Vorlage~~ — **erledigt**: `deploy/monitoring/prometheus-rules.yml` (18 Regeln) + `grafana-dashboard.json` (14 Panels), durch `test_monitoring_config.py` an die echten Metriknamen gebunden | — | ✅ |
 | B5 | ~~Lasttest~~ — **erledigt**: [`loadtest.md`](loadtest.md) — Harness (`scripts/loadtest.py`), Messwerte, Grenzen. **Zwei echte Nebenläufigkeitsfehler gefunden und behoben** (Breaker-Zeile und Cache-Snapshot kollidierten unter parallelen Abfragen; eine Arbeitslisten-Abfrage kam als DIMSE-Fehler zurück), das Assoziationslimit als harte Grenze belegt. Offen: Wiederholung auf der Zielhardware und ein Soak-Test | — | ✅ |
 | B6 | ~~Selbstüberwachung~~ — **erledigt**: Health-Findings `spool_disk_low`/`spool_disk_tight`/`spool_dir_unusable`/`db_slow` + Alarmregel | — | ✅ |
-| B7 | **Upstream-Basis prüfen** — offen: unser Fork steht auf `upstream/main` (2026-04-12); Upstreams Entwicklung lief auf `upstream/dev` weiter (**80 Commits, 37 vom Upstream-Autor**, Stand 2026-07-24, 31 Dateien in `src/`). Unser Fork ist voll funktional und grün — es fehlt nur Upstreams April→Juli-Arbeit. Entscheidung: `main` weiter tracken, `dev` mergen (konfliktreich) oder sich vom Fork lösen. Details in [B7](#b7--upstream-basis-wie-weit-sind-wir-weg-und-wollen-wir-überhaupt-noch-fork-sein) | Wissensverlust vermeiden; „worauf bauen wir eigentlich?" | klein (Entscheidung) / groß (Merge) |
+| B7 | ~~Upstream-Basis prüfen~~ — **entschieden (30.09.2026): wir folgen dem Upstream nicht mehr.** Unser Fork steht auf `upstream/main` (2026-04-12) und ist 105 Commits voraus; Upstreams spätere Arbeit liegt auf dessen `dev` (2026-07-24, 80 Commits) und wird **bewusst nicht** geholt. Der `upstream`-Remote ist entfernt, die Fork-README sagt es jetzt, MIT-Attribution bleibt. Details in [B7](#b7--upstream-basis-wie-weit-sind-wir-weg-und-wollen-wir-überhaupt-noch-fork-sein) | — | ✅ |
 
 ### B1 — was die Vorbedingung war, und was daraus wurde
 
@@ -127,12 +127,22 @@ während `main` bei Upstream stehen blieb.
 - **MIT bleibt MIT**: Copyright-Notiz und Herkunftshinweis müssen erhalten bleiben,
   auch ohne Fork-Label (README „Fork of …" → „Based on …").
 
-**Empfehlung:** **Entscheidung aufschieben, nichts migrieren.** Der Fork-Abstand ist
-ein Wissens-, kein Funktionsproblem. Lösen wir uns, dann bewusst als **Rename**
-(billig, Redirects) oder als neues Repo mit **koordiniertem Umzug** gemeinsam mit der
-anderen Seite — nicht als Nebenprodukt. Zuerst zu klären: **wollen wir Upstream
-überhaupt noch folgen?** Wenn nein, ist der `upstream`-Remote eine Zeile Arbeit und
-der Rest Kosmetik.
+**Entscheidung (30.09.2026): wir folgen dem Upstream nicht mehr.** Wir sind
+ohnehin weit voraus (105 Commits, Studien-/Serien-Ebene umgebaut, Broker-Slice
+ergänzt) — Upstreams `dev`-Linie zu mergen wäre ein Umbau, kein Update. Der
+`upstream`-Remote ist entfernt, die Fork-README sagt es jetzt ausdrücklich, und
+die MIT-Attribution bleibt.
+
+**Damit erledigt:** Option 1 (Status quo) ist **nicht** gewählt, Option 2
+(`dev` mergen) ist **bewusst abgelehnt**. Option 3 (vom Fork lösen) bleibt
+**Kosmetik und ist zurückgestellt** — das Fork-Label stört nicht; ein Umzug wäre
+eine projektübergreifende Migration (Submodule-URL, Pin, CI, Remote der anderen
+Seite) und wird nur gemacht, wenn ein konkreter Anlass es verlangt. Die
+technischen Randbedingungen dafür stehen oben und bleiben gültig.
+
+**Wieder aufnehmen, wenn:** ein Upstream-Fix existiert, den wir wirklich
+brauchen (dann Remote neu hinzufügen und gezielt cherry-picken — **nicht**
+mergen), oder das Fork-Label aus Produkt-/Beschaffungsgründen stört.
 
 ## 4. Nachweise
 
@@ -183,9 +193,10 @@ DCMTK) ist gefahren; Teil 2 braucht einen IHE-Zugang.
 11. **F2b (GDT/BDT)**, **F5 (Tag-Morphing)** — nach Bedarf, je Haus.
 12. **F3/F4** nur, wenn ein konkreter Kunde sie verlangt. **C1** bleibt
     zurückgestellt, **C5** bleibt Beobachtungsposten.
-13. **B7 (Upstream-Basis)** — nur die **Entscheidung** ist fällig („wollen wir
-    Upstream noch folgen?"), kein Aufwand. Ein Merge von `upstream/dev` oder eine
-    Repo-Migration wäre ein eigenes Vorhaben und erst nach dieser Antwort sinnvoll.
+13. ~~**B7 (Upstream-Basis)**~~ — **entschieden (30.09.2026): kein
+    Upstream-Tracking mehr.** Der `upstream`-Remote ist entfernt, die Fork-README
+    sagt es, MIT-Attribution bleibt. Die Option „eigenes Repo" bleibt
+    zurückgestellt (Kosmetik, nur bei konkretem Anlass).
 
 ## 7. Was bewusst außerhalb bleibt
 
