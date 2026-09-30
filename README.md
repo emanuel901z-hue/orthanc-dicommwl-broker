@@ -275,7 +275,18 @@ git config core.hooksPath .githooks
 GitHub-CI (`.github/workflows/ci.yml`) läuft als PR-Gate auf `main`/`develop`
 sowie manuell: pytest, lint+tsc+vitest, Docker-E2E-Stack, audit-ci+pip-audit,
 Gitleaks, Semgrep-SAST, Trivy-Container-Scan, License-Check, Markdownlint.
-Privates OE3-Submodule benötigt Secret `SUBMODULE_PAT` (read access).
+Das OE3-Submodule ist **öffentlich** — `git clone --recurse-submodules`
+funktioniert ohne Token; die CI nutzt `secrets.SUBMODULE_PAT || secrets.GITHUB_TOKEN`,
+das Secret ist nur noch ein optionaler Fallback.
+
+Das Submodule wird auf einen **Release-Tag** gepinnt (nicht auf einen
+Branch-Head). Nach einem `git pull` also gepinnt aktualisieren —
+**ohne `--remote`**, sonst zieht man den Branch-Head und der Pin driftet:
+
+```bash
+git submodule update --init          # bleibt auf dem gepinnten Tag
+git submodule status                 # muss z. B. fc29d07… (v2.6.1) zeigen
+```
 
 ## Status
 

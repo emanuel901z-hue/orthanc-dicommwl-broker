@@ -226,6 +226,14 @@ Workspace betrifft:
 - **Beim Pin-Update mitverifizieren**: `docker compose up -d --build oe3`, dann
   `node orthanc-explorer-3-usable/e2e/stack/verify-ui.cjs` gegen den laufenden
   Stack — grün, bevor der Pin committet wird.
+- **Nach einem `git pull` nur gepinnt aktualisieren**: `git submodule update
+  --init` — **ohne `--remote`**. `--remote` zieht den Branch-Head (`main`) und
+  reißt den Pin auf, also genau den Drift, den die Tag-Regel verhindert.
+  Kurzkontrolle: `git submodule status` muss den gepinnten Tag nennen
+  (z. B. `… (v2.6.1)`), und `git ls-tree HEAD orthanc-explorer-3-usable` muss
+  denselben Commit zeigen. Weicht es ab: `git submodule update --init`.
+- **Der Branch `feat/mwl-broker` ist stillgelegt** (vollständig in `main`
+  gemerged). Immer auf `main` arbeiten, nie auf der alten Linie.
 
 ## Regeln für den OHIF-Viewer (`ohif-viewer/`, `extension-radiology-advanced/`)
 
