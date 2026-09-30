@@ -64,6 +64,7 @@ Begründung.
 | B4 | ~~Monitoring-Vorlage~~ — **erledigt**: `deploy/monitoring/prometheus-rules.yml` (18 Regeln) + `grafana-dashboard.json` (14 Panels), durch `test_monitoring_config.py` an die echten Metriknamen gebunden | — | ✅ |
 | B5 | ~~Lasttest~~ — **erledigt**: [`loadtest.md`](loadtest.md) — Harness (`scripts/loadtest.py`), Messwerte, Grenzen. **Zwei echte Nebenläufigkeitsfehler gefunden und behoben** (Breaker-Zeile und Cache-Snapshot kollidierten unter parallelen Abfragen; eine Arbeitslisten-Abfrage kam als DIMSE-Fehler zurück), das Assoziationslimit als harte Grenze belegt. Offen: Wiederholung auf der Zielhardware und ein Soak-Test | — | ✅ |
 | B6 | ~~Selbstüberwachung~~ — **erledigt**: Health-Findings `spool_disk_low`/`spool_disk_tight`/`spool_dir_unusable`/`db_slow` + Alarmregel | — | ✅ |
+| B7 | **Upstream-Basis prüfen** — offen: unser Fork steht auf `upstream/main` (2026-04-12); Upstreams Entwicklung lief auf `upstream/dev` weiter (**80 Commits, 37 vom Upstream-Autor**, Stand 2026-07-24, 31 Dateien in `src/`). Unser Fork ist voll funktional und grün — es fehlt nur Upstreams April→Juli-Arbeit. Entscheidung: `main` weiter tracken, `dev` mergen (konfliktreich) oder sich vom Fork lösen. Details in [B7](#b7--upstream-basis-wie-weit-sind-wir-weg-und-wollen-wir-überhaupt-noch-fork-sein) | Wissensverlust vermeiden; „worauf bauen wir eigentlich?" | klein (Entscheidung) / groß (Merge) |
 
 ### B1 — was die Vorbedingung war, und was daraus wurde
 
@@ -88,6 +89,50 @@ keiner. Die drei Punkte, die im Code geprüft wurden, sind jetzt abgearbeitet:
 **Was außerhalb bleibt:** VIP/Load Balancer einrichten, Postgres-Failover, ein
 Lasttest *mit* zwei Instanzen. Der Broker kann seine eigene Adresse nicht
 bewegen — das ist Netzwerk- und Deployment-Aufgabe.
+
+### B7 — Upstream-Basis: wie weit sind wir weg, und wollen wir überhaupt noch „Fork" sein?
+
+**Befund** (gemessen 30.09.2026):
+
+| Ref | Stand | Commits, die uns fehlen |
+|---|---|---|
+| `upstream/main` | 2026-04-12 | 0 — hierauf basiert unser Fork |
+| `upstream/dev` | 2026-07-24 | **80** (37 von `rhavekost`, dem Upstream-Autor; 31 Dateien in `src/`, +1552/−148) |
+| unser `main` | 2026-09-30 | — (105 Commits vor `upstream/main`, getaggt `v2.6.1`) |
+
+Unser Fork ist **in sich geschlossen und voll funktional** (626 Backend-,
+696 Frontend-Tests, DOM-Audit 155/155, C-FIND live gegen den Broker). Es fehlt
+ausschließlich Upstreams Arbeit zwischen April und Juli — die lief auf `dev`,
+während `main` bei Upstream stehen blieb.
+
+**Drei Optionen:**
+
+1. **So lassen** (Status quo): wir tracken `upstream/main`. Kein Aufwand. Risiko:
+   wir bauen dauerhaft auf einem Stand, den Upstream selbst nicht mehr fortschreibt.
+2. **`upstream/dev` mergen**: 80 Commits holen. Konfliktreich — wir haben
+   `src/features` stark umgebaut. Eigener Vorgang mit eigenem Zeitfenster, kein Nebenbei.
+3. **Vom Fork lösen** — siehe unten.
+
+**Zur Option „eigenes Repo" (technisch):**
+
+- Das Repo ist auf GitHub ein **Fork** (`fork: true`, parent
+  `rhavekost/orthanc-explorer-3`, MIT). **GitHub kann nicht „unforken"**: das Label
+  „forked from" verschwindet nur, wenn man die Historie in ein **neues** Repo pusht.
+- **Umbenennen** (z. B. `oe3-usable`) ist billiger als ein neues Repo: GitHub leitet
+  die alte URL weiter — es bleibt aber ein Fork.
+- **Jede** dieser Varianten ist eine **projektübergreifende Migration**: das Repo ist
+  die gemeinsame Basis mit dem internen PACS-Projekt. Submodule-URL (`.gitmodules`),
+  der Pin im Workspace, die CI und der Remote auf der anderen Seite müssen mitziehen —
+  genau die Koordination, die wir gerade glattgezogen haben.
+- **MIT bleibt MIT**: Copyright-Notiz und Herkunftshinweis müssen erhalten bleiben,
+  auch ohne Fork-Label (README „Fork of …" → „Based on …").
+
+**Empfehlung:** **Entscheidung aufschieben, nichts migrieren.** Der Fork-Abstand ist
+ein Wissens-, kein Funktionsproblem. Lösen wir uns, dann bewusst als **Rename**
+(billig, Redirects) oder als neues Repo mit **koordiniertem Umzug** gemeinsam mit der
+anderen Seite — nicht als Nebenprodukt. Zuerst zu klären: **wollen wir Upstream
+überhaupt noch folgen?** Wenn nein, ist der `upstream`-Remote eine Zeile Arbeit und
+der Rest Kosmetik.
 
 ## 4. Nachweise
 
@@ -138,6 +183,9 @@ DCMTK) ist gefahren; Teil 2 braucht einen IHE-Zugang.
 11. **F2b (GDT/BDT)**, **F5 (Tag-Morphing)** — nach Bedarf, je Haus.
 12. **F3/F4** nur, wenn ein konkreter Kunde sie verlangt. **C1** bleibt
     zurückgestellt, **C5** bleibt Beobachtungsposten.
+13. **B7 (Upstream-Basis)** — nur die **Entscheidung** ist fällig („wollen wir
+    Upstream noch folgen?"), kein Aufwand. Ein Merge von `upstream/dev` oder eine
+    Repo-Migration wäre ein eigenes Vorhaben und erst nach dieser Antwort sinnvoll.
 
 ## 7. Was bewusst außerhalb bleibt
 
