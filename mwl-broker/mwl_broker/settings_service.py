@@ -4,6 +4,7 @@ The deployment (.env) stays the source of truth for defaults; the UI may
 override individual keys at runtime. `reset()` drops the override so the ENV
 value applies again. Unknown keys are rejected (allowlist, not free-form).
 """
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -157,6 +158,28 @@ KNOWN: dict[str, tuple[str, str]] = {
     "hl7_default_modality": (
         "str",
         "Modality used when an ORM message carries none.",
+    ),
+    "gdt_enabled": (
+        "bool",
+        "Accept GDT/BDT orders (practices without an HL7 interface) on the REST endpoint.",
+    ),
+    "gdt_default_station_aet": (
+        "str",
+        "Scheduled station used when a GDT record carries no station AE title.",
+    ),
+    "gdt_default_modality": (
+        "str",
+        "Modality used when a GDT record carries none.",
+    ),
+    "gdt_field_map": (
+        "json",
+        "Site-specific GDT field numbers as JSON, e.g. {\"accession\":\"6200\"}. "
+        "Empty = only the standard fields are read.",
+    ),
+    "prefetch_timeout_s": (
+        "int",
+        "Timeout of one prefetch C-MOVE in seconds (the PACS sends the study "
+        "while the broker waits).",
     ),
     "atna_enabled": (
         "bool",
@@ -350,6 +373,7 @@ _INT_RANGES: dict[str, tuple[int, int]] = {
     "ha_heartbeat_s": (1, 300),
     "ha_instance_timeout_s": (10, 3600),
     "cache_stale_max_s": (0, 86400),
+    "prefetch_timeout_s": (5, 3600),
     "cache_max_items": (1, 100000),
     "breaker_fail_threshold": (1, 100),
     "breaker_open_seconds": (5, 3600),
@@ -387,6 +411,22 @@ def _validate_path(value: str) -> list[str]:
     return []
 
 
+def _validate_json_object(value: str) -> list[str]:
+    """A JSON setting must be an object of strings — a field map, not free text."""
+    if not value.strip():
+        return []  # empty = the built-in defaults apply
+    try:
+        parsed = json.loads(value)
+    except ValueError as exc:
+        return [f"not valid JSON: {exc}"]
+    if not isinstance(parsed, dict):
+        return ["must be a JSON object, e.g. {\"accession\": \"6200\"}"]
+    bad = [k for k, v in parsed.items() if not isinstance(v, str)]
+    if bad:
+        return [f"values must be strings: {', '.join(bad)}"]
+    return []
+
+
 def validate_value(key: str, raw: str) -> list[str]:
     """Return a list of validation errors (empty = valid)."""
     if key not in KNOWN:
@@ -414,6 +454,8 @@ def validate_value(key: str, raw: str) -> list[str]:
         return _validate_events(raw)
     elif kind == "path":
         return _validate_path(raw)
+    elif kind == "json":
+        return _validate_json_object(raw)
     elif kind == "aets":
         bad = [p for p in (x.strip() for x in raw.split(",")) if p and not _AET_RE.match(p)]
         if bad:

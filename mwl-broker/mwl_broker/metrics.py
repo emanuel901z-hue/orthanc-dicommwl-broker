@@ -46,6 +46,9 @@ MPPS_FORWARDED = Counter(
 HL7_MESSAGES = Counter(
     "mwl_hl7_messages_total", "Inbound HL7 messages", ["transport", "result"]
 )
+GDT_RECORDS = Counter(
+    "mwl_gdt_records_total", "Inbound GDT/BDT records", ["result"]
+)
 ATNA_SENT = Counter("mwl_atna_sent_total", "ATNA audit messages delivered", ["event"])
 ATNA_FAILED = Counter("mwl_atna_failed_total", "ATNA audit messages that failed", ["event"])
 ATNA_DROPPED = Counter("mwl_atna_dropped_total", "ATNA audit messages dropped (queue full)")

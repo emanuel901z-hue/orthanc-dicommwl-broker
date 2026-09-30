@@ -239,11 +239,12 @@ def log_hl7(transport: str, parsed: dict, action: str, error: str = "",
 def upsert_from_hl7(parsed: dict, *, transport: str = "http",
                     default_station_aet: str = "", default_modality: str = "",
                     raw: str = "") -> dict:
-    """Apply one parsed order message. Returns {action, accession, item_id}.
+    """Apply one parsed HL7 order message. Returns {action, accession, item_id}.
 
     The message type is checked first: an `ORU^R01` (a report) carries OBR
     segments too, and applying it would create a worklist entry that nobody
-    ordered. `hl7.describe_message_type` says why in plain words.
+    ordered. `hl7.describe_message_type` says why in plain words. The write path
+    itself is `apply_order`, shared with every other order interface.
     """
     from . import hl7
 
@@ -253,11 +254,24 @@ def upsert_from_hl7(parsed: dict, *, transport: str = "http",
         log_hl7(transport, parsed, "rejected", reason, raw=raw)
         return {"action": "rejected", "accession": parsed.get("accession", ""),
                 "item_id": None, "error": reason}
+    return apply_order(parsed, transport=transport, origin="hl7", raw=raw,
+                       default_station_aet=default_station_aet,
+                       default_modality=default_modality)
 
+
+def apply_order(parsed: dict, *, transport: str = "http", origin: str = "hl7",
+                default_station_aet: str = "", default_modality: str = "",
+                raw: str = "") -> dict:
+    """Create, update or cancel a local worklist item from a parsed order.
+
+    Shared by every interface that produces orders (HL7 ORM/OMG/OMI, GDT/BDT):
+    the transport module only decides *whether* a message is an order — the
+    write path is one, otherwise two interfaces drift apart.
+    """
     accession = parsed.get("accession", "")
     sps_id = parsed.get("sps_id") or "1"
     if not accession:
-        log_hl7(transport, parsed, "rejected", "no accession number")
+        log_hl7(transport, parsed, "rejected", "no accession number", raw=raw)
         return {"action": "rejected", "accession": "", "item_id": None,
                 "error": "no accession number"}
 
@@ -272,13 +286,13 @@ def upsert_from_hl7(parsed: dict, *, transport: str = "http",
         if parsed.get("order_control", "").upper() in ("CA", "OC"):
             if row is None:
                 log_hl7(transport, parsed, "cancel-unknown",
-                        "no local item for this accession")
+                        "no local item for this accession", raw=raw)
                 return {"action": "cancel-unknown", "accession": accession, "item_id": None,
                         "error": "no local item for this accession"}
             s.delete(row)
             s.commit()
             publish_metrics()
-            log_hl7(transport, parsed, "cancelled")
+            log_hl7(transport, parsed, "cancelled", raw=raw)
             return {"action": "cancelled", "accession": accession, "item_id": None}
 
         values = {
@@ -294,7 +308,7 @@ def upsert_from_hl7(parsed: dict, *, transport: str = "http",
             "study_uid": parsed.get("study_uid", ""),
             "sps_status": "SCHEDULED",
             "enabled": True,
-            "origin": "hl7",
+            "origin": origin,
         }
         mapped = parsed.get("mapped") or {}
         if row is None:
@@ -304,7 +318,7 @@ def upsert_from_hl7(parsed: dict, *, transport: str = "http",
             action = "created"
         else:
             for key, value in values.items():
-                if value:            # never blank an existing field with an empty HL7 field
+                if value:            # never blank an existing field with an empty field
                     setattr(row, key, value)
             if mapped:
                 row.extra_attributes = {**(row.extra_attributes or {}), **mapped}
@@ -314,8 +328,8 @@ def upsert_from_hl7(parsed: dict, *, transport: str = "http",
 
     publish_metrics()
     log_hl7(transport, parsed, action, raw=raw)
-    log.info("local worklist: HL7 %s %s (accession %s, transport %s)",
-             parsed.get("order_control", "?"), action, accession, transport)
+    log.info("local worklist: %s %s %s (accession %s, transport %s)",
+             origin, parsed.get("order_control", "?"), action, accession, transport)
     return {"action": action, "accession": accession, "item_id": item_id}
 
 

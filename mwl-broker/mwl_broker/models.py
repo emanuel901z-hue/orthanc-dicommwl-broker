@@ -210,9 +210,30 @@ class LocalWorklistItem(Base):
     )
 
 
+class UpsSubscription(Base):
+    """A UPS-RS subscription: who wants to hear about work item state changes.
+
+    PS3.18 §11.6 has a subscriber identify itself (an AE title) and, optionally,
+    lock a work item against deletion. The broker delivers the event to
+    subscribers that are connected to its own WebSocket event channel — the full
+    DICOM event-report transport (a subscriber-supplied channel URL) is out of
+    scope; the boundary is in the conformance statement.
+
+    No patient data: a subscriber AE title, a work item UID, a flag.
+    """
+
+    __tablename__ = "ups_subscription"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subscriber_aet: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    # empty = subscribed to every work item; otherwise one work item UID
+    workitem_uid: Mapped[str] = mapped_column(String(128), default="", index=True)
+    deletion_lock: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class Hl7Message(Base):
     """Inbound HL7 message log — troubleshooting for the interface."""
-
     __tablename__ = "hl7_message"
 
     id: Mapped[int] = mapped_column(primary_key=True)

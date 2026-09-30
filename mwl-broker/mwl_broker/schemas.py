@@ -697,6 +697,106 @@ class Hl7ParseOut(BaseModel):
     warnings: list[str] = Field(description="What could not be mapped (the UI shows it).")
 
 
+class GdtParseOut(BaseModel):
+    """Result of a GDT/BDT record (dry-run shows what would happen)."""
+
+    dry_run: bool = Field(description="True when nothing was written.")
+    record_type: str = Field(description="GDT record type (field 8000), e.g. 6302.")
+    sender_id: str = Field(description="GDT ID of the sender (field 8316).")
+    receiver_id: str = Field(description="GDT ID of the receiver (field 8315).")
+    version: str = Field(description="GDT version the sender used (field 9218).")
+    accession: str = Field(description="Order number, or the one derived when the "
+                                       "PVS sends none.")
+    action: str = Field(description="planned/applied action, e.g. created | cancelled.")
+    item: LocalItemOut | None = Field(default=None, description="The affected local item.")
+    parsed: dict = Field(description="All fields the parser mapped.")
+    item_id: int | None = Field(default=None, description="Local item that was created/updated.")
+    warnings: list[str] = Field(description="What could not be mapped (the UI shows it).")
+
+
+class UpsSubscriptionIn(BaseModel):
+    """A UPS-RS subscription request (PS3.18 §11.6)."""
+
+    subscriber_aet: str = Field(min_length=1, max_length=16,
+                                description="AE title of the subscriber that wants the events.",
+                                examples=["CT_01"])
+    workitem_uid: str = Field(default="", max_length=128,
+                              description="Only this work item (empty = every work item).")
+    deletion_lock: bool = Field(default=False,
+                                description="Reserve the work item against deletion.")
+
+
+class UpsSubscriptionOut(BaseModel):
+    """A stored UPS-RS subscription."""
+
+    id: int = Field(description="Row ID.")
+    subscriber_aet: str = Field(description="AE title of the subscriber.")
+    workitem_uid: str = Field(description="Work item UID, or empty for all work items.")
+    deletion_lock: bool = Field(description="Whether the work item is locked against deletion.")
+    created_at: datetime = Field(description="When the subscription was created (UTC).")
+
+
+class PrefetchIn(BaseModel):
+    """Prior-study prefetch request (study-level C-FIND + C-MOVE)."""
+
+    patient_id: str = Field(min_length=1, max_length=64,
+                            description="Patient ID whose prior studies are wanted.",
+                            examples=["P-100"])
+    query_node: str = Field(min_length=1, max_length=64,
+                            description="Name of the PACS target that holds the priors and "
+                                        "runs the move (the query/retrieve provider).",
+                            examples=["pacs-main"])
+    destination: str = Field(min_length=1, max_length=64,
+                             description="Name of the PACS target the images should land on; "
+                                         "its AE title becomes the C-MOVE destination.",
+                             examples=["orthanc"])
+    modality: str = Field(default="", max_length=16,
+                          description="Only studies of this modality (empty = all).")
+    exclude_study_uid: str = Field(default="", max_length=128,
+                                   description="Study to leave out — usually the one being "
+                                               "read right now.")
+    max_studies: int = Field(default=5, ge=1, le=50,
+                             description="At most this many prior studies, newest first.")
+
+
+class PrefetchStudyOut(BaseModel):
+    """One prior study the query node reported."""
+
+    study_uid: str = Field(description="Study Instance UID.")
+    study_date: str = Field(description="Study date (YYYYMMDD).")
+    description: str = Field(description="Study description.")
+    modalities: str = Field(description="Modalities in the study.")
+    instances: str = Field(description="Number of instances (as reported).")
+
+
+class PrefetchMoveOut(BaseModel):
+    """The outcome of one C-MOVE sub-operation set."""
+
+    study_uid: str = Field(description="Study Instance UID that was moved.")
+    status: int | None = Field(description="Final C-MOVE status code (None = no response).")
+    completed: int = Field(description="Sub-operations completed.")
+    failed: int = Field(description="Sub-operations that failed.")
+    warning: int = Field(description="Sub-operations with warnings.")
+    ok: bool = Field(description="True for a success or warning status.")
+    error: str = Field(description="Plain-language reason when the move failed.")
+
+
+class PrefetchOut(BaseModel):
+    """What the prefetch found and (when applied) what it moved.
+
+    No patient name — the caller supplied the patient ID and gets the study list
+    back; the identifier itself is not echoed.
+    """
+
+    dry_run: bool = Field(description="True when nothing was moved.")
+    query_node: str = Field(description="Name of the query node that was asked.")
+    destination: str = Field(description="Name of the destination PACS target.")
+    destination_aet: str = Field(description="AE title used as the C-MOVE destination.")
+    studies: list[PrefetchStudyOut] = Field(description="Prior studies that were found.")
+    moved: list[PrefetchMoveOut] = Field(
+        default_factory=list, description="Move results (empty for a dry run).")
+
+
 class AtnaStatsOut(BaseModel):
     """State of the ATNA audit trail."""
 

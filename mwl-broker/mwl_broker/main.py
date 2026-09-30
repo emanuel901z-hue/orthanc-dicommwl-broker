@@ -2,6 +2,7 @@
 
 Run:  uvicorn mwl_broker.main:app --host 0.0.0.0 --port 8081
 """
+import asyncio
 import json
 import logging
 import os
@@ -33,6 +34,11 @@ log = logging.getLogger("mwl_broker.main")
 async def lifespan(app: FastAPI):
     settings = get_settings()
     db.init_db()
+    # UPS-RS events: a state change happens on a request thread, the WebSocket on
+    # the event loop — the hub needs the loop to hand the event across.
+    from . import ups
+
+    ups.hub.bind_loop(asyncio.get_running_loop())
     if settings.seed_config_json:
         try:
             db.seed_from_json(json.loads(settings.seed_config_json))
@@ -160,6 +166,7 @@ def create_app() -> FastAPI:
             {"name": "simulation", "description": "Dry-run simulation of routing and modify rules — same code as the live path."},
             {"name": "logs", "description": "C-FIND and C-STORE audit logs (PHI-free)."},
             {"name": "orders", "description": "Order context: accession ↔ study correlation for a study (IHE MADO manifest creators)."},
+            {"name": "ups", "description": "UPS-RS (DICOMweb work items): search, retrieve, create, state change, subscriptions and the event channel."},
             {"name": "monitoring", "description": "Health, status snapshot, C-ECHO and Prometheus metrics."},
         ],
         lifespan=lifespan,

@@ -37,8 +37,14 @@ API_ONLY = {
     "/api/v1/dicom-web/workitems": "UPS-RS: the DICOMweb interface for external consumers (conformance statement §9a)",
     "/api/v1/dicom-web/workitems/{param}": "UPS-RS (see above)",
     "/api/v1/dicom-web/workitems/{param}/state": "UPS-RS (see above)",
+    "/api/v1/dicom-web/workitems/subscriptions": "UPS-RS subscriptions for external consumers (conformance statement §9a)",
+    "/api/v1/dicom-web/workitems/subscriptions/{param}": "UPS-RS subscriptions (see above)",
     "/api/v1/hl7/adt": "the ADT intake for the RIS; the UI offers the semantic equivalent (merge/link)",
+    "/api/v1/gdt/order": "the GDT/BDT intake for a practice system without HL7 "
+                         "(the UI offers the local worklist)",
     "/api/v1/orders/context": "for external MADO manifest creators (conformance statement §9c)",
+    "/api/v1/prefetch": "prior-study prefetch for a reporting station/viewer — an "
+                        "integration endpoint, driven by the client that wants the priors",
     "/api/v1/mpps/{param}": "single-step detail for integrations — the UI lists the steps",
 }
 
@@ -166,6 +172,11 @@ def test_every_write_schema_field_is_reachable_in_the_ui():
             gaps[name] = missing
     # the import document is assembled by the UI from the export file, not typed
     gaps.pop("ConfigImportIn", None)
+    # API-only interfaces have no operator form by design (see API_ONLY above):
+    # the UPS-RS subscriptions and the prefetch tool are driven by the external
+    # client that uses them, not by this settings UI.
+    for name in ("UpsSubscriptionIn", "PrefetchIn"):
+        gaps.pop(name, None)
     assert not gaps, f"write fields no form can set: {gaps}"
 
 

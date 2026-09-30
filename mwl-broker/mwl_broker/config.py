@@ -73,6 +73,17 @@ class Settings(BaseSettings):
     hl7_default_station_aet: str = ""   # fallback when the ORM carries none
     hl7_default_modality: str = ""
 
+    # GDT/BDT interface (practices without HL7) — German XDT record format
+    gdt_enabled: bool = True            # accept POST /gdt/order
+    gdt_default_station_aet: str = ""   # fallback when the record carries none
+    gdt_default_modality: str = ""
+    # Site-specific field numbers as a JSON object, e.g. {"accession": "6200"}.
+    # Empty = only the standard fields below are read.
+    gdt_field_map: str = ""
+
+    # Prior-study prefetch (C-FIND/C-MOVE SCU — the broker is the client here)
+    prefetch_timeout_s: int = 120       # a C-MOVE runs until the PACS sent the study
+
     # IHE ATNA audit trail (own Audit Record Repository)
     atna_enabled: bool = False          # explicit opt-in: audit leaves the broker
     atna_syslog_host: str = ""

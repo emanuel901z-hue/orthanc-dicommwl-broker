@@ -4,13 +4,15 @@ All endpoints are sync `def` — they run in the FastAPI threadpool, which
 keeps them consistent with the synchronous DIMSE handlers.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
 from pydicom.dataset import Dataset
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
+from fastapi import (APIRouter, Body, Depends, HTTPException, Path, Query, Request,
+                     WebSocket, WebSocketDisconnect)
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -31,6 +33,11 @@ from .schemas import (
     AtnaTestOut,
     Hl7MessageOut,
     Hl7ParseOut,
+    GdtParseOut,
+    UpsSubscriptionIn,
+    UpsSubscriptionOut,
+    PrefetchIn,
+    PrefetchOut,
     LocalItemIn,
     LocalItemOut,
     AuditEntryOut,
@@ -103,9 +110,9 @@ from .schemas import (
     PatientMergeOut,
     Hl7AdtOut,
 )
-from . import (adt, atna, audit, breaker, cache, config_io, health_checks, hl7, hl7_mapping,
+from . import (adt, atna, audit, breaker, cache, config_io, gdt, health_checks, hl7, hl7_mapping,
                instances,
-               merge_rules, merges, mpps, orders, stats, ups,
+               merge_rules, merges, mpps, orders, prefetch, stats, ups,
                local_worklist, metrics, notify, rbac, retention, settings_service,
                simulate, spool, station_rules, tls, transforms)
 from .models import (BrokerSetting, ConfigAudit, Hl7Message, LocalWorklistItem,
@@ -1551,6 +1558,70 @@ def apply_hl7_orm(
             "warnings": parsed["warnings"] + ([result["error"]] if result.get("error") else [])}
 
 
+# ── GDT/BDT intake (practices without HL7) ─────────────────────────────
+
+
+@router.post(
+    "/gdt/order", response_model=GdtParseOut, tags=["local"],
+    summary="Apply a GDT/BDT order (record type 6302)",
+    description="Parses one GDT (Gerätedatentransfer) or BDT record and creates, "
+                "updates or cancels a local worklist item — for practices whose "
+                "EDP has no HL7 interface. An order is record type `6302` "
+                "(\"Neue Untersuchung anfordern\"); `6300`/`6301` carry master "
+                "data and `6310`/`6311` examination results, so they are refused "
+                "with a reason instead of becoming a worklist entry. The order "
+                "number has no standard field — set it per site in the "
+                "`gdt_field_map` setting; otherwise a stable accession is "
+                "derived from sender, patient and day. With `dry_run=true` the "
+                "response only shows what the parser understood.",
+    response_description="The parsed fields, the planned/applied action and any warnings.",
+    responses={
+        422: {"description": "The record is not an order (master data, result …), "
+                             "the GDT intake is disabled, or no patient/order "
+                             "number could be determined."},
+    },
+)
+def apply_gdt_order(
+    request: Request,
+    body: Annotated[str, Body(media_type="text/plain",
+                              description="The raw GDT/BDT record (one field per line).")],
+    dry_run: bool = Query(default=True, description="Only parse and report; write nothing."),
+    s: Session = _db_dep,
+):
+    if not settings_service.get_bool("gdt_enabled"):
+        raise HTTPException(422, ["GDT intake is disabled (setting gdt_enabled)"])
+    parsed = gdt.parse(body)
+    if not parsed["supported"]:
+        if not dry_run:
+            local_worklist.log_hl7("gdt", parsed, "rejected", parsed["reject_reason"])
+        raise HTTPException(422, [parsed["reject_reason"]])
+    if not parsed["accession"]:
+        raise HTTPException(422, parsed["warnings"] or ["no accession number"])
+    context = {k: parsed[k] for k in ("record_type", "sender_id", "receiver_id",
+                                      "version", "accession")}
+    if dry_run:
+        return {"dry_run": True, "action": "created-or-updated", "item": None,
+                "parsed": parsed, "warnings": parsed["warnings"], **context}
+
+    result = local_worklist.apply_order(
+        parsed, transport="gdt", origin="gdt",
+        default_station_aet=settings_service.get_str("gdt_default_station_aet"),
+        default_modality=settings_service.get_str("gdt_default_modality"),
+    )
+    row = s.get(LocalWorklistItem, result["item_id"]) if result["item_id"] else None
+    audit.record(s, _actor(request), f"gdt.{result['action']}", "local_item",
+                 result["item_id"], None, audit.snapshot("local_item", row),
+                 _correlation(request))
+    s.commit()
+    metrics.GDT_RECORDS.labels(result=result["action"]).inc()
+    return {"dry_run": False, "action": result["action"],
+            "item_id": result["item_id"],
+            "item": _local_snapshot(row) if row is not None else None,
+            "parsed": parsed,
+            "warnings": parsed["warnings"] + ([result["error"]] if result.get("error") else []),
+            **context}
+
+
 # ── ATNA audit trail ───────────────────────────────────────────────────
 
 
@@ -2163,6 +2234,56 @@ def order_context(
     return orders.context(s, study_uid=study_uid, accession=accession, limit=limit)
 
 
+# ── Prior-study prefetch (C-FIND/C-MOVE SCU) ───────────────────────────
+
+
+@router.post(
+    "/prefetch", response_model=PrefetchOut, tags=["orders"],
+    summary="Prefetch a patient's prior studies",
+    description="Finds a patient's earlier studies at a query/retrieve node "
+                "(study-level C-FIND) and — unless it is a dry run — pulls them to "
+                "a destination AE title with C-MOVE, so the priors are at the "
+                "reporting station when the reader opens the new study. The broker "
+                "acts as a query/retrieve **client** here; it never *offers* "
+                "C-MOVE (no presentation context is accepted on its own port). Both "
+                "nodes are PACS targets by name, and the query node must know the "
+                "destination AE title as a move destination. PHI-free answer: the "
+                "patient ID is the query, never echoed.",
+    response_description="The prior studies found and, when applied, the move results.",
+    responses={
+        422: {"description": "Unknown node, missing patient ID, or a query the "
+                             "broker refuses before it talks to anyone."},
+        **_docs(READ_ONLY_403),
+    },
+)
+def prefetch_studies(
+    request: Request,
+    body: Annotated[PrefetchIn, Body(description="Which patient, which nodes, how many priors.")],
+    dry_run: bool = Query(default=True, description="Only find and report; move nothing."),
+    s: Session = _db_dep,
+):
+    try:
+        result = prefetch.prefetch(
+            body.patient_id, query_node=body.query_node, destination=body.destination,
+            modality=body.modality, exclude_study_uid=body.exclude_study_uid,
+            max_studies=body.max_studies, dry_run=dry_run,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except ConnectionError as exc:
+        raise HTTPException(502, f"the query node could not be reached: {exc}")
+    if not dry_run:
+        # PHI-free snapshot: node names and counts, never the patient ID
+        audit.record(s, _actor(request), "prefetch.run", "prefetch", None, None,
+                     {"query_node": result["query_node"],
+                      "destination": result["destination"],
+                      "studies": len(result["studies"]),
+                      "moved": sum(1 for move in result["moved"] if move["ok"])},
+                     _correlation(request))
+        s.commit()
+    return result
+
+
 # ── Echo + status ──────────────────────────────────────────────────────
 
 
@@ -2260,21 +2381,115 @@ def health_config(s: Session = _db_dep):
 @router.get(
     "/dicom-web/workitems", tags=["ups"],
     summary="Search work items (UPS-RS)",
-    description="DICOMweb search over the work items the broker holds itself "
-                "(emergencies and unscheduled examinations). Query parameters are "
-                "DICOM keywords, e.g. `AccessionNumber` or `ScheduledStationAETitle`. "
-                "The response uses the DICOM JSON model. Subscriptions and event "
-                "reports are not implemented (see the conformance statement).",
+    description="DICOMweb search over the work items: the entries the broker holds "
+                "itself (emergencies, unscheduled examinations) **and** the "
+                "upstream sources, queried through the same aggregation as the "
+                "DIMSE path — a REST client never sees a different worklist than a "
+                "modality. Query parameters are DICOM keywords, e.g. "
+                "`AccessionNumber` or `ScheduledStationAETitle`; the response uses "
+                "the DICOM JSON model. A bare listing without query keys stays "
+                "local (`include_upstream=false`), because fanning out with an "
+                "empty identifier would make every source answer everything. "
+                "Subscriptions are supported (see the `…/subscriptions` routes).",
     response_description="Matching work items as a DICOM JSON array.",
 )
 def ups_search(
     request: Request,
     limit: int = Query(default=100, ge=1, le=500, description="Maximum number of work items."),
+    include_upstream: bool = Query(
+        default=True,
+        description="Also query the upstream sources (only when the search carries "
+                    "at least one DICOM key; a bare listing stays local)."),
 ):
     # the client sends DICOM keywords; the module works on the JSON tag keys
     query = {ups.QUERY_KEYS[key]: value
              for key, value in request.query_params.items() if key in ups.QUERY_KEYS}
-    return ups.search(query, limit=limit)
+    return ups.search(query, limit=limit, include_upstream=include_upstream and bool(query))
+
+
+# ── UPS-RS subscriptions (PS3.18 §11.6) ────────────────────────────────
+# Declared before `/workitems/{workitem_uid}` — otherwise "subscriptions" would
+# be captured as a work item UID.
+
+
+@router.post(
+    "/dicom-web/workitems/subscriptions", response_model=UpsSubscriptionOut,
+    status_code=201, tags=["ups"],
+    summary="Subscribe to work item events (UPS-RS)",
+    description="Registers a subscriber for work item state changes (PS3.18 "
+                "§11.6). The broker delivers the event as JSON on its WebSocket "
+                "(`/dicom-web/workitems/ws?subscriber=<AET>`); a subscriber-"
+                "supplied channel URL is not implemented (see the conformance "
+                "statement). An empty `workitem_uid` subscribes to every work item.",
+    response_description="The stored subscription.",
+    responses=_docs(VALIDATION_422, READ_ONLY_403),
+)
+def ups_create_subscription(
+    request: Request,
+    body: Annotated[UpsSubscriptionIn, Body(description="The subscription to create.")],
+    s: Session = _db_dep,
+):
+    try:
+        row = ups.upsert_subscription(body.subscriber_aet, body.workitem_uid,
+                                      body.deletion_lock)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    audit.record(s, _actor(request), "ups.subscribe", "ups_subscription", row["id"], None,
+                 {"subscriber_aet": row["subscriber_aet"], "workitem_uid": row["workitem_uid"]},
+                 _correlation(request))
+    s.commit()
+    return row
+
+
+@router.get(
+    "/dicom-web/workitems/subscriptions", response_model=list[UpsSubscriptionOut], tags=["ups"],
+    summary="List work item subscriptions (UPS-RS)",
+    description="Every subscriber the broker knows, with the work item it watches "
+                "(empty = all work items) and whether it locks the item against "
+                "deletion.",
+    response_description="All subscriptions.",
+)
+def ups_list_subscriptions():
+    return ups.list_subscriptions()
+
+
+@router.delete(
+    "/dicom-web/workitems/subscriptions/{subscriber_aet}", status_code=204, tags=["ups"],
+    summary="Remove a work item subscription (UPS-RS)",
+    description="Stops event delivery to this subscriber; the work item itself stays "
+                "untouched.",
+    response_description="The subscription was removed.",
+    responses={404: {"description": "No subscription for this subscriber."},
+               **_docs(READ_ONLY_403)},
+)
+def ups_delete_subscription(
+    request: Request,
+    subscriber_aet: Annotated[str, Path(description="AE title of the subscriber.")],
+    s: Session = _db_dep,
+):
+    if not ups.delete_subscription(subscriber_aet):
+        raise HTTPException(404, "not found")
+    audit.record(s, _actor(request), "ups.unsubscribe", "ups_subscription", None,
+                 {"subscriber_aet": subscriber_aet.upper()}, None, _correlation(request))
+    s.commit()
+
+
+@router.websocket("/dicom-web/workitems/ws")
+async def ups_event_channel(websocket: WebSocket, subscriber: str = Query(default="")):
+    """The event channel: work item events as JSON to one connected subscriber."""
+    queue: asyncio.Queue = asyncio.Queue()
+    # register before the handshake completes: a state change right after the
+    # client's connect must not race the registration and get lost
+    ups.hub.subscribe(subscriber, queue)
+    try:
+        await websocket.accept()
+        while True:
+            event = await queue.get()
+            await websocket.send_json(event)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        ups.hub.unsubscribe(subscriber, queue)
 
 
 @router.get(
