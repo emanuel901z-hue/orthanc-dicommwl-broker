@@ -202,3 +202,111 @@ def test_prefetch_can_skip_the_study_being_read(client, qr_network):
     }).json()
 
     assert [s["study_uid"] for s in plan["studies"]] == ["1.2.840.1"]
+
+
+# ── bounded work: time budget and concurrency ──────────────────────────
+
+
+def _three_studies():
+    return [{"study_uid": f"1.2.{n}", "study_date": "20200101", "description": "CT",
+             "modalities": "CT", "instances": "1"} for n in (1, 2, 3)]
+
+
+def test_studies_that_no_longer_fit_the_budget_are_skipped_not_cut_off(client, monkeypatch):
+    """The whole call is bounded — a half-transferred study is worse than none.
+
+    Each C-MOVE occupies a request worker for as long as the PACS takes, so the
+    budget covers the *call*, not each study. What does not fit is reported as
+    `skipped` instead of being started and aborted mid-transfer.
+    """
+    import time as time_module
+
+    _target(client, "pacs", "QR_AET", 1)
+    _target(client, "dest", "DEST_AET", 1)
+    client.put("/api/v1/settings/prefetch_timeout_s", json={"value": "5"})
+    monkeypatch.setattr(prefetch, "find_studies", lambda *a, **k: _three_studies())
+
+    def slow_move(node, uid, dest, **kwargs):
+        time_module.sleep(2.5)          # eats most of the 5 s budget
+        return {"study_uid": uid, "status": 0x0000, "completed": 1, "failed": 0,
+                "warning": 0, "ok": True, "error": ""}
+
+    monkeypatch.setattr(prefetch, "move_study", slow_move)
+
+    result = client.post("/api/v1/prefetch?dry_run=false", json={
+        "patient_id": "P-100", "query_node": "pacs", "destination": "dest",
+    }).json()
+
+    assert len(result["moved"]) == 1
+    assert result["skipped"] == ["1.2.2", "1.2.3"]
+
+
+def test_too_many_parallel_calls_are_refused_instead_of_queued(client, monkeypatch):
+    """A prefetch holds a worker and a PACS association — the rest gets 429.
+
+    Without the limit, a handful of concurrent calls would tie up the API (and
+    with it `/healthz`) for everyone: the broker would look dead while it is
+    only busy prefetching.
+    """
+    _target(client, "pacs", "QR_AET", 1)
+    _target(client, "dest", "DEST_AET", 1)
+    client.put("/api/v1/settings/prefetch_max_concurrency", json={"value": "1"})
+    monkeypatch.setattr(prefetch, "find_studies", lambda *a, **k: _three_studies()[:1])
+    monkeypatch.setattr(prefetch, "move_study", lambda node, uid, dest, **k: {
+        "study_uid": uid, "status": 0x0000, "completed": 1, "failed": 0,
+        "warning": 0, "ok": True, "error": ""})
+    body = {"patient_id": "P-100", "query_node": "pacs", "destination": "dest"}
+
+    with prefetch._slot():                       # pretend another call is running
+        busy = client.post("/api/v1/prefetch?dry_run=false", json=body)
+        assert busy.status_code == 429
+        assert "already running" in busy.json()["detail"]
+
+    # the slot was released again — the next call goes through
+    assert client.post("/api/v1/prefetch?dry_run=false", json=body).status_code == 200
+
+
+def test_a_dry_run_is_never_refused_by_the_concurrency_limit(client, monkeypatch):
+    """Looking is cheap and must stay available even while a prefetch runs."""
+    _target(client, "pacs", "QR_AET", 1)
+    _target(client, "dest", "DEST_AET", 1)
+    client.put("/api/v1/settings/prefetch_max_concurrency", json={"value": "1"})
+    monkeypatch.setattr(prefetch, "find_studies", lambda *a, **k: _three_studies()[:1])
+
+    with prefetch._slot():
+        response = client.post("/api/v1/prefetch?dry_run=true", json={
+            "patient_id": "P-100", "query_node": "pacs", "destination": "dest"})
+
+    assert response.status_code == 200
+    assert response.json()["dry_run"] is True
+
+
+def test_the_prefetch_does_not_hold_a_database_session_during_the_move(client, monkeypatch):
+    """The C-MOVE can take the whole budget — it must not keep a pooled
+    connection, or a few calls would starve every other endpoint and the DIMSE
+    handlers (pool: 10 + 20 overflow)."""
+    from mwl_broker import db
+
+    _target(client, "pacs", "QR_AET", 1)
+    _target(client, "dest", "DEST_AET", 1)
+    monkeypatch.setattr(prefetch, "find_studies", lambda *a, **k: _three_studies()[:1])
+
+    opened = []
+    real_engine = db.get_engine()
+
+    def counting_move(node, uid, dest, **kwargs):
+        # while the "move" runs, the API must be able to take a fresh session
+        with db.get_session() as s:
+            s.execute(__import__("sqlalchemy").text("SELECT 1"))
+        opened.append(uid)
+        return {"study_uid": uid, "status": 0x0000, "completed": 1, "failed": 0,
+                "warning": 0, "ok": True, "error": ""}
+
+    monkeypatch.setattr(prefetch, "move_study", counting_move)
+
+    response = client.post("/api/v1/prefetch?dry_run=false", json={
+        "patient_id": "P-100", "query_node": "pacs", "destination": "dest"})
+
+    assert response.status_code == 200
+    assert opened == ["1.2.1"]
+    assert real_engine is not None

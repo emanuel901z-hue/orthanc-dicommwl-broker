@@ -1,6 +1,7 @@
 """Runtime configuration via environment variables (prefix BROKER_)."""
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -8,8 +9,15 @@ class Settings(BaseSettings):
     # Postgres — own database "mwl" on the shared index-DB instance
     database_url: str = "postgresql+psycopg://dev:dev@postgres:5432/mwl"
 
-    # DICOM SCP identity — what modalities see
-    broker_aet: str = "MWLBROKER"
+    # DICOM SCP identity — what modalities see.
+    # The field is called `broker_aet`, so `env_prefix` alone would look for
+    # `BROKER_BROKER_AET` while `.env`, compose, setup.sh and the docs all say
+    # `BROKER_AET` — the operator's AET was silently ignored and the broker kept
+    # answering as MWLBROKER (modalities then get association rejects).
+    # Both spellings are accepted; `BROKER_AET` wins.
+    broker_aet: str = Field(default="MWLBROKER",
+                            validation_alias=AliasChoices("BROKER_AET",
+                                                          "BROKER_BROKER_AET"))
     dicom_port: int = 11113
     max_associations: int = 20
 
@@ -82,7 +90,14 @@ class Settings(BaseSettings):
     gdt_field_map: str = ""
 
     # Prior-study prefetch (C-FIND/C-MOVE SCU — the broker is the client here)
-    prefetch_timeout_s: int = 120       # a C-MOVE runs until the PACS sent the study
+    # Overall time budget of one prefetch call in seconds: a C-MOVE keeps a
+    # request worker busy while the PACS sends the study, so the whole call is
+    # bounded (not each study on its own).
+    prefetch_timeout_s: int = 120
+    # How many prefetch calls may run at the same time. Each one occupies a
+    # request worker and a PACS association; more than a couple would tie up the
+    # broker for everyone else. Further callers get 429.
+    prefetch_max_concurrency: int = 2
 
     # IHE ATNA audit trail (own Audit Record Repository)
     atna_enabled: bool = False          # explicit opt-in: audit leaves the broker

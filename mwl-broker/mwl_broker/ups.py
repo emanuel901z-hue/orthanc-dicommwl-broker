@@ -22,9 +22,9 @@ import logging
 import threading
 import uuid as uuidlib
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from . import local_worklist, settings_service
+from . import local_worklist, metrics, settings_service
 from .db import session_factory
 from .models import LocalWorklistItem, UpsSubscription
 
@@ -171,6 +171,7 @@ def create_workitem(workitem: dict) -> dict:
     local_worklist.publish_metrics()
     log.info("UPS work item created: %s (accession %s)", _uid_for(item), accession)
     workitem = item_to_workitem(item)
+    metrics.UPS_WORKITEMS.labels(operation="create").inc()
     hub.publish({"event": "workitem-created", "workitem_uid": _uid_for(item),
                  "state": workitem["00404041"]["Value"][0], "workitem": workitem})
     return workitem
@@ -215,6 +216,7 @@ def set_state(uid: str, state: str) -> dict:
     local_worklist.publish_metrics()
     log.info("UPS work item %s → %s", uid, state)
     workitem = item_to_workitem(item)
+    metrics.UPS_WORKITEMS.labels(operation="state").inc()
     hub.publish({"event": "workitem-state-change", "workitem_uid": uid,
                  "state": state, "workitem": workitem})
     return workitem
@@ -230,6 +232,40 @@ def _workitem_matches(workitem: dict, query: dict[str, str]) -> bool:
         for tag, value in query.items()
         if value
     )
+
+
+# Query keys that map 1:1 onto a column of the local table, so the database can
+# do the filtering. Dates and times are deliberately absent: the API renders them
+# normalised (dashes/colons removed) while the column keeps what was stored —
+# filtering in SQL would produce false negatives, so they stay in the exact
+# check below.
+_PUSHDOWN_COLUMNS = {
+    "00080050": LocalWorklistItem.accession,
+    "00100020": LocalWorklistItem.patient_id,
+    "00100010": LocalWorklistItem.patient_name,
+    "00080060": LocalWorklistItem.modality,
+    "00400001": LocalWorklistItem.station_aet,
+    "00401001": LocalWorklistItem.sps_id,
+    "0020000D": LocalWorklistItem.study_uid,
+    "00404041": LocalWorklistItem.sps_status,
+    "00741000": LocalWorklistItem.sps_status,
+}
+
+
+def _pushdown_clauses(query: dict[str, str]) -> list:
+    """WHERE clauses for the keys a column can answer (rest stays in Python)."""
+    clauses = []
+    for tag, value in query.items():
+        column = _PUSHDOWN_COLUMNS.get(tag)
+        if column is None or not value:
+            continue
+        needle = value.rstrip("*")
+        if tag in ("00404041", "00741000"):
+            # the state is compared case-insensitively (the column is free text)
+            clauses.append(func.upper(column).like(f"%{needle.upper()}%"))
+        else:
+            clauses.append(column.ilike(f"%{needle}%"))
+    return clauses
 
 
 def _identifier_from_query(query: dict[str, str]) -> "Dataset":
@@ -330,10 +366,15 @@ def search(query: dict[str, str], limit: int = 100, include_upstream: bool = Fal
     matches: list[dict] = []
     seen: set[tuple[str, str]] = set()
 
+    # The database filters what it can (a busy house can hold thousands of local
+    # items); the exact match below stays authoritative for the rest — including
+    # the dates the API renders normalised and the mapped extra attributes.
+    statement = select(LocalWorklistItem)
+    clauses = _pushdown_clauses(query)
+    if clauses:
+        statement = statement.where(*clauses)
     with session_factory()() as s:
-        rows = s.scalars(
-            select(LocalWorklistItem).order_by(LocalWorklistItem.id.desc())
-        ).all()
+        rows = s.scalars(statement.order_by(LocalWorklistItem.id.desc())).all()
 
     for row in rows:
         workitem = item_to_workitem(row)
@@ -399,18 +440,24 @@ def upsert_subscription(subscriber_aet: str, workitem_uid: str = "",
         row.deletion_lock = bool(deletion_lock)
         s.commit()
         s.refresh(row)
-        return _subscription_dict(row)
+        result = _subscription_dict(row)
+    # keep the event hub's cached scope in step (it must not query per event)
+    hub.set_scope(subscriber_aet, result["workitem_uid"])
+    return result
 
 
 def delete_subscription(subscriber_aet: str) -> bool:
+    subscriber_aet = (subscriber_aet or "").strip().upper()
     with session_factory()() as s:
         row = s.scalars(select(UpsSubscription).where(
-            UpsSubscription.subscriber_aet == (subscriber_aet or "").strip().upper())).first()
+            UpsSubscription.subscriber_aet == subscriber_aet)).first()
         if row is None:
             return False
         s.delete(row)
         s.commit()
-        return True
+    # a deleted subscription also drops the connected event channel
+    hub.forget(subscriber_aet)
+    return True
 
 
 class _EventHub:
@@ -424,45 +471,97 @@ class _EventHub:
     A state change happens on a request/DIMSE thread, the WebSocket lives on the
     event loop: `publish` therefore hands the event to the loop thread with
     `call_soon_threadsafe` instead of touching the queues from the wrong thread.
+
+    The subscription *scope* (which work item a subscriber watches) is cached
+    here instead of being read from the database on every event: a fan-out would
+    otherwise cost one query per subscriber per event, on the DIMSE/request
+    thread that just changed the state. The API keeps the cache in step through
+    `set_scope`/`forget`.
     """
+
+    # A bounded number of live subscribers: every one of them is a queue the
+    # broker writes to, and nobody needs thousands of event channels.
+    MAX_SUBSCRIBERS = 200
 
     def __init__(self) -> None:
         self._loop = None
         self._queues: dict[str, set] = {}
+        self._scopes: dict[str, str] = {}
         self._lock = threading.Lock()
 
     def bind_loop(self, loop) -> None:
         self._loop = loop
 
-    def subscribe(self, subscriber: str, queue) -> None:
+    def subscribe(self, subscriber: str, queue) -> bool:
+        """Register a connected subscriber.
+
+        False when the subscriber has no subscription (PS3.18 §11.6: the
+        subscription comes first) or the hub is full. The scope is read here,
+        once per connection — not per event, which would put a query on the
+        thread that just changed the work item.
+        """
+        subscriber = subscriber.strip().upper()
+        subscription = subscription_for(subscriber)
+        if subscription is None:
+            return False
         with self._lock:
-            self._queues.setdefault(subscriber.strip().upper(), set()).add(queue)
+            if len(self._queues) >= self.MAX_SUBSCRIBERS and subscriber not in self._queues:
+                return False
+            self._queues.setdefault(subscriber, set()).add(queue)
+            self._scopes[subscriber] = subscription["workitem_uid"]
+        return True
 
     def unsubscribe(self, subscriber: str, queue) -> None:
+        subscriber = subscriber.strip().upper()
         with self._lock:
-            self._queues.get(subscriber.strip().upper(), set()).discard(queue)
+            queues = self._queues.get(subscriber)
+            if queues is None:
+                return
+            queues.discard(queue)
+            if not queues:
+                self._queues.pop(subscriber, None)
+                self._scopes.pop(subscriber, None)
+
+    def set_scope(self, subscriber: str, workitem_uid: str) -> None:
+        """Remember which work item a subscriber watches (empty = all)."""
+        with self._lock:
+            self._scopes[subscriber.strip().upper()] = workitem_uid or ""
+
+    def forget(self, subscriber: str) -> None:
+        """Drop a subscriber completely — its subscription was deleted."""
+        with self._lock:
+            self._queues.pop(subscriber.strip().upper(), None)
+            self._scopes.pop(subscriber.strip().upper(), None)
+
+    def subscriber_count(self) -> int:
+        with self._lock:
+            return len(self._queues)
 
     def publish(self, event: dict) -> None:
         if self._loop is None:
             return
         uid = event.get("workitem_uid", "")
         with self._lock:
-            targets = list(self._queues.items())
-        for subscriber, queues in targets:
-            subscription = subscription_for(subscriber)
-            if subscription is None:
-                continue                      # not subscribed (any more)
-            if subscription["workitem_uid"] and subscription["workitem_uid"] != uid:
+            targets = [(sub, list(queues), self._scopes.get(sub, ""))
+                       for sub, queues in self._queues.items()]
+        delivered = 0
+        for _subscriber, queues, scope in targets:
+            if scope and scope != uid:
                 continue                      # only interested in another item
             for queue in queues:
                 try:
                     self._loop.call_soon_threadsafe(queue.put_nowait, event)
+                    delivered += 1
                 except RuntimeError:          # loop gone (shutdown / test teardown)
+                    metrics.UPS_EVENTS.labels(result="dropped").inc()
                     return
+        if targets:
+            metrics.UPS_EVENTS.labels(result="delivered" if delivered else "no_subscriber").inc()
 
     def reset_for_tests(self) -> None:
         with self._lock:
             self._queues.clear()
+            self._scopes.clear()
         self._loop = None
 
 

@@ -287,6 +287,12 @@ class ConfigImportIn(BaseModel):
     settings: dict[str, str] = Field(
         default_factory=dict, description="Runtime setting overrides (key → value).",
     )
+    ups_subscriptions: list["UpsSubscriptionIn"] = Field(
+        default_factory=list,
+        description="UPS-RS subscriptions (who wants events for which work item). "
+                    "Configuration like sources and targets, so a staging export "
+                    "can reproduce it.",
+    )
 
 
 class ConfigExportOut(ConfigImportIn):
@@ -300,7 +306,8 @@ class ConfigExportOut(ConfigImportIn):
 class ImportChangeOut(BaseModel):
     """One change an import would make."""
 
-    entity: str = Field(description="source | target | rule | transform | setting.")
+    entity: str = Field(description="source | target | rule | transform | setting | "
+                                    "ups_subscription.")
     action: str = Field(description="create | update.")
     name: str = Field(description="Name (or key) of the affected entry.")
     fields: dict = Field(description="Field values the import would apply.")
@@ -323,7 +330,8 @@ class AuditEntryOut(BaseModel):
     ts: datetime = Field(description="When the change happened (UTC).")
     actor: str = Field(description="Operator identity (header) or 'api'.")
     action: str = Field(description="e.g. create.source, update.rule, import.transform.")
-    entity: str = Field(description="source | target | rule | transform | setting.")
+    entity: str = Field(description="source | target | rule | transform | setting | "
+                                    "ups_subscription.")
     entity_id: int | None = Field(default=None, description="Row ID of the affected entry.")
     before_json: dict | None = Field(default=None, description="State before the change.")
     after_json: dict | None = Field(default=None, description="State after the change.")
@@ -429,9 +437,15 @@ class SettingOut(BaseModel):
     default: str = Field(description="Value from the deployment ENV (fallback).")
     source: str = Field(description="'db' = UI override active, 'env' = deployment default.")
     kind: str = Field(
-        description="Value type: bool | int | aets | url | path | events | enum:<choices>.",
+        description="Value type: bool | int | aets | url | path | events | json | enum:<choices>.",
     )
     description: str = Field(description="What the setting does.")
+    editable: bool = Field(
+        default=True,
+        description="False for deployment-owned settings (spool volume, container "
+                    "port, instance name): readable, but the value has to match the "
+                    "compose mapping, so it cannot be changed at runtime.",
+    )
     min: int | None = Field(default=None, description="Lower bound for integer settings.")
     max: int | None = Field(default=None, description="Upper bound for integer settings.")
     choices: list[str] = Field(
@@ -795,6 +809,10 @@ class PrefetchOut(BaseModel):
     studies: list[PrefetchStudyOut] = Field(description="Prior studies that were found.")
     moved: list[PrefetchMoveOut] = Field(
         default_factory=list, description="Move results (empty for a dry run).")
+    skipped: list[str] = Field(
+        default_factory=list,
+        description="Study UIDs that were not moved because the time budget "
+                    "(`prefetch_timeout_s`) ran out — not started, not cut off.")
 
 
 class AtnaStatsOut(BaseModel):

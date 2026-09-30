@@ -17,17 +17,19 @@ import pytest  # noqa: E402
 @pytest.fixture(autouse=True)
 def fresh_echo_state():
     """Echo status and alert de-bounce live in module globals — reset per test."""
-    from mwl_broker import atna, echo, notify, ups
+    from mwl_broker import atna, echo, notify, prefetch, ups
 
     echo.reset_for_tests()
     notify.reset_for_tests()
     atna.reset_for_tests()
     ups.hub.reset_for_tests()
+    prefetch.reset_for_tests()
     yield
     echo.reset_for_tests()
     notify.reset_for_tests()
     atna.reset_for_tests()
     ups.hub.reset_for_tests()
+    prefetch.reset_for_tests()
 
 
 @pytest.fixture(autouse=True)

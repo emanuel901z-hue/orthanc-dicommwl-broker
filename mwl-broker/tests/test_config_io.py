@@ -208,3 +208,40 @@ def test_plan_import_is_pure():
         first = c.post("/api/v1/config/import", json=doc).json()
         second = c.post("/api/v1/config/import", json=doc).json()
         assert first == second
+
+
+def test_ups_subscriptions_travel_with_the_configuration(client):
+    """They are configuration like sources/targets — a staging export must carry them."""
+    client.post("/api/v1/dicom-web/workitems/subscriptions",
+                json={"subscriber_aet": "ct_01", "workitem_uid": "1.2.3",
+                      "deletion_lock": True})
+
+    doc = client.get("/api/v1/config/export").json()
+    assert doc["ups_subscriptions"] == [
+        {"subscriber_aet": "CT_01", "workitem_uid": "1.2.3", "deletion_lock": True}]
+
+    # gone in production, back from the document
+    client.delete("/api/v1/dicom-web/workitems/subscriptions/CT_01")
+    assert client.get("/api/v1/dicom-web/workitems/subscriptions").json() == []
+
+    plan = client.post("/api/v1/config/import?dry_run=true", json=doc).json()
+    assert any(c["entity"] == "ups_subscription" and c["action"] == "create"
+               for c in plan["changes"])
+    client.post("/api/v1/config/import?dry_run=false", json=doc)
+
+    listed = client.get("/api/v1/dicom-web/workitems/subscriptions").json()
+    assert [s["subscriber_aet"] for s in listed] == ["CT_01"]
+    assert listed[0]["workitem_uid"] == "1.2.3"
+
+
+def test_an_import_cannot_smuggle_in_a_deployment_owned_setting(client):
+    """`spool_dir` from a file would point the container at an unmapped path —
+    the same value the API refuses with 409 must not slip in through the import."""
+    document = {"schema_version": 1, "settings": {"spool_dir": "/tmp/evil"}}
+    plan = client.post("/api/v1/config/import?dry_run=true", json=document).json()
+    assert any("deployment" in reason for reason in plan["skipped"])
+
+    before = client.get("/api/v1/settings/spool_dir").json()["value"]
+    client.post("/api/v1/config/import?dry_run=false", json=document)
+    assert client.get("/api/v1/settings/spool_dir").json()["value"] == before
+    assert before != "/tmp/evil"

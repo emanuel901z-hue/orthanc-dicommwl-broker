@@ -12,6 +12,11 @@
 # See docs/ha.md.
 x-broker-environment: &broker-environment
   BROKER_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/mwl
+  # Connection pool — read in db.py, and dimensioned for the background workers
+  # (echo, spool, retention, ATNA, MPPS) next to the DIMSE handlers and the API.
+  BROKER_DB_POOL_SIZE: ${BROKER_DB_POOL_SIZE:-10}
+  BROKER_DB_MAX_OVERFLOW: ${BROKER_DB_MAX_OVERFLOW:-20}
+  BROKER_DB_POOL_TIMEOUT: ${BROKER_DB_POOL_TIMEOUT:-15}
   BROKER_AET: ${BROKER_AET}
   BROKER_DICOM_PORT: "11113"
   BROKER_ECHO_INTERVAL_S: ${BROKER_ECHO_INTERVAL_S}
@@ -29,6 +34,24 @@ x-broker-environment: &broker-environment
   BROKER_SPOOL_POLL_S: ${BROKER_SPOOL_POLL_S:-10}
   BROKER_SPOOL_LEASE_S: ${BROKER_SPOOL_LEASE_S:-300}
   BROKER_CACHE_STALE_MAX_S: ${BROKER_CACHE_STALE_MAX_S:-120}
+  # DICOM TLS listener: the container port must match the published port below,
+  # so it is a deployment value — the UI shows it read-only (DEPLOYMENT_ONLY).
+  BROKER_TLS_INBOUND_PORT: ${BROKER_TLS_INBOUND_PORT:-2762}
+  # HL7 order intake over REST, and optionally MLLP
+  BROKER_HL7_ENABLED: ${BROKER_HL7_ENABLED:-true}
+  BROKER_HL7_MLLP_ENABLED: ${BROKER_HL7_MLLP_ENABLED:-false}
+  BROKER_HL7_MLLP_BIND: ${BROKER_HL7_MLLP_BIND:-0.0.0.0}
+  BROKER_HL7_MLLP_PORT: ${BROKER_HL7_MLLP_PORT:-2575}
+  BROKER_HL7_DEFAULT_STATION_AET: ${BROKER_HL7_DEFAULT_STATION_AET:-}
+  BROKER_HL7_DEFAULT_MODALITY: ${BROKER_HL7_DEFAULT_MODALITY:-}
+  # GDT/BDT intake (practices without HL7)
+  BROKER_GDT_ENABLED: ${BROKER_GDT_ENABLED:-true}
+  BROKER_GDT_DEFAULT_STATION_AET: ${BROKER_GDT_DEFAULT_STATION_AET:-}
+  BROKER_GDT_DEFAULT_MODALITY: ${BROKER_GDT_DEFAULT_MODALITY:-}
+  BROKER_GDT_FIELD_MAP: ${BROKER_GDT_FIELD_MAP:-}
+  # Prior-study prefetch (C-FIND/C-MOVE client)
+  BROKER_PREFETCH_TIMEOUT_S: ${BROKER_PREFETCH_TIMEOUT_S:-120}
+  BROKER_PREFETCH_MAX_CONCURRENCY: ${BROKER_PREFETCH_MAX_CONCURRENCY:-2}
   BROKER_HA_HEARTBEAT_S: ${BROKER_HA_HEARTBEAT_S:-10}
   BROKER_HA_INSTANCE_TIMEOUT_S: ${BROKER_HA_INSTANCE_TIMEOUT_S:-60}
 services:
@@ -97,8 +120,10 @@ services:
     ports:
       - "${BROKER_API_BIND:-127.0.0.1}:${BROKER_API_PORT}:8081"
       - "${BROKER_DICOM_PORT}:11113"
-      # DICOM TLS listener (off by default; the port is simply unused then)
-      - "${BROKER_TLS_PORT:-2762}:2762"
+      # DICOM TLS listener (off by default; the port is simply unused then).
+      # Both sides come from `.env` — the container port must match the setting
+      # the broker reads, which is why it is not editable in the UI.
+      - "${BROKER_TLS_PORT:-2762}:${BROKER_TLS_INBOUND_PORT:-2762}"
     environment:
       <<: *broker-environment
       BROKER_INSTANCE_ID: ${BROKER_INSTANCE_ID:-broker-a}
@@ -106,6 +131,8 @@ services:
       # store and forward: undeliverable instances survive a PACS outage and a
       # container restart — keep this on real storage with enough headroom
       - mwl-spool:/var/lib/mwl-broker/spool
+      # generated/uploaded TLS certificates must survive a container recreation
+      - mwl-tls:/var/lib/mwl-broker/tls
     extra_hosts:
       # lets the broker reach services on the host (e.g. a webhook receiver)
       - "host.docker.internal:host-gateway"
@@ -139,13 +166,15 @@ services:
     ports:
       - "${BROKER_B_API_BIND:-127.0.0.1}:${BROKER_B_API_PORT:-18091}:8081"
       - "${BROKER_B_DICOM_PORT:-11123}:11113"
-      - "${BROKER_B_TLS_PORT:-2763}:2762"
+      - "${BROKER_B_TLS_PORT:-2763}:${BROKER_TLS_INBOUND_PORT:-2762}"
     environment:
       <<: *broker-environment
       BROKER_INSTANCE_ID: ${BROKER_B_INSTANCE_ID:-broker-b}
     volumes:
       # the SAME volume as the first instance — that is the point
       - mwl-spool:/var/lib/mwl-broker/spool
+      # and the same certificates: both instances answer with the same identity
+      - mwl-tls:/var/lib/mwl-broker/tls
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -226,3 +255,8 @@ volumes:
   orthanc-data:
   # store and forward spool: holds undeliverable DICOM instances
   mwl-spool:
+  # certificates the broker generates itself (self-signed / uploaded). Without a
+  # volume they would live on the container filesystem and disappear on the next
+  # `up --force-recreate` or image update — the TLS listener would then fail to
+  # start with "file not found".
+  mwl-tls:

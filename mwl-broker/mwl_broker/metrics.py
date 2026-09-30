@@ -49,6 +49,22 @@ HL7_MESSAGES = Counter(
 GDT_RECORDS = Counter(
     "mwl_gdt_records_total", "Inbound GDT/BDT records", ["result"]
 )
+PREFETCH_RUNS = Counter(
+    "mwl_prefetch_total",
+    "Prior-study prefetch runs (result: dry_run | ok | partial | busy | error)",
+    ["result"],
+)
+PREFETCH_STUDIES = Counter(
+    "mwl_prefetch_studies_total",
+    "Studies handled by the prefetch (result: moved | failed | skipped)",
+    ["result"],
+)
+UPS_WORKITEMS = Counter(
+    "mwl_ups_workitems_total", "UPS-RS work item operations", ["operation"]
+)
+UPS_EVENTS = Counter(
+    "mwl_ups_events_total", "Events delivered to UPS-RS subscribers", ["result"]
+)
 ATNA_SENT = Counter("mwl_atna_sent_total", "ATNA audit messages delivered", ["event"])
 ATNA_FAILED = Counter("mwl_atna_failed_total", "ATNA audit messages that failed", ["event"])
 ATNA_DROPPED = Counter("mwl_atna_dropped_total", "ATNA audit messages dropped (queue full)")

@@ -22,6 +22,9 @@ name. The query itself carries the patient ID (that is what identifies the
 priors), and it is never logged.
 """
 import logging
+import threading
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from pydicom.dataset import Dataset
@@ -31,11 +34,17 @@ from pynetdicom.sop_class import (
     StudyRootQueryRetrieveInformationModelMove,
 )
 
-from . import settings_service
+from . import metrics, settings_service
 from .db import session_factory
 from .models import PacsTarget
 
 log = logging.getLogger("mwl_broker.prefetch")
+
+# A move that gets less than this many seconds is not started — better to report
+# "not attempted" than to open an association that is cut off mid-transfer. Kept
+# below the smallest allowed budget (5 s), otherwise the first study would never
+# start.
+MIN_MOVE_S = 3
 
 # a few C-MOVE/C-FIND status codes worth naming in plain words
 STATUS_TEXT = {
@@ -191,12 +200,54 @@ def move_study(node: NodeCfg, study_uid: str, destination_aet: str, *,
     }
 
 
+class PrefetchBusy(RuntimeError):
+    """Too many prefetch calls are running — the caller should come back later."""
+
+
+_running = 0
+_running_lock = threading.Lock()
+
+
+@contextmanager
+def _slot():
+    """Bound how many prefetch calls run at once.
+
+    Each call occupies a request worker and a PACS association for up to the
+    whole time budget. Without a limit, a handful of concurrent calls would tie
+    up the API (and with it `/healthz`) for everyone — the broker would look
+    dead while it is only busy prefetching. The limit is a runtime setting, so a
+    busy house can raise it without a restart.
+    """
+    global _running
+    limit = max(1, settings_service.get_int("prefetch_max_concurrency"))
+    with _running_lock:
+        if _running >= limit:
+            raise PrefetchBusy(
+                f"{_running} prefetch call(s) already running (limit {limit}) — "
+                "try again shortly or raise `prefetch_max_concurrency`"
+            )
+        _running += 1
+    try:
+        yield
+    finally:
+        with _running_lock:
+            _running -= 1
+
+
+def reset_for_tests() -> None:
+    global _running
+    with _running_lock:
+        _running = 0
+
+
 def prefetch(patient_id: str, *, query_node: str, destination: str, modality: str = "",
              exclude_study_uid: str = "", max_studies: int = 5, dry_run: bool = True) -> dict:
     """Plan (dry run) or perform the prefetch of a patient's prior studies.
 
-    Raises ValueError for an unknown node or a missing patient ID — the API turns
-    that into a 422 with the same plain-language message.
+    The whole call is bounded by `prefetch_timeout_s`; studies that no longer fit
+    are reported as `skipped` instead of being started and cut off. Raises
+    ValueError for an unknown node or a missing patient ID — the API turns that
+    into a 422 with the same plain-language message.
     """
     patient_id = (patient_id or "").strip()
     if not patient_id:
@@ -221,16 +272,36 @@ def prefetch(patient_id: str, *, query_node: str, destination: str, modality: st
         "patient_id": patient_id,
         "studies": studies,
         "moved": [],
+        "skipped": [],
     }
     if dry_run or not studies:
+        metrics.PREFETCH_RUNS.labels(result="dry_run" if dry_run else "ok").inc()
         return result
 
-    move_timeout = settings_service.get_int("prefetch_timeout_s")
-    result["moved"] = [
-        move_study(node, study["study_uid"], target.aet, timeout_s=move_timeout)
-        for study in studies
-    ]
-    delivered = sum(1 for move in result["moved"] if move["ok"])
-    log.info("prefetch: %d of %d prior study/studies sent to %s",
-             delivered, len(result["moved"]), target.name)
+    budget_s = settings_service.get_int("prefetch_timeout_s")
+    deadline = time.monotonic() + budget_s
+    with _slot():
+        moved = []
+        skipped = []
+        for study in studies:
+            remaining = deadline - time.monotonic()
+            if remaining < MIN_MOVE_S:
+                # the budget is spent: report it instead of starting a move that
+                # would be cut off mid-transfer
+                skipped.append(study["study_uid"])
+                continue
+            moved.append(move_study(node, study["study_uid"], target.aet,
+                                    timeout_s=int(remaining)))
+        result["moved"] = moved
+        result["skipped"] = skipped
+
+    delivered = sum(1 for move in moved if move["ok"])
+    failed = len(moved) - delivered
+    metrics.PREFETCH_STUDIES.labels(result="moved").inc(delivered)
+    metrics.PREFETCH_STUDIES.labels(result="failed").inc(failed)
+    metrics.PREFETCH_STUDIES.labels(result="skipped").inc(len(skipped))
+    metrics.PREFETCH_RUNS.labels(
+        result="ok" if not failed and not skipped else "partial").inc()
+    log.info("prefetch: %d of %d prior study/studies sent to %s (%d skipped)",
+             delivered, len(moved), target.name, len(skipped))
     return result

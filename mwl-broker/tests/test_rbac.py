@@ -163,3 +163,42 @@ def test_read_only_helper_matches_the_policy():
     assert rbac.is_read_only_request("POST", "/api/v1/config/import") is False
     assert rbac.is_read_only_request("POST", "/api/v1/sources") is False
     assert rbac.is_read_only_request("DELETE", "/api/v1/cache") is False
+
+
+def test_every_dry_run_endpoint_is_read_only_for_a_read_only_operator(client):
+    """The policy is derived from the API, not from a hand-kept list.
+
+    A route that offers `?dry_run=` is a safe look — a read-only operator must
+    not be locked out of it. The list in `rbac` was hand-maintained and the GDT
+    and prefetch endpoints were missing: `POST /gdt/order?dry_run=true` answered
+    403 in `enforce` mode, which is exactly the tool the dry run exists for.
+    """
+    from mwl_broker.main import app
+
+    client.put("/api/v1/settings/rbac_mode", json={"value": "enforce"})
+    missing = []
+    for path, operations in app.openapi()["paths"].items():
+        for method, operation in operations.items():
+            if method != "post":
+                continue
+            parameters = {p["name"] for p in operation.get("parameters", [])}
+            if "dry_run" not in parameters:
+                continue
+            if not rbac.is_read_only_request("POST", path, "dry_run=true"):
+                missing.append(f"{method.upper()} {path}")
+    assert not missing, (
+        "these endpoints offer a dry run but deny a read-only operator: "
+        f"{missing} — add them to DRY_RUN_POST_PATTERNS"
+    )
+
+    # and the same routes stay a write without the flag
+    assert client.post("/api/v1/gdt/order?dry_run=true", content="",
+                       headers={"Content-Type": "text/plain"}).status_code != 403
+    assert client.post("/api/v1/gdt/order", content="",
+                       headers={"Content-Type": "text/plain"}).status_code == 403
+    assert client.post("/api/v1/prefetch?dry_run=true",
+                       json={"patient_id": "P", "query_node": "a",
+                             "destination": "b"}).status_code != 403
+    assert client.post("/api/v1/prefetch",
+                       json={"patient_id": "P", "query_node": "a",
+                             "destination": "b"}).status_code == 403

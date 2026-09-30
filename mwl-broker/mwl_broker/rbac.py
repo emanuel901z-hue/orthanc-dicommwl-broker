@@ -35,8 +35,14 @@ READ_ONLY_POST_PATTERNS = (
 
 # Routes that are only read-only *when* they ask for a dry run. Applying the same
 # payload must keep the write role, so the decision looks at the query string.
+# Every endpoint with a `dry_run` switch belongs here — otherwise a read-only
+# operator is locked out of exactly the safe tool the dry run is for.
 DRY_RUN_POST_PATTERNS = (
     r"^/api/v1/hl7/orm$",
+    r"^/api/v1/hl7/adt$",
+    r"^/api/v1/hl7/messages/[^/]+/reprocess$",
+    r"^/api/v1/gdt/order$",
+    r"^/api/v1/prefetch$",
     r"^/api/v1/config/import$",
 )
 

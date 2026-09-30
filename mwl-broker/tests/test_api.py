@@ -826,16 +826,23 @@ def test_spool_endpoints(client):
 
 
 def test_spool_settings_are_validated(client):
+    # `spool_dir` is deployment-owned: the spool volume is mounted at a fixed
+    # path, so a runtime change would send buffered images to the ephemeral
+    # container disk (lost on the next restart). The API refuses it; the value
+    # itself is still validated.
+    from mwl_broker import settings_service
+
     assert client.put("/api/v1/settings/spool_dir",
-                      json={"value": "/var/lib/mwl-broker/spool"}).status_code == 200
-    assert client.put("/api/v1/settings/spool_dir",
-                      json={"value": "relative/path"}).status_code == 422
+                      json={"value": "/var/lib/mwl-broker/spool"}).status_code == 409
+    assert settings_service.validate_value("spool_dir", "relative/path") == [
+        "must be an absolute path"]
     assert client.put("/api/v1/settings/spool_max_attempts",
                       json={"value": "0"}).status_code == 422
     assert client.put("/api/v1/settings/accept_when_queued",
                       json={"value": "false"}).status_code == 200
     rows = {s["key"]: s for s in client.get("/api/v1/settings").json()}
     assert rows["spool_dir"]["kind"] == "path"
+    assert rows["spool_dir"]["editable"] is False
     assert rows["spool_enabled"]["default"] == "True"
 
 
@@ -1098,8 +1105,12 @@ def test_tls_endpoints(client, tmp_path):
     # nothing configured → no key material anywhere in the response
     assert "BEGIN" not in json.dumps(overview)
 
-    # generate a certificate (the pragmatic path without a PKI)
-    client.put("/api/v1/settings/tls_dir", json={"value": str(tmp_path)})
+    # generate a certificate (the pragmatic path without a PKI). `tls_dir` is
+    # deployment-owned (it has to match the mounted volume), so the test points
+    # it at a writable directory directly instead of through the API.
+    from mwl_broker import settings_service
+
+    settings_service.set_value("tls_dir", str(tmp_path))
     created = client.post("/api/v1/tls/self-signed", json={
         "common_name": "mwl-broker.hospital.local", "days": 365,
         "san": ["10.0.1.47", "mwl-broker.hospital.local"],
@@ -1134,12 +1145,17 @@ def test_tls_endpoints(client, tmp_path):
 
 
 def test_tls_settings_are_validated(client):
+    from mwl_broker import settings_service
+
     assert client.put("/api/v1/settings/tls_inbound_client_auth",
                       json={"value": "required"}).status_code == 200
     assert client.put("/api/v1/settings/tls_inbound_client_auth",
                       json={"value": "maybe"}).status_code == 422
+    # the listener port has to match the published container port → read-only
     assert client.put("/api/v1/settings/tls_inbound_port",
-                      json={"value": "0"}).status_code == 422
+                      json={"value": "0"}).status_code == 409
+    assert settings_service.validate_value("tls_inbound_port", "0") == [
+        "must be between 1 and 65535"]
     assert client.put("/api/v1/settings/tls_inbound_cert_file",
                       json={"value": "relative.crt"}).status_code == 422
     assert client.put("/api/v1/settings/tls_outbound_verify",

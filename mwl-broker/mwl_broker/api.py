@@ -780,6 +780,9 @@ def get_setting(
     response_description="The setting with its new effective value.",
     responses={
         404: {"description": "Unknown setting key."},
+        409: {"description": "The setting belongs to the deployment (spool volume, "
+                             "container port, instance name) and cannot be changed "
+                             "at runtime — set it in `.env`/compose instead."},
         422: {"description": "Invalid value for this setting type."},
     },
 )
@@ -791,6 +794,14 @@ def update_setting(
 ):
     if key not in settings_service.KNOWN:
         raise HTTPException(404, f"unknown setting {key!r}")
+    if key in settings_service.DEPLOYMENT_ONLY:
+        # the value has to match the compose mapping / the mounted volume; a
+        # runtime change would silently point the container somewhere unmapped
+        raise HTTPException(409, (
+            f"{key!r} belongs to the deployment and cannot be changed here: the "
+            "container port and the mounted volumes come from docker-compose.yml. "
+            "Set it in `.env` (or the compose file) and restart the broker."
+        ))
     errors = settings_service.validate_value(key, body.value)
     if errors:
         raise HTTPException(422, detail=errors)
@@ -1592,6 +1603,7 @@ def apply_gdt_order(
         raise HTTPException(422, ["GDT intake is disabled (setting gdt_enabled)"])
     parsed = gdt.parse(body)
     if not parsed["supported"]:
+        metrics.GDT_RECORDS.labels(result="rejected").inc()
         if not dry_run:
             local_worklist.log_hl7("gdt", parsed, "rejected", parsed["reject_reason"])
         raise HTTPException(422, [parsed["reject_reason"]])
@@ -2247,12 +2259,18 @@ def order_context(
                 "acts as a query/retrieve **client** here; it never *offers* "
                 "C-MOVE (no presentation context is accepted on its own port). Both "
                 "nodes are PACS targets by name, and the query node must know the "
-                "destination AE title as a move destination. PHI-free answer: the "
-                "patient ID is the query, never echoed.",
+                "destination AE title as a move destination. The whole call is "
+                "bounded by `prefetch_timeout_s`; studies that no longer fit come "
+                "back as `skipped`, and more than `prefetch_max_concurrency` "
+                "simultaneous calls answer 429 instead of tying up the broker. "
+                "PHI-free answer: the patient ID is the query, never echoed.",
     response_description="The prior studies found and, when applied, the move results.",
     responses={
         422: {"description": "Unknown node, missing patient ID, or a query the "
                              "broker refuses before it talks to anyone."},
+        429: {"description": "Too many prefetch calls are running — retry shortly "
+                             "(see the `prefetch_max_concurrency` setting)."},
+        502: {"description": "The query node could not be reached."},
         **_docs(READ_ONLY_403),
     },
 )
@@ -2260,7 +2278,6 @@ def prefetch_studies(
     request: Request,
     body: Annotated[PrefetchIn, Body(description="Which patient, which nodes, how many priors.")],
     dry_run: bool = Query(default=True, description="Only find and report; move nothing."),
-    s: Session = _db_dep,
 ):
     try:
         result = prefetch.prefetch(
@@ -2270,17 +2287,27 @@ def prefetch_studies(
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
+    except prefetch.PrefetchBusy as exc:
+        metrics.PREFETCH_RUNS.labels(result="busy").inc()
+        raise HTTPException(429, str(exc))
     except ConnectionError as exc:
+        metrics.PREFETCH_RUNS.labels(result="error").inc()
         raise HTTPException(502, f"the query node could not be reached: {exc}")
     if not dry_run:
-        # PHI-free snapshot: node names and counts, never the patient ID
-        audit.record(s, _actor(request), "prefetch.run", "prefetch", None, None,
-                     {"query_node": result["query_node"],
-                      "destination": result["destination"],
-                      "studies": len(result["studies"]),
-                      "moved": sum(1 for move in result["moved"] if move["ok"])},
-                     _correlation(request))
-        s.commit()
+        # A short session, opened only for the audit write. The request must not
+        # hold a pooled database connection while the C-MOVEs run — a prefetch
+        # can occupy a worker for the whole budget, and a few of those would
+        # exhaust the pool for every other endpoint and the DIMSE handlers.
+        # PHI-free snapshot: node names and counts, never the patient ID.
+        with get_session() as s:
+            audit.record(s, _actor(request), "prefetch.run", "prefetch", None, None,
+                         {"query_node": result["query_node"],
+                          "destination": result["destination"],
+                          "studies": len(result["studies"]),
+                          "moved": sum(1 for move in result["moved"] if move["ok"]),
+                          "skipped": len(result["skipped"])},
+                         _correlation(request))
+            s.commit()
     return result
 
 
@@ -2404,6 +2431,7 @@ def ups_search(
     # the client sends DICOM keywords; the module works on the JSON tag keys
     query = {ups.QUERY_KEYS[key]: value
              for key, value in request.query_params.items() if key in ups.QUERY_KEYS}
+    metrics.UPS_WORKITEMS.labels(operation="search").inc()
     return ups.search(query, limit=limit, include_upstream=include_upstream and bool(query))
 
 
@@ -2476,11 +2504,18 @@ def ups_delete_subscription(
 
 @router.websocket("/dicom-web/workitems/ws")
 async def ups_event_channel(websocket: WebSocket, subscriber: str = Query(default="")):
-    """The event channel: work item events as JSON to one connected subscriber."""
+    """The event channel: work item events as JSON to one connected subscriber.
+
+    The subscriber must have created a subscription first (PS3.18 §11.6) and the
+    hub takes at most `_EventHub.MAX_SUBSCRIBERS` live channels — beyond that the
+    handshake is refused instead of queueing events nobody reads.
+    """
     queue: asyncio.Queue = asyncio.Queue()
     # register before the handshake completes: a state change right after the
     # client's connect must not race the registration and get lost
-    ups.hub.subscribe(subscriber, queue)
+    if not ups.hub.subscribe(subscriber, queue):
+        await websocket.close(code=1008)      # policy violation / try again later
+        return
     try:
         await websocket.accept()
         while True:

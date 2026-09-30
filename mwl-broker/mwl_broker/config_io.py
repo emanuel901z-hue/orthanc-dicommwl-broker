@@ -10,15 +10,16 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from . import audit, settings_service
-from .models import BrokerSetting, MwlSource, PacsTarget, RoutingRule, TransformRule
+from . import audit, settings_service, ups
+from .models import (BrokerSetting, MwlSource, PacsTarget, RoutingRule, TransformRule,
+                     UpsSubscription)
 
 log = logging.getLogger("mwl_broker.config_io")
 
 SCHEMA_VERSION = 1
 
 # Fields that identify an entry and are therefore not part of the diff.
-_IDENTITY = {"name", "key", "source", "target"}
+_IDENTITY = {"name", "key", "source", "target", "subscriber_aet"}
 
 
 def export_config(session) -> dict:
@@ -28,6 +29,8 @@ def export_config(session) -> dict:
     rules = session.scalars(select(RoutingRule).order_by(RoutingRule.id)).all()
     transforms = session.scalars(select(TransformRule).order_by(TransformRule.id)).all()
     settings = session.scalars(select(BrokerSetting)).all()
+    subscriptions = session.scalars(
+        select(UpsSubscription).order_by(UpsSubscription.id)).all()
 
     src_names = {s.id: s.name for s in sources}
     tgt_names = {t.id: t.name for t in targets}
@@ -55,6 +58,13 @@ def export_config(session) -> dict:
             for t in transforms
         ],
         "settings": {s.key: s.value for s in settings},
+        # UPS-RS subscriptions are configuration like sources/targets: a staging
+        # export should be able to reproduce who listens to which work items.
+        "ups_subscriptions": [
+            {"subscriber_aet": s.subscriber_aet, "workitem_uid": s.workitem_uid,
+             "deletion_lock": s.deletion_lock}
+            for s in subscriptions
+        ],
     }
 
 
@@ -94,6 +104,8 @@ def plan_import(session, payload: dict) -> dict:
     targets = _rows_by_name(session, PacsTarget)
     transforms = _rows_by_name(session, TransformRule)
     settings = {s.key: s for s in session.scalars(select(BrokerSetting)).all()}
+    subscriptions = {s.subscriber_aet: s
+                     for s in session.scalars(select(UpsSubscription)).all()}
 
     # A document may create the very nodes its rules reference — so the plan
     # resolves names against the database *plus* the document itself.
@@ -172,6 +184,11 @@ def plan_import(session, payload: dict) -> dict:
         if key not in settings_service.KNOWN:
             skipped.append(f"setting {key}: unknown key")
             continue
+        if key in settings_service.DEPLOYMENT_ONLY:
+            # the value has to match the compose mapping / the mounted volume —
+            # an import must not smuggle one in behind the API's back
+            skipped.append(f"setting {key}: belongs to the deployment, not importable")
+            continue
         errors = settings_service.validate_value(key, value)
         if errors:
             skipped.append(f"setting {key}: {'; '.join(errors)}")
@@ -180,6 +197,25 @@ def plan_import(session, payload: dict) -> dict:
         if existing is None or existing.value != value:
             changes.append({"entity": "setting", "action": "update", "name": key,
                             "fields": {"value": value}})
+
+    for item in payload.get("ups_subscriptions", []):
+        subscriber = (item.get("subscriber_aet") or "").strip().upper()
+        if not subscriber:
+            skipped.append("ups subscription without subscriber_aet")
+            continue
+        fields = {"workitem_uid": item.get("workitem_uid", "") or "",
+                  "deletion_lock": bool(item.get("deletion_lock", False))}
+        existing = subscriptions.get(subscriber)
+        if existing is None:
+            changes.append({"entity": "ups_subscription", "action": "create",
+                            "name": subscriber, "fields": fields})
+        else:
+            diff = _diff_fields(
+                {"workitem_uid": existing.workitem_uid,
+                 "deletion_lock": existing.deletion_lock}, fields)
+            if diff:
+                changes.append({"entity": "ups_subscription", "action": "update",
+                                "name": subscriber, "fields": diff})
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -200,6 +236,8 @@ def apply_import(session, payload: dict, actor: str) -> dict:
     sources = _rows_by_name(session, MwlSource)
     targets = _rows_by_name(session, PacsTarget)
     transforms = _rows_by_name(session, TransformRule)
+    subscriptions = {s.subscriber_aet: s
+                     for s in session.scalars(select(UpsSubscription)).all()}
 
     for item in payload.get("sources", []):
         row = sources.get(item["name"])
@@ -278,6 +316,8 @@ def apply_import(session, payload: dict, actor: str) -> dict:
     for key, value in (payload.get("settings") or {}).items():
         if key not in settings_service.KNOWN or settings_service.validate_value(key, value):
             continue
+        if key in settings_service.DEPLOYMENT_ONLY:
+            continue
         row = session.get(BrokerSetting, key)
         before = audit.snapshot("setting", row)
         if row is None:
@@ -288,6 +328,23 @@ def apply_import(session, payload: dict, actor: str) -> dict:
         session.flush()
         audit.record(session, actor, "import.setting", "setting", None, before,
                      audit.snapshot("setting", row))
+
+    for item in payload.get("ups_subscriptions", []):
+        subscriber = (item.get("subscriber_aet") or "").strip().upper()
+        if not subscriber:
+            continue
+        row = subscriptions.get(subscriber)
+        before = audit.snapshot("ups_subscription", row)
+        if row is None:
+            row = UpsSubscription(subscriber_aet=subscriber)
+            session.add(row)
+        row.workitem_uid = item.get("workitem_uid", "") or ""
+        row.deletion_lock = bool(item.get("deletion_lock", False))
+        session.flush()
+        audit.record(session, actor, "import.ups_subscription", "ups_subscription",
+                     row.id, before, audit.snapshot("ups_subscription", row))
+        # the event hub caches the scope — keep it in step with the import
+        ups.hub.set_scope(subscriber, row.workitem_uid)
 
     session.commit()
     return plan

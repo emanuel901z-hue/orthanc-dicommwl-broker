@@ -21,6 +21,7 @@ from .models import (
     PacsTarget,
     RoutingRule,
     TransformRule,
+    UpsSubscription,
 )
 
 log = logging.getLogger("mwl_broker.audit")
@@ -95,6 +96,11 @@ def _setting(row: BrokerSetting) -> dict:
     return {"key": row.key, "value": row.value}
 
 
+def _ups_subscription(row: UpsSubscription) -> dict:
+    return {"subscriber_aet": row.subscriber_aet, "workitem_uid": row.workitem_uid,
+            "deletion_lock": row.deletion_lock}
+
+
 SERIALIZERS = {
     "source": (MwlSource, _source),
     "local_item": (LocalWorklistItem, _local_item),
@@ -103,6 +109,7 @@ SERIALIZERS = {
     "rule": (RoutingRule, _rule),
     "transform": (TransformRule, _transform),
     "setting": (BrokerSetting, _setting),
+    "ups_subscription": (UpsSubscription, _ups_subscription),
 }
 
 

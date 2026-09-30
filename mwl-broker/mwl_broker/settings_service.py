@@ -178,8 +178,13 @@ KNOWN: dict[str, tuple[str, str]] = {
     ),
     "prefetch_timeout_s": (
         "int",
-        "Timeout of one prefetch C-MOVE in seconds (the PACS sends the study "
-        "while the broker waits).",
+        "Overall time budget of one prefetch call in seconds. The C-MOVE keeps a "
+        "request worker busy while the PACS sends, so the whole call is bounded.",
+    ),
+    "prefetch_max_concurrency": (
+        "int",
+        "How many prefetch calls may run at once. Each holds a request worker and "
+        "a PACS association; further callers get 429.",
     ),
     "atna_enabled": (
         "bool",
@@ -344,8 +349,21 @@ KNOWN: dict[str, tuple[str, str]] = {
     ),
 }
 
-_INT_RANGES: dict[str, tuple[int, int]] = {
-    "seen_item_ttl_days": (1, 3650),
+# Settings that belong to the **deployment**, not to the running configuration:
+# their value has to match the compose mapping or the mounted volume. Changing
+# one at runtime would point the container somewhere that is not mapped —
+# a different spool directory (images land on the ephemeral container disk and
+# are gone after a restart) or a TLS port the reverse proxy does not forward.
+# They stay readable (the operator must see what is configured) but not
+# writable; the deployment sets them in `.env`/compose.
+DEPLOYMENT_ONLY: frozenset[str] = frozenset({
+    "spool_dir",
+    "tls_dir",
+    "tls_inbound_port",
+    "instance_id",
+})
+
+_INT_RANGES: dict[str, tuple[int, int]] = {    "seen_item_ttl_days": (1, 3650),
     "upstream_timeout_s": (1, 600),
     "echo_interval_s": (5, 3600),
     "retention_query_log_days": (0, 36500),
@@ -374,6 +392,7 @@ _INT_RANGES: dict[str, tuple[int, int]] = {
     "ha_instance_timeout_s": (10, 3600),
     "cache_stale_max_s": (0, 86400),
     "prefetch_timeout_s": (5, 3600),
+    "prefetch_max_concurrency": (1, 10),
     "cache_max_items": (1, 100000),
     "breaker_fail_threshold": (1, 100),
     "breaker_open_seconds": (5, 3600),
@@ -515,6 +534,8 @@ def list_all() -> list[dict]:
             "source": "db" if key in rows else "env",
             "kind": kind,
             "description": description,
+            # a deployment-owned setting is shown but cannot be changed here
+            "editable": key not in DEPLOYMENT_ONLY,
         }
         entry.update(_constraints(kind))
         if kind == "int":

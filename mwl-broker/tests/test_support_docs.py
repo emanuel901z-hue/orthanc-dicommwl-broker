@@ -119,7 +119,8 @@ def test_every_script_the_documents_tell_you_to_run_exists():
 def test_the_training_document_lists_every_help_page():
     """The ten help pages are a training asset — the list has to be complete."""
     listed = set(re.findall(r"`(overview|sources|targets|rules|transforms|stations|"
-                            r"worklist|spool|audit|settings)`", TRAINING.read_text()))
+                            r"worklist|spool|audit|settings|prefetch)`",
+                            TRAINING.read_text()))
     in_ui = set()
     for path in (OE3 / "src" / "features" / "broker").rglob("*.tsx"):
         if path.name.endswith(".test.tsx"):
