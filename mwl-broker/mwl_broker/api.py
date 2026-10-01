@@ -1494,7 +1494,7 @@ def reprocess_hl7_message(
         default_modality=settings_service.get_str("hl7_default_modality"),
         raw=row.raw,
     )
-    audit.record(s, _actor(request), f"hl7.reprocess", "hl7_message", row.id,
+    audit.record(s, _actor(request), "hl7.reprocess", "hl7_message", row.id,
                  None, {"action": result["action"], "item_id": result["item_id"]},
                  _correlation(request))
     s.commit()
