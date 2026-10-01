@@ -168,11 +168,14 @@ def test_every_write_schema_field_is_reachable_in_the_ui():
             gaps[name] = missing
     # the import document is assembled by the UI from the export file, not typed
     gaps.pop("ConfigImportIn", None)
-    # API-only interfaces have no operator form by design (see API_ONLY above):
-    # the UPS-RS subscriptions and the prefetch tool are driven by the external
-    # client that uses them, not by this settings UI.
-    for name in ("UpsSubscriptionIn", "PrefetchIn"):
-        gaps.pop(name, None)
+    # UPS-RS subscriptions have no operator form by design: the **subscriber** is
+    # the client that wants the events, so it creates its own subscription. The
+    # settings UI only lists and removes them (`UpsSubscriptionOut` is covered by
+    # the field-level checks below).
+    gaps.pop("UpsSubscriptionIn", None)
+    # `PrefetchIn` is *not* excluded: the prefetch page has a form, so every field
+    # belongs in it. The exclusion was here when the page did not exist yet and
+    # silently hid `exclude_study_uid`.
     assert not gaps, f"write fields no form can set: {gaps}"
 
 
