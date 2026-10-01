@@ -296,3 +296,166 @@ def test_a_subscription_can_be_scoped_to_one_work_item(client):
 def test_a_subscription_needs_a_subscriber(client):
     assert client.post("/api/v1/dicom-web/workitems/subscriptions",
                        json={"subscriber_aet": ""}).status_code == 422
+
+
+# ── Randfälle, die die Oberfläche und die Ereignisse betreffen ──────────
+
+
+def test_a_disabled_item_without_a_known_state_reads_as_canceled(client):
+    """`sps_status` is free text — an unknown value must not invent a state."""
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import LocalWorklistItem
+
+    with session_factory()() as s:
+        s.add(LocalWorklistItem(accession="ACC-ODD", patient_id="P-1",
+                                sps_status="NONSENSE", enabled=False))
+        s.commit()
+
+    found = client.get("/api/v1/dicom-web/workitems",
+                       params={"AccessionNumber": "ACC-ODD"}).json()
+
+    assert found[0]["00404041"]["Value"] == ["CANCELED"]
+
+
+def test_the_search_ignores_an_empty_query_value(client):
+    client.post("/api/v1/dicom-web/workitems", json=_workitem())
+
+    assert ups._pushdown_clauses({"00080050": ""}) == []
+    assert len(ups.search({"00080050": ""})) == 1        # still matches everything
+
+
+def test_the_search_stops_at_the_limit(client):
+    for n in range(3):
+        client.post("/api/v1/dicom-web/workitems",
+                    json=_workitem(accession=f"ACC-LIM-{n}"))
+
+    assert len(client.get("/api/v1/dicom-web/workitems",
+                          params={"AccessionNumber": "ACC-LIM", "limit": 2}).json()) == 2
+
+
+def test_an_upstream_item_is_flattened_with_its_start_time(client, monkeypatch):
+    """The MWL answer carries a Scheduled Procedure Step sequence; the work item
+    is flat — including the start time, or the reader sees the wrong slot."""
+    from mwl_broker import aggregation
+
+    _seed_source(client)
+    dataset = _upstream_dataset()
+    dataset.ScheduledProcedureStepSequence[0].ScheduledProcedureStepStartTime = "093000"
+    monkeypatch.setattr(aggregation, "query_source", lambda cfg, ident: [dataset])
+
+    found = client.get("/api/v1/dicom-web/workitems",
+                       params={"AccessionNumber": "ACC-UP"}).json()
+
+    assert found[0]["00400003"]["Value"] == ["093000"]
+    assert found[0]["00741000"]["Value"] == ["SCHEDULED"]
+
+
+def test_a_flattened_item_survives_empty_values(client):
+    from pydicom.dataset import Dataset
+
+    workitem = ups.dataset_to_workitem(Dataset())
+
+    assert workitem["00080050"]["Value"] == [""]
+    assert workitem["00404041"]["Value"] == ["SCHEDULED"]
+    assert "00100010" not in workitem                   # nothing to invent
+
+
+def test_a_subscription_needs_a_subscriber_at_module_level(client):
+    with pytest.raises(ValueError, match="subscriber_aet is required"):
+        ups.upsert_subscription("   ")
+
+
+def test_the_event_channel_needs_a_subscription(client):
+    """PS3.18 §11.6: the subscription comes first — no subscription, no events."""
+    import asyncio
+
+    assert ups.hub.subscribe("NOT_SUBSCRIBED", asyncio.Queue()) is False
+
+
+def test_the_event_hub_refuses_more_than_its_limit(client, monkeypatch):
+    import asyncio
+
+    client.post("/api/v1/dicom-web/workitems/subscriptions",
+                json={"subscriber_aet": "CT_01"})
+    client.post("/api/v1/dicom-web/workitems/subscriptions",
+                json={"subscriber_aet": "MR_01"})
+    monkeypatch.setattr(ups._EventHub, "MAX_SUBSCRIBERS", 1)
+
+    assert ups.hub.subscribe("CT_01", asyncio.Queue()) is True
+    assert ups.hub.subscribe("MR_01", asyncio.Queue()) is False
+
+
+def test_publishing_without_a_loop_and_to_a_dead_loop_is_harmless(client):
+    """A state change may happen before the event loop is bound (or during
+    shutdown) — it must never raise on the DIMSE/request thread."""
+    import asyncio
+
+    ups.hub.reset_for_tests()                                # explicitly no loop
+    ups.hub.publish({"event": "x", "workitem_uid": "1"})     # no loop bound
+
+    class _DeadLoop:
+        def call_soon_threadsafe(self, *_args):
+            raise RuntimeError("loop is closed")
+
+    client.post("/api/v1/dicom-web/workitems/subscriptions",
+                json={"subscriber_aet": "CT_01"})
+    ups.hub.bind_loop(_DeadLoop())
+    assert ups.hub.subscribe("CT_01", asyncio.Queue()) is True
+
+    ups.hub.publish({"event": "x", "workitem_uid": "1"})     # must not raise
+
+
+def test_removing_an_unknown_subscriber_is_a_no_op(client):
+    import asyncio
+
+    ups.hub.unsubscribe("NEVER_THERE", asyncio.Queue())
+    ups.hub.forget("NEVER_THERE")
+    assert ups.delete_subscription("NEVER_THERE") is False
+
+
+def test_an_unknown_step_status_reads_as_scheduled(client):
+    """`ScheduledProcedureStepStatus` is free text — an unknown value must not
+    invent a state the standard does not have."""
+    from pydicom.dataset import Dataset
+
+    ds = Dataset()
+    ds.AccessionNumber = "ACC-UP-9"
+    sps = Dataset()
+    sps.ScheduledProcedureStepStatus = "WHATEVER"
+    ds.ScheduledProcedureStepSequence = [sps]
+
+    assert ups.dataset_to_workitem(ds)["00404041"]["Value"] == ["SCHEDULED"]
+
+
+def test_the_search_skips_local_items_that_do_not_match(client):
+    client.post("/api/v1/dicom-web/workitems", json=_workitem(accession="ACC-ONE"))
+
+    assert ups.search({"00080050": "ACC-TWO"}) == []
+
+
+def test_the_upstream_search_stops_at_the_limit(client, monkeypatch):
+    from mwl_broker import aggregation
+
+    _seed_source(client)
+    monkeypatch.setattr(aggregation, "query_source", lambda cfg, ident: [
+        _upstream_dataset("ACC-UP-1"), _upstream_dataset("ACC-UP-2")])
+
+    found = ups.search({"00080050": "ACC-UP"}, limit=1, include_upstream=True)
+
+    assert [w["00080050"]["Value"][0] for w in found] == ["ACC-UP-1"]
+
+
+def test_set_state_survives_an_item_that_disappeared(client):
+    """Between finding the row and loading it another request may have deleted
+    it — that is a 404, not a crash."""
+    from mwl_broker.models import LocalWorklistItem
+
+    ghost = LocalWorklistItem(id=999999, accession="GONE", sps_id="1")
+    monkeypatch = None
+    original = ups._find
+    ups._find = lambda uid: ghost                      # type: ignore[assignment]
+    try:
+        with pytest.raises(LookupError):
+            ups.set_state("1.2.840.113619.6.500.999999", "COMPLETED")
+    finally:
+        ups._find = original                           # type: ignore[assignment]

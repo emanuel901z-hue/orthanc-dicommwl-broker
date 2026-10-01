@@ -310,3 +310,40 @@ def test_the_prefetch_does_not_hold_a_database_session_during_the_move(client, m
     assert response.status_code == 200
     assert opened == ["1.2.1"]
     assert real_engine is not None
+
+
+# ── Fehlerpfade, die die Oberfläche in Klartext melden muss ─────────────
+
+
+def test_a_missing_patient_id_is_refused(client):
+    with pytest.raises(ValueError, match="patient_id is required"):
+        prefetch.prefetch("  ", query_node="a", destination="b")
+
+
+def test_an_unknown_destination_is_refused(client):
+    _target(client, "pacs", "QR_AET", 1)
+    with pytest.raises(ValueError, match="unknown destination"):
+        prefetch.prefetch("P-1", query_node="pacs", destination="nope")
+
+
+def test_a_rejected_association_is_an_error_not_an_empty_answer(client, monkeypatch):
+    """A PACS that refuses the association must not look like "no priors"."""
+    node = prefetch.NodeCfg(id=1, name="pacs", aet="QR", host="127.0.0.1", port=1)
+
+    class _Refused:
+        is_established = False
+
+    monkeypatch.setattr(prefetch, "_associate", lambda ae, n, timeout: _Refused())
+
+    with pytest.raises(ConnectionError, match="association rejected"):
+        prefetch.find_studies(node, "P-1")
+    with pytest.raises(ConnectionError, match="association rejected"):
+        prefetch.move_study(node, "1.2.3", "DEST")
+
+
+def test_tls_arguments_are_only_built_for_a_tls_node(client):
+    plain = prefetch.NodeCfg(id=1, name="p", aet="A", host="h", port=1, tls=False)
+    secure = prefetch.NodeCfg(id=2, name="s", aet="B", host="h", port=1, tls=True)
+
+    assert prefetch._tls_args(plain) is None
+    assert prefetch._tls_args(secure) is not None      # the TLS context is built

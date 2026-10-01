@@ -181,3 +181,17 @@ def test_rules_are_stored_and_listed(client, seeded):
     assert len(rows) == 2
     assert [r["tag"] for r in merge_rules.list_rules()] == [
         "PatientName", "ScheduledStationAETitle"]
+
+
+def test_a_rule_can_write_into_a_missing_sps_sequence():
+    """A worklist answer without ScheduledProcedureStepSequence is unusual but
+    legal; a field rule must create it instead of dropping the value."""
+    from pydicom.dataset import Dataset
+
+    from mwl_broker import merge_rules
+
+    ds = Dataset()
+    ds.AccessionNumber = "ACC-1"
+    merge_rules._write(ds, "ScheduledStationAETitle", "CT_01")
+
+    assert ds.ScheduledProcedureStepSequence[0].ScheduledStationAETitle == "CT_01"

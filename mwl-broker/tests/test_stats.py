@@ -132,3 +132,28 @@ def test_empty_period_reports_zeroes(client):
     assert body["totals"]["stores"] == 0
     assert body["groups"] == []
     assert len(body["series"]) >= 7
+
+
+def test_a_failed_store_is_counted_per_source(client):
+    """The reporting has to separate "forwarded" from "failed" — otherwise a
+    broken target looks like a busy one."""
+    from mwl_broker import stats
+    from mwl_broker.db import session_factory
+    from mwl_broker.models import MwlSource, StoreLog
+
+    with session_factory()() as s:
+        source = MwlSource(name="ris-stat", aet="RIS_STAT", host="127.0.0.1", port=1,
+                           calling_aet="MWLBROKER", charset="ISO_IR 100", enabled=True)
+        s.add(source)
+        s.commit()
+        s.add(StoreLog(calling_aet="CT_01", sop_instance_uid="1.2.3", source_id=source.id,
+                       status="success"))
+        s.add(StoreLog(calling_aet="CT_01", sop_instance_uid="1.2.4", source_id=source.id,
+                       status="failed", error="no route"))
+        s.commit()
+
+    overview = stats.overview(days=7, group_by="source")
+
+    row = next(r for r in overview["groups"] if r["name"] == "ris-stat")
+    assert row["stores"] == 2
+    assert row["stores_failed"] == 1

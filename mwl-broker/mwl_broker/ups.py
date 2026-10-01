@@ -533,10 +533,6 @@ class _EventHub:
             self._queues.pop(subscriber.strip().upper(), None)
             self._scopes.pop(subscriber.strip().upper(), None)
 
-    def subscriber_count(self) -> int:
-        with self._lock:
-            return len(self._queues)
-
     def publish(self, event: dict) -> None:
         if self._loop is None:
             return

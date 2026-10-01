@@ -52,10 +52,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
 def _as_aware(value: datetime | None) -> datetime | None:
     if value is not None and value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
@@ -64,10 +60,6 @@ def _as_aware(value: datetime | None) -> datetime | None:
 
 def _cutoff(days: int) -> datetime:
     return _now() - timedelta(days=days)
-
-
-def _setting_key(table: str) -> str:
-    return TABLES[table][0]
 
 
 def overview() -> dict:

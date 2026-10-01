@@ -171,3 +171,47 @@ def test_an_order_without_patient_or_number_is_refused(client):
     result = _post(client, _record(("8000", "6302"), ("8402", "CT01")))
 
     assert result.status_code == 422
+
+
+# ── Randfälle des Parsers ──────────────────────────────────────────────
+
+
+def test_a_broken_field_map_falls_back_to_the_defaults(client):
+    """The API validates the JSON, but a value written directly must not break
+    the parser — it logs and keeps the standard field numbers."""
+    from mwl_broker import settings_service
+
+    settings_service.set_value("gdt_field_map", "{not json")
+    parsed = gdt.parse(ORDER)
+
+    assert parsed["patient_id"] == "P-100"          # the defaults still apply
+    assert gdt.field_map()["patient_id"] == "3000"
+
+
+def test_a_date_in_iso_order_is_read_as_well(client):
+    """GDT says TTMMJJJJ, but a few systems send YYYYMMDD."""
+    parsed = gdt.parse(_record(("8000", "6302"), ("3000", "P-1"), ("3103", "19800101")))
+
+    assert parsed["birth_date"] == "1980-01-01"
+
+
+def test_an_unreadable_date_is_left_empty_instead_of_guessed(client):
+    parsed = gdt.parse(_record(("8000", "6302"), ("3000", "P-1"), ("3103", "99139999")))
+
+    assert parsed["birth_date"] == ""
+
+
+def test_the_scheduled_time_is_read(client):
+    """Field 6201 carries the appointment time (HHMM)."""
+    parsed = gdt.parse(_record(("8000", "6302"), ("3000", "P-1"),
+                               ("6200", "30092026"), ("6201", "0930")))
+
+    assert parsed["scheduled_date"] == "2026-09-30"
+    assert parsed["scheduled_time"] == "09:30"
+
+
+def test_a_line_without_a_field_header_is_reported(client):
+    parsed = gdt.parse("8000-6302\r\n" + _record(("8000", "6302"), ("3000", "P-1")))
+
+    assert any("field header" in warning for warning in parsed["warnings"])
+    assert parsed["patient_id"] == "P-1"            # the readable part still parses

@@ -218,3 +218,19 @@ def test_health_is_quiet_when_everything_is_fine(client, monkeypatch, tmp_path):
         findings = health_checks.config_findings(s, Settings())
 
     assert not [f for f in findings if f["code"].startswith("spool_disk")]
+
+
+def test_the_version_falls_back_to_zero_without_metadata(monkeypatch):
+    """Running from a source tree without an installed package must not crash —
+    the About box shows a version, whatever it is."""
+    import importlib.metadata
+
+    from mwl_broker import _detect_version
+
+    def _boom(_name):
+        raise importlib.metadata.PackageNotFoundError("mwl-broker")
+
+    monkeypatch.setattr(importlib.metadata, "version", _boom)
+    monkeypatch.setattr("pathlib.Path.is_file", lambda self: False)
+
+    assert _detect_version() == "0.0.0"

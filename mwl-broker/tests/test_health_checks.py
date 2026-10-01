@@ -388,3 +388,100 @@ def test_findings_are_published_as_metrics():
     _findings()
 
     assert REGISTRY.get_sample_value("mwl_config_findings", {"severity": "error"}) == 1
+
+
+def test_a_modify_rule_without_a_target_is_not_reported():
+    """`continue` for a rule that cannot apply — it is not a finding, it is off."""
+    from mwl_broker import settings_service
+
+    _source()
+    _target()
+    settings_service.set_value("tls_inbound_enabled", "false")
+    with session_factory()() as s:
+        s.add(TransformRule(name="off", target_id=None, enabled=True,
+                            operations=[{"op": "remove", "tag": "PatientAddress"}]))
+        s.add(TransformRule(name="disabled", target_id=_target(name="p2", is_default=False),
+                            enabled=False,
+                            operations=[{"op": "remove", "tag": "PatientAddress"}]))
+        s.commit()
+
+    assert "transform_target_disabled" not in _codes(_findings())
+
+
+def test_an_unreadable_spool_directory_is_an_error(monkeypatch):
+    """A spool on a broken mount must be visible — the broker cannot buffer."""
+    import shutil
+
+    _source()
+    _target()
+
+    def _boom(_path):
+        raise OSError("no such device")
+
+    monkeypatch.setattr(shutil, "disk_usage", _boom)
+
+    finding = next(f for f in _findings() if f["code"] == "spool_dir_unusable")
+    assert finding["severity"] == "error"
+    assert "not usable" in finding["message"]
+
+
+def test_a_slow_database_is_reported(monkeypatch):
+    """A slow DB delays every modality answer — the operator has to see it."""
+    import itertools
+
+    _source()
+    _target()
+    ticks = itertools.count(0, 1.0)          # every reading is 1000 ms later
+    monkeypatch.setattr(health_checks.time, "monotonic", lambda: next(ticks))
+
+    finding = next(f for f in _findings() if f["code"] == "db_slow")
+    assert finding["details"]["latency_ms"] >= 500
+
+
+def test_tls_client_auth_without_a_ca_is_an_error():
+    """'required' without a trust anchor would reject every modality."""
+    from mwl_broker import settings_service, tls
+
+    _source()
+    _target()
+    settings_service.set_value("tls_inbound_enabled", "true")
+    settings_service.set_value("tls_inbound_client_auth", "required")
+    tls.reset_for_tests()
+
+    findings = [f for f in _findings() if f["code"] == "tls_configuration_incomplete"]
+    assert any("Client authentication" in f["message"] for f in findings)
+
+
+def test_a_server_key_from_another_certificate_is_an_error(tmp_path):
+    from mwl_broker import settings_service, tls
+
+    _source()
+    _target()
+    settings_service.set_value("tls_dir", str(tmp_path))
+    tls.reset_for_tests()
+    one = tls.generate_self_signed("one.local", 365, filename="one")
+    two = tls.generate_self_signed("two.local", 365, filename="two")
+    settings_service.set_value("tls_inbound_cert_file", one["certificate_path"])
+    settings_service.set_value("tls_inbound_key_file", two["key_path"])
+
+    finding = next(f for f in _findings() if f["code"] == "tls_key_mismatch")
+    assert finding["severity"] == "error"
+
+
+def test_a_world_readable_private_key_is_a_warning(tmp_path):
+    import os
+
+    from mwl_broker import settings_service, tls
+
+    _source()
+    _target()
+    settings_service.set_value("tls_dir", str(tmp_path))
+    tls.reset_for_tests()
+    generated = tls.generate_self_signed("broker.local", 365, filename="open")
+    os.chmod(generated["key_path"], 0o644)
+    settings_service.set_value("tls_inbound_cert_file", generated["certificate_path"])
+    settings_service.set_value("tls_inbound_key_file", generated["key_path"])
+
+    finding = next(f for f in _findings() if f["code"] == "tls_key_world_readable")
+    assert finding["severity"] == "warning"
+    assert finding["details"]["mode"]

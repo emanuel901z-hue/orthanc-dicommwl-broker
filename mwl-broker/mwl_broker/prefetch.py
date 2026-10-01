@@ -81,12 +81,6 @@ def _node(row: PacsTarget) -> NodeCfg:
                    tls=row.tls, tls_verify=row.tls_verify)
 
 
-def node_config(target_id: int) -> NodeCfg | None:
-    with session_factory()() as s:
-        row = s.get(PacsTarget, target_id)
-        return _node(row) if row is not None else None
-
-
 def node_by_name(name: str) -> NodeCfg | None:
     from sqlalchemy import select
 

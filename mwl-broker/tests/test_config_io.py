@@ -245,3 +245,102 @@ def test_an_import_cannot_smuggle_in_a_deployment_owned_setting(client):
     client.post("/api/v1/config/import?dry_run=false", json=document)
     assert client.get("/api/v1/settings/spool_dir").json()["value"] == before
     assert before != "/tmp/evil"
+
+
+def test_an_import_reports_updates_not_only_creates(client):
+    """A second import with changed values is an *update* — the plan has to say
+    so, otherwise the operator sees "nothing to do" and the change never lands."""
+    client.post("/api/v1/sources", json=SOURCE)
+    client.post("/api/v1/targets", json={"name": "pacs", "aet": "PACS", "host": "10.0.0.9",
+                                         "port": 104, "calling_aet": "MWLBROKER",
+                                         "enabled": True, "is_default": True})
+    doc = client.get("/api/v1/config/export").json()
+
+    doc["targets"][0]["port"] = 11112
+    doc["sources"][0]["timeout_s"] = 42
+    doc["settings"] = {"echo_interval_s": "90"}
+
+    plan = client.post("/api/v1/config/import?dry_run=true", json=doc).json()
+    updates = {(c["entity"], c["name"]) for c in plan["changes"] if c["action"] == "update"}
+
+    assert ("target", "pacs") in updates
+    assert ("source", "ris-a") in updates
+    assert ("setting", "echo_interval_s") in updates
+
+    client.post("/api/v1/config/import?dry_run=false", json=doc)
+    assert client.get("/api/v1/sources").json()[0]["timeout_s"] == 42
+
+
+def test_a_modify_rule_with_an_unknown_target_is_skipped_with_a_reason(client):
+    doc = {"schema_version": 1, "transforms": [
+        {"name": "t1", "source": None, "target": "ghost", "priority": 100,
+         "enabled": True, "operations": [{"op": "remove", "tag": "PatientAddress"}]},
+    ]}
+    plan = client.post("/api/v1/config/import?dry_run=true", json=doc).json()
+
+    assert any("unknown target ghost" in reason for reason in plan["skipped"])
+
+
+def test_a_subscription_without_a_subscriber_is_skipped(client):
+    """The schema already rejects an empty subscriber; a document that reaches
+    the module another way must not create a subscription without one."""
+    from mwl_broker.db import session_factory
+
+    with session_factory()() as s:
+        plan = config_io.plan_import(s, {"schema_version": 1, "ups_subscriptions": [
+            {"subscriber_aet": "  ", "workitem_uid": ""}]})
+
+    assert any("without subscriber_aet" in reason for reason in plan["skipped"])
+    assert plan["changes"] == []
+
+
+def test_importing_a_changed_subscription_updates_it(client):
+    client.post("/api/v1/dicom-web/workitems/subscriptions",
+                json={"subscriber_aet": "CT_01"})
+    doc = {"schema_version": 1, "ups_subscriptions": [
+        {"subscriber_aet": "ct_01", "workitem_uid": "1.2.3", "deletion_lock": True}]}
+
+    plan = client.post("/api/v1/config/import?dry_run=true", json=doc).json()
+    assert any(c["entity"] == "ups_subscription" and c["action"] == "update"
+               for c in plan["changes"])
+
+    client.post("/api/v1/config/import?dry_run=false", json=doc)
+    listed = client.get("/api/v1/dicom-web/workitems/subscriptions").json()
+    assert listed[0]["workitem_uid"] == "1.2.3" and listed[0]["deletion_lock"] is True
+
+
+def test_a_rule_in_the_document_updates_an_existing_rule(client):
+    """The same source→target pair with a new priority is an update."""
+    client.post("/api/v1/sources", json=SOURCE)
+    client.post("/api/v1/targets", json={"name": "pacs", "aet": "PACS", "host": "10.0.0.9",
+                                         "port": 104, "calling_aet": "MWLBROKER",
+                                         "enabled": True, "is_default": True})
+    src = client.get("/api/v1/sources").json()[0]
+    tgt = client.get("/api/v1/targets").json()[0]
+    client.post("/api/v1/rules", json={"source_id": src["id"], "target_id": tgt["id"],
+                                       "priority": 10, "enabled": True})
+    doc = {"schema_version": 1,
+           "rules": [{"source": "ris-a", "target": "pacs", "priority": 77, "enabled": False}]}
+
+    plan = client.post("/api/v1/config/import?dry_run=true", json=doc).json()
+    assert any(c["entity"] == "rule" and c["action"] == "update" for c in plan["changes"])
+
+    client.post("/api/v1/config/import?dry_run=false", json=doc)
+    rules = client.get("/api/v1/rules").json()
+    assert rules[0]["priority"] == 77 and rules[0]["enabled"] is False
+
+
+def test_a_modify_rule_in_the_document_updates_an_existing_rule(client):
+    client.post("/api/v1/transforms", json={
+        "name": "t1", "priority": 100, "enabled": True,
+        "operations": [{"op": "remove", "tag": "PatientAddress"}]})
+    doc = {"schema_version": 1, "transforms": [
+        {"name": "t1", "source": None, "target": None, "priority": 55, "enabled": False,
+         "operations": [{"op": "set", "tag": "InstitutionName", "value": "KH"}]}]}
+
+    plan = client.post("/api/v1/config/import?dry_run=true", json=doc).json()
+    assert any(c["entity"] == "transform" and c["action"] == "update" for c in plan["changes"])
+
+    client.post("/api/v1/config/import?dry_run=false", json=doc)
+    row = client.get("/api/v1/transforms").json()[0]
+    assert row["priority"] == 55 and row["enabled"] is False
