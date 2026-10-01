@@ -446,6 +446,12 @@ class SettingOut(BaseModel):
                     "port, instance name): readable, but the value has to match the "
                     "compose mapping, so it cannot be changed at runtime.",
     )
+    restart_required: bool = Field(
+        default=False,
+        description="True when the value is only read while the process starts "
+                    "(TLS listener, MLLP listener, MPPS presentation context): the "
+                    "change is stored but takes effect after a restart.",
+    )
     min: int | None = Field(default=None, description="Lower bound for integer settings.")
     max: int | None = Field(default=None, description="Upper bound for integer settings.")
     choices: list[str] = Field(

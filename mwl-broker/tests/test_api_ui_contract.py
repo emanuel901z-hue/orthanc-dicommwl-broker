@@ -209,3 +209,131 @@ def test_no_client_method_without_a_caller():
                     if name not in known_unused
                     and not re.search(rf"brokerApi(?:\.\w+)*\.{re.escape(name)}\b", text))
     assert not unused, f"client methods no view calls: {unused}"
+
+
+# ── Feld-Ebene: die handgeschriebenen TS-Typen gegen die Pydantic-Schemas ──
+#
+# Die Route-/Schema-Namen sind über die OpenAPI abgesichert, die **Felder** waren
+# es nicht: `src/api/broker.ts` ist von Hand geschrieben, TypeScript prüft nur
+# gegen sich selbst. So blieb `StoreLogOut.applied_transforms` (welche Modify-Regeln
+# ein Bild verändert haben) jahrelang unsichtbar — das Backend lieferte es, die
+# Oberfläche ignorierte es, niemand konnte es bemerken.
+#
+# `TS_TYPE ↔ Backend-Schema` ist bewusst explizit: eine geratene Zuordnung würde
+# Felder stillschweigend paaren und die Prüfung wertlos machen.
+
+TS_TO_BACKEND: dict[str, tuple[str, ...]] = {
+    "PrefetchResult": ("PrefetchOut",),
+    "PrefetchStudy": ("PrefetchStudyOut",),
+    "PrefetchMove": ("PrefetchMoveOut",),
+    "UpsSubscription": ("UpsSubscriptionOut",),
+    "LocalItem": ("LocalItemOut",),
+    "BrokerSource": ("SourceOut",),
+    "BrokerTarget": ("TargetOut",),
+    "BrokerRule": ("RuleOut",),
+    "BrokerTransform": ("TransformOut",),
+    "BrokerSetting": ("SettingOut",),
+    "SpoolItem": ("SpoolItemOut",),
+    "SpoolStats": ("SpoolStatsOut",),
+    "CacheSource": ("CacheSourceOut",),
+    "CacheItem": ("CacheItemOut",),
+    "Hl7MessageDetail": ("Hl7MessageDetailOut",),
+    "MppsStep": ("MppsStepOut",),
+    "StationRule": ("StationRuleOut",),
+    # die Liste und die Antwort auf das Anlegen teilen sich einen Typ
+    "PatientMerge": ("PatientMergeOut", "PatientMergeCreatedOut"),
+    "MergeRule": ("MergeRuleOut",),
+    "StatsOverview": ("StatsOut",),
+    "QueryLogRow": ("QueryLogOut",),
+    "StoreLogRow": ("StoreLogOut",),
+    "Hl7Message": ("Hl7MessageOut",),
+    "Hl7FieldMap": ("Hl7FieldMapOut",),
+    "TlsOverview": ("TlsOverviewOut",),
+    "AtnaStats": ("AtnaStatsOut",),
+    "RbacStatus": ("RbacStatusOut",),
+    "BrokerHealth": ("HealthOut",),
+    "BrokerFinding": ("FindingOut",),
+}
+
+# Felder, die das Backend liefert und die Oberfläche **bewusst** nicht zeigt.
+# Jeder Eintrag braucht einen Grund — sonst ist er ein vergessenes Element.
+DELIBERATELY_NOT_SHOWN: dict[str, str] = {}
+
+
+def _ts_type_fields(name: str) -> set[str]:
+    """Felder eines `export type X = { … }` aus dem Client (Klammern zählen)."""
+    text = (OE3 / "src" / "api" / "broker.ts").read_text()
+    match = re.search(rf"export type {re.escape(name)} = \{{", text)
+    assert match, f"TS-Typ {name} nicht gefunden"
+    depth, start = 0, match.end() - 1
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                body = text[start + 1:i]
+                return set(re.findall(r"^\s{2}(\w+)\??:", body, re.M))
+    raise AssertionError(f"TS-Typ {name} endet nicht")
+
+
+def _backend_fields(name: str, schemas: dict, seen: frozenset[str] = frozenset()) -> set[str]:
+    """Felder eines Schemas inklusive seiner Basisklassen (`allOf`)."""
+    if name in seen or name not in schemas:
+        return set()
+    schema = schemas[name]
+    fields = set(schema.get("properties", {}))
+    for parent in schema.get("allOf", []):
+        fields |= _backend_fields(parent["$ref"].split("/")[-1], schemas, seen | {name})
+    return fields
+
+
+@skip
+def test_every_response_field_reaches_the_ui_or_is_explained():
+    """Forward: ein Feld, das niemand anzeigt, ist entweder ein fehlendes
+    Element oder eine bewusste Entscheidung — nichts dazwischen."""
+    schemas = openapi_schemas()
+    ui = ui_source()
+    unexplained = []
+    for ts_type, backend_names in TS_TO_BACKEND.items():
+        known = [n for n in backend_names if n in schemas]
+        if not known:
+            continue
+        backend = set().union(*(_backend_fields(n, schemas) for n in known))
+        for field in sorted(backend - _ts_type_fields(ts_type)):
+            if field in DELIBERATELY_NOT_SHOWN:
+                continue
+            if not re.search(rf"\b{re.escape(field)}\b", ui):
+                unexplained.append(f"{backend_names[0]}.{field}")
+    assert not unexplained, (
+        f"the backend delivers these and the UI ignores them: {unexplained} — "
+        "show them or list them in DELIBERATELY_NOT_SHOWN with a reason"
+    )
+
+
+@skip
+def test_the_client_declares_no_field_the_backend_never_sends():
+    """Reverse: ein Feld im TS-Typ, das das Backend nicht liefert, ist zur
+    Laufzeit `undefined` — TypeScript kann das nicht sehen."""
+    schemas = openapi_schemas()
+    phantom = []
+    for ts_type, backend_names in TS_TO_BACKEND.items():
+        known = [n for n in backend_names if n in schemas]
+        if not known:
+            continue
+        backend = set().union(*(_backend_fields(n, schemas) for n in known))
+        for field in sorted(_ts_type_fields(ts_type) - backend):
+            phantom.append(f"{ts_type}.{field} (not in {'/'.join(known)})")
+    assert not phantom, f"the UI reads fields the backend never sends: {phantom}"
+
+
+@skip
+def test_the_field_pairs_still_match_reality():
+    """Eine umbenannte Schema- oder Typ-Bezeichnung darf die Prüfung nicht
+    stillschweigend leer laufen lassen."""
+    schemas = openapi_schemas()
+    text = (OE3 / "src" / "api" / "broker.ts").read_text()
+    for ts_type, backend_names in TS_TO_BACKEND.items():
+        assert f"export type {ts_type} =" in text, f"TS-Typ {ts_type} fehlt"
+        for name in backend_names:
+            assert name in schemas, f"Backend-Schema {name} fehlt"

@@ -435,7 +435,23 @@ Workspace betrifft:
 - **Ein Schalter, der nichts tut, ist schlimmer als keiner.** Start-Entscheidungen
   (MLLP-Listener, MPPS-SOP-Klasse) müssen die **Einstellung** lesen
   (`settings_service`), nicht nur den Env-Wert — sonst zeigt die UI einen
-  wirkungslosen Schalter.
+  wirkungslosen Schalter. Und wenn ein Wert **nur beim Start** gelesen wird
+  (TLS-Listener, MLLP-Thread, MPPS-Präsentationskontext), gehört er in
+  `settings_service.RESTART_REQUIRED` — die API liefert dann
+  `restart_required: true`, die UI schreibt „Erst nach Neustart" daran. Ein
+  Toggle, der sofort zu wirken scheint und bis zum Neustart nichts tut, ist
+  genau die Falle, die dieser Hinweis verhindert.
+- **Drei Nähte, drei Prüfungen — und die Feld-Ebene gehört dazu.** Route-Namen
+  allein reichen nicht: `test_api_ui_contract.py` prüft (a) jede Route, die die
+  UI ruft, existiert, (b) jede Route ist erreichbar oder begründet API-only,
+  (c) jedes Schreibfeld steht im Formular, (d) **jedes Antwortfeld** ist in der
+  Oberfläche sichtbar oder in `DELIBERATELY_NOT_SHOWN` mit Grund — und (e) kein
+  TS-Typ deklariert ein Feld, das das Backend nie sendet (zur Laufzeit
+  `undefined`, für TypeScript unsichtbar). `src/api/broker.ts` ist **von Hand
+  geschrieben**; TS prüft nur gegen sich selbst. Genau so blieb
+  `StoreLogOut.applied_transforms` unsichtbar — das Backend lieferte, welche
+  Modify-Regeln ein Bild verändert haben, und die Oberfläche zeigte es nie.
+  Die Zuordnung `TS-Typ ↔ Schema` ist bewusst explizit (keine geratene Paarung).
 - **Jede Einstellung muss den Container auch erreichen.** Es gibt kein
   `env_file` — nur was in `x-broker-environment` (docker-compose.yml) steht,
   kommt an; die ENV-Namen müssen `BROKER_` + Feldname in Großbuchstaben sein

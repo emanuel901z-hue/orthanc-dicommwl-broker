@@ -363,6 +363,26 @@ DEPLOYMENT_ONLY: frozenset[str] = frozenset({
     "instance_id",
 })
 
+# Settings that only take effect after a restart. They are read **once**, while
+# the process starts — the DICOM SCP builds its presentation contexts, the TLS
+# listener opens its socket, the MLLP listener starts its thread. The UI marks
+# them, because a switch that looks immediate and silently does nothing is worse
+# than no switch (the same rule the code follows elsewhere).
+RESTART_REQUIRED: frozenset[str] = frozenset({
+    # the SCP's supported SOP classes are fixed when the AE is built
+    "mpps_enabled",
+    # the TLS listener is started once, with its certificate and client auth
+    "tls_inbound_enabled",
+    "tls_inbound_cert_file",
+    "tls_inbound_key_file",
+    "tls_inbound_ca_file",
+    "tls_inbound_client_auth",
+    # the MLLP listener is a thread, not a request handler
+    "hl7_mllp_enabled",
+    "hl7_mllp_bind",
+    "hl7_mllp_port",
+})
+
 _INT_RANGES: dict[str, tuple[int, int]] = {    "seen_item_ttl_days": (1, 3650),
     "upstream_timeout_s": (1, 600),
     "echo_interval_s": (5, 3600),
@@ -536,6 +556,8 @@ def list_all() -> list[dict]:
             "description": description,
             # a deployment-owned setting is shown but cannot be changed here
             "editable": key not in DEPLOYMENT_ONLY,
+            # …and this one needs a restart before it does anything
+            "restart_required": key in RESTART_REQUIRED,
         }
         entry.update(_constraints(kind))
         if kind == "int":

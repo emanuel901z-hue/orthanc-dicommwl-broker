@@ -225,10 +225,6 @@ def build_ack(control_id: str, ok: bool = True, error: str = "",
     )
 
 
-def now_hl7() -> str:
-    return datetime.now().strftime("%Y%m%d%H%M%S")
-
-
 def peek_type(text: str) -> str:
     """MSH-9 of a message without parsing the rest — MLLP needs to route by it."""
     for segment in _segments(text):

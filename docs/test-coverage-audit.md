@@ -147,8 +147,8 @@ Seit dem 21.09. sind HA (B1), HL7/PIR/OMI/ADT (F2a), die externen Interop-Nachwe
 
 | Ebene | 21.09. | **23.09.** |
 |---|---|---|
-| `pytest` (Backend) | 432 | **745** |
-| `vitest` (Frontend) | 522 | **789** |
+| `pytest` (Backend) | 432 | **751** |
+| `vitest` (Frontend) | 522 | **795** |
 | Playwright (Stack-Lauf) | 25 | **30** |
 | `verify-ui.cjs` (DOM-Audit) | 133 | **154** |
 | `verify-screens.cjs` | 225 | **225** (+ 52 Bilder) |

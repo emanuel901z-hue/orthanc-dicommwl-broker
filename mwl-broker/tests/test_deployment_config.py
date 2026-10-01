@@ -166,3 +166,39 @@ def test_the_api_refuses_to_change_a_deployment_owned_setting(client):
     # a normal setting still works
     assert client.put("/api/v1/settings/echo_interval_s",
                       json={"value": "45"}).status_code == 200
+
+
+def test_settings_that_need_a_restart_say_so(client):
+    """A switch that looks immediate and silently does nothing is worse than no
+    switch.
+
+    `mpps_enabled`, the TLS listener and the MLLP listener are read **once**
+    while the process starts (the SCP builds its presentation contexts, the
+    listener opens its socket / starts its thread). The API has to mark them so
+    the UI can say "after a restart".
+    """
+    rows = {row["key"]: row for row in client.get("/api/v1/settings").json()}
+
+    for key in ("mpps_enabled",
+                "tls_inbound_enabled", "tls_inbound_cert_file", "tls_inbound_key_file",
+                "tls_inbound_ca_file", "tls_inbound_client_auth",
+                "hl7_mllp_enabled", "hl7_mllp_bind", "hl7_mllp_port"):
+        assert rows[key]["restart_required"] is True, f"{key} needs a restart"
+
+
+def test_settings_that_apply_immediately_are_not_marked(client):
+    """The other direction: a flag on everything would be as useless as none."""
+    rows = {row["key"]: row for row in client.get("/api/v1/settings").json()}
+
+    for key in ("spool_enabled", "cache_enabled", "echo_interval_s", "rbac_mode",
+                "retention_query_log_days", "prefetch_max_concurrency",
+                "notify_webhook_url", "atna_enabled"):
+        assert rows[key]["restart_required"] is False, f"{key} applies immediately"
+
+
+def test_every_restart_required_setting_exists(client):
+    """A typo in the list would silently mark nothing."""
+    from mwl_broker import settings_service
+
+    assert settings_service.RESTART_REQUIRED <= set(settings_service.KNOWN)
+    assert settings_service.RESTART_REQUIRED  # not empty by accident
