@@ -340,3 +340,99 @@ def test_the_field_pairs_still_match_reality():
         assert f"export type {ts_type} =" in text, f"TS-Typ {ts_type} fehlt"
         for name in backend_names:
             assert name in schemas, f"Backend-Schema {name} fehlt"
+
+
+# ── Wertemengen und Optionalität ────────────────────────────────────────────
+#
+# Die Feldnamen waren abgesichert, die **Bedeutung** nicht: ein Feld kann im
+# Backend Pflicht und im TS-Typ optional sein (die UI könnte es weglassen), und
+# eine Wertemenge kann auseinanderlaufen (`origin` war im TS `'manual' | 'hl7'`,
+# das Backend liefert aber auch `gdt` und `ups`). Beides fällt weder TypeScript
+# noch einem Namensvergleich auf.
+
+# Ein Feld, dessen Wertemenge das Schema **nicht** als `enum` ausdrücken kann,
+# weil sie den Wert selbst trägt. Jeder Eintrag braucht eine Ersatzprüfung.
+UNION_WITHOUT_ENUM: dict[str, str] = {
+    # `SettingOut.kind` trägt seine Auswahl inline ("enum:off,enforce") und wird
+    # deshalb gegen `settings_service.KNOWN` geprüft, nicht gegen ein Schema-enum
+    "SettingOut.kind": "kind carries its choices inline (enum:<a,b>)",
+}
+
+
+def _ts_type_details(name: str) -> dict[str, tuple[bool, str]]:
+    """`{feld: (optional, typ-text)}` eines `export type X = { … }`."""
+    text = (OE3 / "src" / "api" / "broker.ts").read_text()
+    match = re.search(rf"export type {re.escape(name)} = \{{", text)
+    assert match, f"TS-Typ {name} nicht gefunden"
+    depth, start = 0, match.end() - 1
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                body = text[start + 1:i]
+                return {m.group(1): (bool(m.group(2)), m.group(3).strip())
+                        for m in re.finditer(r"^\s{2}(\w+)(\?)?:\s*([^;]+);", body, re.M)}
+    raise AssertionError(f"TS-Typ {name} endet nicht")
+
+
+@skip
+def test_a_required_field_is_not_optional_in_the_client():
+    """Reverse: nennt der TS-Typ ein Pflichtfeld optional, kann die UI es
+    weglassen — und bekommt einen 422 statt einer Antwort."""
+    schemas = openapi_schemas()
+    wrong = []
+    for ts_type, backend_names in TS_TO_BACKEND.items():
+        known = [n for n in backend_names if n in schemas]
+        if not known:
+            continue
+        required = set().union(*(set(schemas[n].get("required", [])) for n in known))
+        for field, (optional, _type) in _ts_type_details(ts_type).items():
+            if field in required and optional:
+                wrong.append(f"{ts_type}.{field} is optional in TS, required in {known[0]}")
+    assert not wrong, f"the UI could leave out a required field: {wrong}"
+
+
+@skip
+def test_the_value_sets_match_the_schema():
+    """Beide Richtungen: das Schema deklariert seine Werte (`Literal` → `enum`),
+    der TS-Typ muss sie genau nennen."""
+    schemas = openapi_schemas()
+    drift = []
+    for ts_type, backend_names in TS_TO_BACKEND.items():
+        known = [n for n in backend_names if n in schemas]
+        if not known:
+            continue
+        props = {}
+        for name in known:
+            props.update(schemas[name].get("properties", {}))
+        for field, (_optional, ts_type_text) in _ts_type_details(ts_type).items():
+            if field not in props:
+                continue
+            declared = props[field].get("enum")
+            union = set(re.findall(r"'([^']*)'", ts_type_text)) if "|" in ts_type_text else set()
+            key = f"{known[0]}.{field}"
+            if declared and set(declared) != union:
+                drift.append(f"{key}: backend {sorted(declared)} vs client {sorted(union)}")
+            elif union and not declared and key not in UNION_WITHOUT_ENUM:
+                drift.append(
+                    f"{key}: the client lists {sorted(union)} but the schema only says "
+                    f"'{props[field].get('type')}' — declare it as a Literal")
+    assert not drift, f"value sets drifted apart: {drift}"
+
+
+@skip
+def test_the_inline_kind_matches_the_settings_table():
+    """Ersatzprüfung für die eine Ausnahme: die festen `kind`-Werte müssen zur
+    Einstellungstabelle passen (die `enum:<…>`-Form trägt ihre Auswahl selbst)."""
+    from mwl_broker import settings_service
+
+    fixed = {kind for kind in (k for k, _ in settings_service.KNOWN.values())
+             if not kind.startswith("enum:")}
+    union = set(re.findall(r"'([^']*)'", _ts_type_details("BrokerSetting")["kind"][1]))
+
+    assert union == fixed, (
+        f"the settings kinds drifted apart: backend {sorted(fixed)} vs client {sorted(union)}")
+    assert any(k.startswith("enum:") for k, _ in settings_service.KNOWN.values()), (
+        "the enum:<choices> form disappeared — drop it from UNION_WITHOUT_ENUM")

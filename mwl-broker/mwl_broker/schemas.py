@@ -435,7 +435,9 @@ class SettingOut(BaseModel):
     key: str = Field(description="Setting key (mirrors the ENV variable name).")
     value: str = Field(description="Currently effective value.")
     default: str = Field(description="Value from the deployment ENV (fallback).")
-    source: str = Field(description="'db' = UI override active, 'env' = deployment default.")
+    source: Literal["db", "env"] = Field(
+        description="'db' = UI override active, 'env' = deployment default.",
+    )
     kind: str = Field(
         description="Value type: bool | int | aets | url | path | events | json | enum:<choices>.",
     )
@@ -636,7 +638,10 @@ class LocalItemIn(BaseModel):
 class LocalItemOut(LocalItemIn):
     model_config = ConfigDict(from_attributes=True)
     id: int = Field(description="Row ID.")
-    origin: str = Field(description="manual | hl7 — how the item was created.")
+    origin: Literal["hl7", "gdt", "manual", "ups"] = Field(
+        description="How the item was created: hl7 (ORM/OMG), gdt (practice system), "
+                    "manual (entered here), ups (a UPS work item).",
+    )
     created_at: datetime = Field(description="Creation timestamp (UTC).")
     updated_at: datetime = Field(description="Last modification (UTC).")
 
@@ -980,9 +985,9 @@ class CacheSourceOut(BaseModel):
     age_s: int | None = Field(
         default=None, description="Age of the newest cached answer in seconds (null = empty).",
     )
-    state: str = Field(
-        description="empty | available | expired — 'expired' means an outage could "
-                    "no longer be bridged (older than the stale window).",
+    state: Literal["empty", "available", "expired"] = Field(
+        description="empty (nothing cached) | available (fresh enough) | expired "
+                    "(only served as a bridge while the source is down).",
     )
     stale_on_error: bool = Field(description="Whether this source may be served stale.")
     refresh_s: int = Field(description="Background refresh interval (0 = off).")
@@ -1478,8 +1483,10 @@ class PatientMergeOut(BaseModel):
     new_patient_id: str = Field(description="Identifier that survives.")
     reason: str = Field(description="Why it happened.")
     actor: str = Field(description="Who recorded it.")
-    origin: str = Field(description="manual | adt")
-    kind: str = Field(description="merge (the old identifier is retired) | link (both stay valid).")
+    origin: Literal["manual", "adt"] = Field(description="manual | adt")
+    kind: Literal["merge", "link"] = Field(
+        description="merge (the old identifier is retired) | link (both stay valid).",
+    )
     active: bool = Field(description="Whether it is in effect.")
 
 

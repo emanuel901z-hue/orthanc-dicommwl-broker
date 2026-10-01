@@ -250,14 +250,14 @@ die Schnittstellen-Ausbaustufen GDT/BDT, UPS-RS (Subscriptions + Ereigniskanal)
 und der Voraufnahmen-Prefetch.
 Die OpenAPI-Dokumentation ist vollständig (107 Operationen, jede mit Beschreibung,
 Parametern und Fehlerantworten). Aktuelle Zahlen:
-751 Backend-Tests (96 %), 795 Frontend-Tests, 30 Playwright-Tests im Stack-Lauf,
+759 Backend-Tests (96 %), 795 Frontend-Tests, 30 Playwright-Tests im Stack-Lauf,
 154 Checks im Deep-Audit und 225 im Screenshot-Walk — alles in `./ci-local.sh`
 verdrahtet.
 
 ## Tests
 
 ```bash
-cd mwl-broker && python -m pytest tests -q        # 751 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/GDT/ATNA/UPS-RS inkl. Subscriptions/Voraufnahmen-Prefetch/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
+cd mwl-broker && python -m pytest tests -q        # 759 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/GDT/ATNA/UPS-RS inkl. Subscriptions/Voraufnahmen-Prefetch/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
 cd orthanc-explorer-3-usable && npm run test      # 795 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
@@ -270,7 +270,7 @@ npx playwright test --config=e2e/stack/playwright.stack.config.ts
 # läuft parallel zum regulären Stack; up → C-FIND-Smoke → Playwright → down -v):
 ./test-stack.sh          # alles; --keep lässt ihn laufen, --down räumt ab
 
-# Coverage: backend 96 % (751 Tests, Schwelle 95 % in pyproject.toml),
+# Coverage: backend 96 % (759 Tests, Schwelle 95 % in pyproject.toml),
 # Broker-UI 97,5 % (795 Tests, Schwellen in vitest.config.ts) — beide brechen den Build bei Rückfall
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 cd orthanc-explorer-3-usable && npx vitest run --coverage
@@ -279,6 +279,10 @@ cd orthanc-explorer-3-usable && npx vitest run --coverage
 #   DCMTK (apt install dcmtk): fremdes RIS, fremde Modalität, fremdes PACS
 #   dcm4che (docker pull dcm4che/dcm4che-tools:5.33.1): fremder MPPS-SCU, HL7 in/out
 ./deploy/interop-test.sh          # 23 Prüfungen, ~2 min; --keep lässt alles stehen
+
+# Vertrags-Audit UI ↔ API ↔ Backend — Routen, Felder, i18n, Settings und Doku,
+# jeweils in beiden Richtungen; nennt am Ende auch, was bewusst nicht geprüft wird:
+./gap-audit.sh           # 14 Stages mit Bericht; --fast ohne die vitest-Stages
 
 # Lokale CI-Pipeline (alle Stages: backend pytest → tsc → lint → vitest →
 # docker-e2e auf dem Test-Stack; gleiche Images/Code-Basis wie Produktion):

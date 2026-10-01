@@ -165,6 +165,10 @@ python3 mwl-broker/scripts/loadtest.py cstore --port 11123 --api http://127.0.0.
 docker compose --project-name mwl-test --env-file .env.test \
   -f docker-compose.yml -f docker-compose.demo.yml down -v
 
+# Vertrags-Audit UI ↔ API ↔ Backend (14 Stages, beide Richtungen, mit Bericht)
+./gap-audit.sh
+./gap-audit.sh --fast       # ohne die beiden vitest-Stages
+
 # Vollständige lokale Pipeline / Test-Stack / Fork-Push-Guard
 ./ci-local.sh               # pytest → tsc → lint → vitest → docker-e2e (--quick ohne Docker)
 ./test-stack.sh             # ephemerer Stack: up → DIMSE-Smokes → Playwright → down -v
@@ -445,13 +449,29 @@ Workspace betrifft:
   allein reichen nicht: `test_api_ui_contract.py` prüft (a) jede Route, die die
   UI ruft, existiert, (b) jede Route ist erreichbar oder begründet API-only,
   (c) jedes Schreibfeld steht im Formular, (d) **jedes Antwortfeld** ist in der
-  Oberfläche sichtbar oder in `DELIBERATELY_NOT_SHOWN` mit Grund — und (e) kein
+  Oberfläche sichtbar oder in `DELIBERATELY_NOT_SHOWN` mit Grund, (e) kein
   TS-Typ deklariert ein Feld, das das Backend nie sendet (zur Laufzeit
-  `undefined`, für TypeScript unsichtbar). `src/api/broker.ts` ist **von Hand
-  geschrieben**; TS prüft nur gegen sich selbst. Genau so blieb
-  `StoreLogOut.applied_transforms` unsichtbar — das Backend lieferte, welche
-  Modify-Regeln ein Bild verändert haben, und die Oberfläche zeigte es nie.
+  `undefined`, für TypeScript unsichtbar) und (f) **Wertemengen und
+  Optionalität**: ein Pflichtfeld darf im Client nicht optional sein, und wo das
+  Schema Werte deklariert (`Literal` → `enum`), muss die TS-Union sie genau
+  nennen. `src/api/broker.ts` ist **von Hand geschrieben**; TS prüft nur gegen
+  sich selbst. Genau so blieb `StoreLogOut.applied_transforms` unsichtbar — das
+  Backend lieferte, welche Modify-Regeln ein Bild verändert haben, und die
+  Oberfläche zeigte es nie — und `LocalItem.origin` nannte im Client nur
+  `manual | hl7`, während das Backend auch `gdt` und `ups` liefert.
   Die Zuordnung `TS-Typ ↔ Schema` ist bewusst explizit (keine geratene Paarung).
+- **Alles zusammen: `./gap-audit.sh`.** 14 Stages (Routen, Felder, i18n,
+  Settings, Doku, Metriken, Conformance) mit Bericht — und am Ende die Liste
+  dessen, was **nicht** geprüft wird (Query-Parameter, Fehlerformate,
+  Datumsformate, Feature-Flags ↔ Deployment). Ein neuer Prüfer soll die
+  Antwort auf „haben wir dafür eine Analyse?" nicht suchen müssen.
+- **Ein Schalter, der nur beim Start wirkt, muss das sagen — und die Liste wird
+  gegen den Code geprüft.** `test_settings_startup.py` liest die Lesestellen
+  jedes Settings per AST und verlangt: was **nur** in einer Startfunktion
+  (`lifespan`, `mllp.serve`, `mpps.enabled`, `tls._config`, `dimse._build_ae`)
+  gelesen wird, steht in `RESTART_REQUIRED` — oder in
+  `LIVE_DESPITE_STARTUP_READER` mit Begründung (der geteilte `tls._config`).
+  Beide Richtungen: eine Markierung ohne Startlesestelle fällt genauso auf.
 - **Jede Einstellung muss den Container auch erreichen.** Es gibt kein
   `env_file` — nur was in `x-broker-environment` (docker-compose.yml) steht,
   kommt an; die ENV-Namen müssen `BROKER_` + Feldname in Großbuchstaben sein
