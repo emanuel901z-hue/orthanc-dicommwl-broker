@@ -50,11 +50,14 @@ stage "scripts" bash -c '
   echo "   scripts ok"
 '
 
-stage "backend: pytest"   bash -c 'cd mwl-broker && .venv/bin/pytest tests -q'
+# Coverage is part of the stage: pyproject.toml sets fail_under, so a drop
+# below the threshold fails the pipeline instead of only the report.
+stage "backend: pytest"   bash -c 'cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing:skip-covered'
 stage "frontend: tsc"     bash -c 'cd orthanc-explorer-3-usable && npx tsc --noEmit -p tsconfig.app.json'
 stage "frontend: lint"    bash -c 'cd orthanc-explorer-3-usable && npm run lint'
 stage "frontend: i18n"    bash -c 'cd orthanc-explorer-3-usable && npm run i18n:check'
-stage "frontend: vitest"  bash -c 'cd orthanc-explorer-3-usable && npm run test'
+# The broker slice has coverage thresholds in vitest.config.ts — same idea.
+stage "frontend: vitest"  bash -c 'cd orthanc-explorer-3-usable && npx vitest run --coverage'
 
 if [ "$QUICK" -eq 0 ]; then
   stage "stack: e2e (cfind + playwright)" ./test-stack.sh

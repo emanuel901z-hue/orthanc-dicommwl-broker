@@ -33,3 +33,14 @@ include = ["mwl_broker*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["mwl_broker"]
+
+[tool.coverage.report]
+# The broker owns this code; a drop has to fail the build. Current state is
+# 96 %, the threshold sits just below it so ordinary fluctuation passes.
+# `mwl_broker/mock_ris.py` (the demo/test double, CLI + blocking server) is
+# included — excluding it would be the easy way out.
+fail_under = 95
+show_missing = true

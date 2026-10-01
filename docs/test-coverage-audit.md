@@ -16,11 +16,43 @@ auf den Bildschirmen nicht, wenn man nur Code liest**.
 | Playwright (Stack) | 55 | 55 |
 | verify-ui.cjs (DOM-Audit) | 133 Checks | 133 Checks |
 | **verify-screens.cjs** (neu) | — | **225 Checks** + 52 Screenshots |
-| Backend-Coverage | 95 % | **96 %** |
+| Backend-Coverage | 95 % | **96 %** (Schwelle 95 %) |
 | `aggregation.py` | 76 % | **96 %** |
 | `mllp.py` | 76 % | **95 %** |
-| `api/broker.ts` (Client) | 83,7 % | **91,8 %** |
-| Broker-UI gesamt | 97,3 % Komponenten / 94,6 % Seiten | unverändert hoch |
+| `api/broker.ts` (Client) | 83,7 % | **99,0 %** |
+| Broker-UI gesamt | 97,3 % Komponenten / 94,6 % Seiten | 97,5 % Statements, 86,3 % Branches (Schwellen s. u.) |
+
+## 1a. Die Schwellen brechen den Build (01.10.2026)
+
+Eine Zahl in einem Bericht sinkt still — eine Schwelle nicht. Beide Ebenen
+prüfen sich jetzt selbst:
+
+| Ebene | Wo | Schwelle | Stand |
+|---|---|---|---|
+| Backend | `mwl-broker/pyproject.toml` → `[tool.coverage.report] fail_under` | 95 % | 96,05 % |
+| Broker-UI | `orthanc-explorer-3-usable/vitest.config.ts` → `coverage.thresholds` | 95 % Statements, 85 % Branches, 75 % Functions, 95 % Lines | 97,5 % / 86,3 % / 78,6 % |
+
+Beide Schwellen liegen **unter** dem Ist-Stand, damit normale Schwankung
+durchgeht und ein echter Rückfall nicht. Die Schwellen sind gegengeprüft: mit
+künstlich hochgesetzten Werten (`--coverage.thresholds.statements=99`,
+`--cov-fail-under=99`) schlagen beide Läufe fehl.
+
+`ci-local.sh` und die GitHub-CI fahren beide Ebenen **mit** Coverage, sonst
+würde die Schwelle nie ausgewertet.
+
+Der Umfang ist bewusst der **Broker-Slice** (`src/features/broker/**` +
+`src/api/broker.ts`) — der Rest von OE3 gehört dem geteilten Fork und würde die
+Zahl nur verwässern (Gesamt-SPA: 49 %). `mwl_broker/mock_ris.py` (Demo-Doppel:
+CLI + blockierender Server) ist **eingeschlossen**; es auszunehmen wäre der
+bequeme Weg.
+
+### Was bewusst offen bleibt
+
+Die verbleibenden Lücken sind Interaktionszweige (Zeilenklick/Tastatur,
+Dialogergebnisse, Editor-Callbacks) und defensive Ausnahmen (abbrechender
+TLS-Handshake, sterbender Socket, DB-Fehlerpfad). Die Interaktionszweige fährt
+der **Browser-Audit** (`e2e/stack/verify-ui.cjs`, 217 Checks, inkl. CRUD gegen
+die echte API) durch — sie sind also geprüft, nur nicht von der Unit-Suite.
 
 ## 2. Neue Tests
 
@@ -115,8 +147,8 @@ Seit dem 21.09. sind HA (B1), HL7/PIR/OMI/ADT (F2a), die externen Interop-Nachwe
 
 | Ebene | 21.09. | **23.09.** |
 |---|---|---|
-| `pytest` (Backend) | 432 | **701** |
-| `vitest` (Frontend) | 522 | **703** |
+| `pytest` (Backend) | 432 | **745** |
+| `vitest` (Frontend) | 522 | **789** |
 | Playwright (Stack-Lauf) | 25 | **30** |
 | `verify-ui.cjs` (DOM-Audit) | 133 | **154** |
 | `verify-screens.cjs` | 225 | **225** (+ 52 Bilder) |
