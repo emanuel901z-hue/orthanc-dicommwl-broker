@@ -58,6 +58,10 @@ stage "frontend: lint"    bash -c 'cd orthanc-explorer-3-usable && npm run lint'
 stage "frontend: i18n"    bash -c 'cd orthanc-explorer-3-usable && npm run i18n:check'
 # The broker slice has coverage thresholds in vitest.config.ts — same idea.
 stage "frontend: vitest"  bash -c 'cd orthanc-explorer-3-usable && npx vitest run --coverage'
+# Vertrags-Audit in beiden Richtungen (Routen, Felder, Wertemengen, Startup-Settings,
+# i18n, Doku). Es fährt dieselben Tests wie oben, nur nach Naht gruppiert und mit
+# Bericht — doppelt laufen zu lassen kostet ~40 s und hält die Zuordnung sichtbar.
+stage "gap-audit"         bash -c './gap-audit.sh --fast'
 
 if [ "$QUICK" -eq 0 ]; then
   stage "stack: e2e (cfind + playwright)" ./test-stack.sh
