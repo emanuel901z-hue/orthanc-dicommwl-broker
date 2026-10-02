@@ -359,6 +359,21 @@ UNION_WITHOUT_ENUM: dict[str, str] = {
 }
 
 
+def _ts_aliases() -> dict[str, str]:
+    """`export type X = 'a' | 'b'` — so a field may name its union instead of
+    repeating it (the client does that for `SpoolStatus`, `FindingSeverity`)."""
+    text = (OE3 / "src" / "api" / "broker.ts").read_text()
+    return {m.group(1): m.group(2).strip()
+            for m in re.finditer(r"^export type (\w+) = ([^;{]*);$", text, re.M)
+            if "|" in m.group(2)}
+
+
+def _resolve(text: str) -> str:
+    """Replace a named alias with its union, so the comparison sees the values."""
+    alias = _ts_aliases().get(text.strip())
+    return alias if alias else text
+
+
 def _ts_type_details(name: str) -> dict[str, tuple[bool, str]]:
     """`{feld: (optional, typ-text)}` eines `export type X = { … }`."""
     text = (OE3 / "src" / "api" / "broker.ts").read_text()
@@ -372,7 +387,7 @@ def _ts_type_details(name: str) -> dict[str, tuple[bool, str]]:
             depth -= 1
             if depth == 0:
                 body = text[start + 1:i]
-                return {m.group(1): (bool(m.group(2)), m.group(3).strip())
+                return {m.group(1): (bool(m.group(2)), _resolve(m.group(3)))
                         for m in re.finditer(r"^\s{2}(\w+)(\?)?:\s*([^;]+);", body, re.M)}
     raise AssertionError(f"TS-Typ {name} endet nicht")
 

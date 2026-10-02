@@ -42,6 +42,7 @@ ACTION_MERGED = "merged"
 ACTION_LINKED = "linked"
 ACTION_UNLINKED = "unlinked"
 ACTION_UPDATED = "updated"
+ACTION_REJECTED = "rejected"
 ACTION_NA = "not-applicable"
 
 
@@ -70,9 +71,9 @@ def apply(text: str, *, actor: str = "hl7", transport: str = "http",
         return result
     if result["warnings"]:
         # A message we cannot apply must not be applied halfway.
-        _log(parsed, "rejected", transport, text, dry_run,
+        _log(parsed, ACTION_REJECTED, transport, text, dry_run,
              error="; ".join(result["warnings"]))
-        result["action"] = "rejected"
+        result["action"] = ACTION_REJECTED
         return result
 
     if dry_run:
@@ -107,8 +108,8 @@ def apply(text: str, *, actor: str = "hl7", transport: str = "http",
             )
     except ValueError as exc:
         result["warnings"].append(str(exc))
-        result["action"] = "rejected"
-        _log(parsed, "rejected", transport, text, dry_run, error=str(exc))
+        result["action"] = ACTION_REJECTED
+        _log(parsed, ACTION_REJECTED, transport, text, dry_run, error=str(exc))
         return result
 
     _log(parsed, result["action"], transport, text, dry_run)

@@ -18,6 +18,7 @@ from . import settings_service, api, db
 from .schemas import ReadyOut
 from .config import get_settings
 from .dimse import BrokerSCP
+from . import __version__
 from . import atna
 from . import mllp
 from . import rbac
@@ -91,17 +92,11 @@ async def lifespan(app: FastAPI):
             scp.shutdown()
 
 
-def _broker_version() -> str:
-    """The version the package was built with (single source: pyproject.toml)."""
-    try:
-        from importlib.metadata import version
-
-        return version("mwl-broker")
-    except Exception:                      # not installed (running from source)
-        return "0.1.0"
-
-
-BROKER_VERSION = _broker_version()
+# One source for the version: `mwl_broker.__version__` reads pyproject.toml first and
+# the installed metadata second. The old helper here read the metadata only and fell
+# back to a hard-coded "0.1.0" when running from the source tree — so the OpenAPI
+# document said 0.1.0 while the package said 1.0.0.
+BROKER_VERSION = __version__
 
 
 def create_app() -> FastAPI:

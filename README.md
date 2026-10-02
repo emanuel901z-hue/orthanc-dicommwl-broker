@@ -262,7 +262,11 @@ UI-Härtung aus der DAU-Gap-Analyse, die MFA-Testumgebung, die i18n-Aufräumung 
 die Schnittstellen-Ausbaustufen GDT/BDT, UPS-RS (Subscriptions + Ereigniskanal)
 und der Voraufnahmen-Prefetch.
 Die OpenAPI-Dokumentation ist vollständig (107 Operationen, jede mit Beschreibung,
-Parametern und Fehlerantworten). Aktuelle Zahlen:
+Parametern und Fehlerantworten) — und geprüft: jede Operation hat Summary, Beschreibung,
+Parameter-Doku und Fehlerantworten, jedes Schema-Feld eine Beschreibung, und die
+Wertemengen stehen als `enum` im Schema statt nur im Text (`tests/test_openapi_value_sets.py`
+hält sie mit den Code-Konstanten zusammen). Die Spec des laufenden Containers ist
+identisch mit der aus dem Code erzeugten. Aktuelle Zahlen:
 759 Backend-Tests (96 %), 802 Frontend-Tests, 30 Playwright-Tests im Stack-Lauf,
 217 Checks im Deep-Audit und 267 im Screenshot-Walk — alles in `./ci-local.sh`
 verdrahtet.

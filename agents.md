@@ -436,6 +436,16 @@ Workspace betrifft:
   PS3.7). Wer sie verlangt, verliert den Untersuchungsschritt. Der SCP vergibt
   sie und liefert sie im Rückgabe-Dataset der N-CREATE-Antwort zurück
   (pynetdicom nimmt sie von dort in den Response-Command).
+- **Wertemengen gehören ins Schema, nicht in den Beschreibungstext.** „queued | failed |
+  dead | sent“ als Prosa bedeutet: Swagger zeigt kein Dropdown, ein Client kann nicht
+  validieren, und der eigene TS-Typ driftet unbemerkt. `Literal[...]` im Schema → `enum`
+  im OpenAPI. **Achtung Falle:** ein `Literal` auf einem **Antwortfeld** macht aus einem
+  unerwarteten Wert einen 500 (`ResponseValidationError`) — deshalb vergleicht
+  `tests/test_openapi_value_sets.py` jede Menge mit den Konstanten des Moduls, das sie
+  erzeugt. Genau das hat `patient_merge` gefunden: die erste Fassung nahm
+  `audit.SERIALIZERS` (8 Entities), das Änderungsprotokoll schreibt aber 17.
+  Und: die Spec muss zum **laufenden** Container passen — `main.py` las die Version aus
+  den Metadaten und fiel aus dem Quellbaum auf ein hartkodiertes `0.1.0` zurück.
 - **Fehlertexte gehören in die Sprache des Bedieners — und zwar an der Quelle.**
   Die vorformulierten HTTP-Texte (`src/lib/errors.ts`) sind das, was der Anwender
   im Toast, im Inline-Hinweis und im Dialog liest; sie werden deshalb **dort**

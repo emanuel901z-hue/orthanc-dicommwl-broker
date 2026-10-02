@@ -93,7 +93,13 @@ def _expand(prefix: str) -> set[str]:
         values = {value for name, value in vars(adt).items()
                   if name.startswith("ACTION_") and isinstance(value, str)}
         values.discard(adt.ACTION_NA)          # not applied, so never recorded
-        return {prefix + value for value in values}
+        # the merge API records the *kind* it created (`f"patient.{row['kind']}"`),
+        # which is not an ADT action — the audit page showed "patient.merge" raw
+        kinds = {"merge", "link"}
+        for kind in kinds:
+            assert f'"{kind}"' in source, (
+                f"patient.{kind} is not produced any more — update this expansion")
+        return {prefix + value for value in values | kinds}
     if prefix in ("hl7.", "gdt."):
         # the HL7 intake can cancel (ORC-1 CA/OC) and refuse; the GDT record has
         # no order control — `gdt.parse` always reports "NW", so it only ever

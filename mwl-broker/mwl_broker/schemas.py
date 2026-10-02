@@ -306,9 +306,13 @@ class ConfigExportOut(ConfigImportIn):
 class ImportChangeOut(BaseModel):
     """One change an import would make."""
 
-    entity: str = Field(description="source | target | rule | transform | setting | "
-                                    "ups_subscription.")
-    action: str = Field(description="create | update.")
+    entity: Literal["source", "target", "station", "rule", "transform", "setting",
+                    "local_item", "ups_subscription", "cache", "hl7_field_map",
+                    "hl7_message", "merge_rule", "mpps_step", "patient_merge",
+                    "prefetch", "spool", "tls"] = Field(
+        description="Which kind of entry the change touched.",
+    )
+    action: Literal["create", "update"] = Field(description="create | update.")
     name: str = Field(description="Name (or key) of the affected entry.")
     fields: dict = Field(description="Field values the import would apply.")
 
@@ -330,12 +334,21 @@ class AuditEntryOut(BaseModel):
     ts: datetime = Field(description="When the change happened (UTC).")
     actor: str = Field(description="Operator identity (header) or 'api'.")
     action: str = Field(description="e.g. create.source, update.rule, import.transform.")
-    entity: str = Field(description="source | target | rule | transform | setting | "
-                                    "ups_subscription.")
+    entity: Literal["source", "target", "station", "rule", "transform", "setting",
+                    "local_item", "ups_subscription", "cache", "hl7_field_map",
+                    "hl7_message", "merge_rule", "mpps_step", "patient_merge",
+                    "prefetch", "spool", "tls"] = Field(
+        description="Which kind of entry the change touched.",
+    )
     entity_id: int | None = Field(default=None, description="Row ID of the affected entry.")
     before_json: dict | None = Field(default=None, description="State before the change.")
     after_json: dict | None = Field(default=None, description="State after the change.")
     correlation_id: str = Field(default="", description="Request correlation ID.")
+    rollbackable: bool = Field(
+        default=False,
+        description="Whether this entry can be rolled back: only the entities "
+                    "with a stored snapshot can (see `POST /config/rollback/{id}`).",
+    )
 
 
 class RollbackOut(BaseModel):
@@ -343,7 +356,10 @@ class RollbackOut(BaseModel):
 
     audit_id: int = Field(description="The change-log entry that was rolled back.")
     entity: str = Field(description="Affected entity type.")
-    action: str = Field(description="What the rollback did (delete | recreate | restore).")
+    action: Literal["delete", "recreate", "restore"] = Field(
+        description="What the rollback did: delete (the change created it), recreate "
+                    "(the change deleted it), restore (put the old values back).",
+    )
     message: str = Field(description="Human-readable result.")
 
 
@@ -390,7 +406,9 @@ class SimulateRouteOut(BaseModel):
 
     accession: str = Field(description="Accession that was checked.")
     study_uid: str = Field(description="Study UID that was checked.")
-    matched_via: str = Field(description="accession | study_uid | default | none.")
+    matched_via: Literal["accession", "study_uid", "default", "none"] = Field(
+        description="How the target was chosen.",
+    )
     source_id: int | None = Field(default=None, description="Worklist source the case came from.")
     source_name: str | None = Field(default=None, description="Name of that source.")
     target_id: int | None = Field(default=None, description="Target the instance would be sent to.")
@@ -471,7 +489,7 @@ class SettingUpdateIn(BaseModel):
 class RbacStatusOut(BaseModel):
     """Access mode for the caller (read vs. write)."""
 
-    mode: str = Field(description="off | enforce.")
+    mode: Literal["off", "enforce"] = Field(description="off | enforce.")
     enforced: bool = Field(description="Whether writes are restricted.")
     roles_header: str = Field(description="Header the proxy passes the roles in.")
     write_role: str = Field(description="Role that allows configuration changes.")
@@ -542,7 +560,9 @@ class TlsOverviewOut(BaseModel):
 
     inbound_enabled: bool = Field(description="Whether the TLS listener is switched on.")
     inbound_port: int = Field(description="Port of the TLS listener.")
-    inbound_client_auth: str = Field(description="none | optional | required (mTLS).")
+    inbound_client_auth: Literal["none", "optional", "required"] = Field(
+        description="Client authentication the listener asks for (required = mTLS).",
+    )
     outbound_verify: bool = Field(description="Whether outgoing certificates are verified.")
     directory: str = Field(description="Directory for self-generated certificates.")
     entries: dict = Field(description="State of every configured file (certificates and keys).")
@@ -833,7 +853,7 @@ class AtnaStatsOut(BaseModel):
     configured: bool = Field(description="True when enabled *and* a repository host is set.")
     host: str = Field(description="Audit repository host.")
     port: int = Field(description="Audit repository port.")
-    protocol: str = Field(description="tcp | tls.")
+    protocol: Literal["tcp", "tls"] = Field(description="tcp | tls.")
     queue_size: int = Field(description="Buffered messages waiting for delivery.")
     queue_max: int = Field(description="Buffer limit before the oldest are dropped.")
     worker_running: bool = Field(description="Whether the drain worker is alive.")
@@ -915,7 +935,9 @@ class NotifyEventOut(BaseModel):
     """One alerting event the broker can send."""
 
     code: str = Field(description="Event code used in `notify_events`.", examples=["source_down"])
-    severity: str = Field(description="error | warning | info.")
+    severity: Literal["error", "warning", "info"] = Field(
+        description="error | warning | info.",
+    )
     description: str = Field(description="What the event means (English, for the UI).")
 
 
@@ -959,7 +981,10 @@ class SpoolItemOut(BaseModel):
     source_id: int | None = Field(default=None, description="Originating worklist source.")
     target_id: int | None = Field(default=None, description="Target it has to reach.")
     target_name: str = Field(description="Name of that target (for the operator).")
-    status: str = Field(description="queued | failed | dead | sent.")
+    status: Literal["queued", "claimed", "sent", "failed", "dead"] = Field(
+        description="queued (waiting) | claimed (being sent) | sent | failed | dead "
+                    "(given up).",
+    )
     attempts: int = Field(description="Forwarding attempts so far.")
     last_error: str = Field(description="Reason of the last failure.")
     payload_bytes: int = Field(description="Size of the spooled payload (0 once delivered).")
@@ -1080,7 +1105,9 @@ class BreakerStateOut(BaseModel):
 
     source_id: int = Field(description="Row ID of the source.")
     name: str = Field(description="Display name of the source.")
-    state: str = Field(description="closed | half_open | open.")
+    state: Literal["closed", "half_open", "open"] = Field(
+        description="closed | half_open | open.",
+    )
     failures: int = Field(description="Consecutive failures since the last success.")
     retry_in_s: int | None = Field(
         default=None, description="Seconds until the next probe (null unless open).",
@@ -1095,7 +1122,9 @@ class FindingOut(BaseModel):
         description="Stable machine-readable code (the UI translates it).",
         examples=["no_default_target"],
     )
-    severity: str = Field(description="error | warning | info.")
+    severity: Literal["error", "warning", "info"] = Field(
+        description="error | warning | info.",
+    )
     message: str = Field(description="English fallback message.")
     entity: dict = Field(
         default_factory=dict,
@@ -1322,7 +1351,9 @@ class MppsStepOut(BaseModel):
     id: int = Field(description="Row ID.")
     ts: datetime = Field(description="When the broker received the message.")
     sop_instance_uid: str = Field(description="MPPS SOP instance UID (the step's identity).")
-    status: str = Field(description="IN PROGRESS | COMPLETED | DISCONTINUED.")
+    status: Literal["IN PROGRESS", "COMPLETED", "DISCONTINUED"] = Field(
+        description="IN PROGRESS | COMPLETED | DISCONTINUED.",
+    )
     accession: str = Field(description="Accession number — the key the RIS needs.")
     patient_id: str = Field(description="Patient ID (no name: PHI stays out of the logs).")
     sps_id: str = Field(description="Scheduled procedure step ID.")
@@ -1455,7 +1486,9 @@ class StatsOut(BaseModel):
     totals: StatsTotals = Field(description="Totals for the period.")
     groups: list[StatsGroup] = Field(description="Breakdown by the requested dimension.")
     series: list[StatsDay] = Field(description="Per-day series (gap-free, oldest first).")
-    group_by: str = Field(description="Dimension that was used: source | modality | station.")
+    group_by: Literal["source", "modality", "station"] = Field(
+        description="Dimension that was used.",
+    )
 
 
 class PatientMergeIn(BaseModel):
@@ -1516,8 +1549,9 @@ class Hl7AdtOut(BaseModel):
     control_id: str = Field(description="MSH-10.")
     old_patient_id: str = Field(description="MRG-1 (the previous identifier, for merge/link/unlink).")
     new_patient_id: str = Field(description="PID-3 (the surviving identifier, or the patient for A08).")
-    action: str = Field(
-        description="merged | linked | unlinked | updated | rejected | not-applicable.",
+    action: Literal["merged", "linked", "unlinked", "updated", "rejected",
+                    "not-applicable"] = Field(
+        description="What the message did.",
     )
     record_id: int | None = Field(
         default=None, description="The stored merge/link row, if one was created.",

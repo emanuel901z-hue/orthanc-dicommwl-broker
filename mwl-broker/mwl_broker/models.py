@@ -370,6 +370,18 @@ class ConfigAudit(Base):
     correlation_id: Mapped[str] = mapped_column(String(64), default="")
 
 
+    @property
+    def rollbackable(self) -> bool:
+        """Whether `POST /config/rollback/{id}` can undo this entry.
+
+        Only the entities with a stored snapshot can — the rest appear in the
+        change log for the record. The UI hides the button when this is false
+        instead of offering an action that answers 422.
+        """
+        from . import audit
+
+        return self.entity in audit.SERIALIZERS
+
 class BrokerSetting(Base):
     """Runtime setting overriding the ENV default (ENV stays the fallback).
 

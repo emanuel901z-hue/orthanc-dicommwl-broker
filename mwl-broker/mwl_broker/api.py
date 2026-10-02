@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone
 
 from pydicom.dataset import Dataset
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import (APIRouter, Body, Depends, HTTPException, Path, Query, Request,
                      WebSocket, WebSocketDisconnect)
@@ -1160,7 +1160,9 @@ def list_hl7_messages(
 def list_mpps(
     limit: int = Query(default=50, ge=1, le=500, description="Maximum number of entries."),
     offset: int = Query(default=0, ge=0, description="Number of entries to skip (paging)."),
-    status: str = Query(default="", description="Only this status (IN PROGRESS | COMPLETED | DISCONTINUED)."),
+    status: Literal["", "IN PROGRESS", "COMPLETED", "DISCONTINUED"] = Query(
+        default="", description="Only this status (empty = all).",
+    ),
 ):
     return mpps.list_steps(limit=limit, offset=offset, status=status)
 
