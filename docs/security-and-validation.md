@@ -81,9 +81,9 @@ verdrahtet und prüfen Verhalten, nicht Implementierung.
 | Ebene | Umfang | Was sie belegt |
 |---|---|---|
 | `pytest` (Backend) | 759 Tests (96 %, Schwelle 95 %) | DIMSE-Verhalten über echte Assoziationen (C-FIND, C-STORE, C-ECHO, MPPS N-CREATE/N-SET/**N-GET**), MLLP über echte Sockets, TLS/mTLS, RBAC, Aufbewahrung, Aggregation/Merge, Patienten-Zusammenführung, Reporting, UPS-RS, Auftragskontext (MADO-Korrelation), ADT-Ereignisse (A08/A24/A40/A47) und Aufträge (ORM^O01/OMG^O19/OMI^O23) und Patientendaten-Aktualisierungen (A08/A31) über REST und MLLP, Ablehnung von Nicht-Aufträgen (ORU^R01), Nebenläufigkeit (Breaker/Cache unter parallelen Abfragen), Hochverfügbarkeit (Spool-Claim, Instanz-Heartbeat), die Betriebsdokumente (Alarmnamen, Runbook-Anker, Skripte, Hilfeseiten), Interoperabilität gegen Fremdsoftware (mehrwertige Attribute, Cache-Fehler), Schema-Migrationen |
-| `vitest` (Frontend) | 795 Tests (Broker-Slice 97,5 %, Schwellen in `vitest.config.ts`) | jede Broker-Seite und -Karte, Fehlerpfade, Berechtigungslogik, IID-Einstiegspunkt (RAD-106) |
-| `verify-ui.cjs` | 154 Checks | jede Seite in Desktop und Mobil: keine Konsolen-/Netzwerkfehler, genau ein `<h1>`, kein Overflow, erwartete Inhalte |
-| `verify-screens.cjs` | 225 Checks + 52 Bilder | jede Ansicht und jeder Dialog, inkl. Rohschlüssel-Erkennung |
+| `vitest` (Frontend) | 801 Tests (Broker-Slice 97,5 %, Schwellen in `vitest.config.ts`) | jede Broker-Seite und -Karte, Fehlerpfade, Berechtigungslogik, IID-Einstiegspunkt (RAD-106) |
+| `verify-ui.cjs` | 217 Checks | jede Seite in Desktop und Mobil: keine Konsolen-/Netzwerkfehler, genau ein `<h1>`, kein Overflow, erwartete Inhalte |
+| `verify-screens.cjs` | 267 Checks + 52 Bilder | jede Ansicht und jeder Dialog, inkl. Rohschlüssel-Erkennung |
 | Playwright | 55 Tests | echte Bedienabläufe gegen den laufenden Stack (Konfiguration, MFA-Reise, Audit/Rollback, Spool) |
 | `backup-roundtrip-test.sh` | 1 Ablauf | Sicherung → Daten zerstören → Wiederherstellung → Daten wieder da |
 | `deploy/interop-test.sh` | 23 Prüfungen | Interoperabilität gegen **Fremdsoftware**: DCMTK (fremdes RIS, fremde Modalität, fremdes PACS, TLS/mTLS), dcm4che (fremder MPPS-SCU, fremder HL7-Sender/-Empfänger) — fand **sieben** Fehler, die eigene Tests nicht sehen konnten, und deckte auf, dass die Werkzeugnamen im PATH auf Python-Wrapper zeigten ([`interop.md`](interop.md)) |

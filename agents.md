@@ -436,6 +436,14 @@ Workspace betrifft:
   PS3.7). Wer sie verlangt, verliert den Untersuchungsschritt. Der SCP vergibt
   sie und liefert sie im Rückgabe-Dataset der N-CREATE-Antwort zurück
   (pynetdicom nimmt sie von dort in den Response-Command).
+- **Jede Seite trägt „Was ist das?".** Der Knopf (`PageHelp`, `helpId` +
+  `prefix`) öffnet drei Abschnitte: was die Seite ist, wie man sie bedient, was
+  zu tun ist, wenn nichts ankommt. `prefix="broker"` nutzt `broker.help_<id>_*`,
+  die Basis-Seiten `help.help_<id>_*`. Fehlt der Text, **rendert der Knopf nicht**
+  — der Screenshot-Audit prüft ihn deshalb auf jeder Ansicht
+  (`Hilfe-Knopf vorhanden`); ein fehlender Schlüssel fällt sofort auf. Die Texte
+  liegen auf Deutsch und Englisch, andere Sprachen fallen auf Englisch zurück
+  (Hinweis im Dialog).
 - **Eine Schaltfläche, deren Voraussetzung man in der Oberfläche nicht anlegen
   kann, ist eine Sackgasse.** „An Peer senden" gab es, die Ziele dafür nicht:
   Peers liegen hier in der Datenbank (`OrthancPeersInDatabase`), es gab also

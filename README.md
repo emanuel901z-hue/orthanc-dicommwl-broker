@@ -256,15 +256,15 @@ die Schnittstellen-Ausbaustufen GDT/BDT, UPS-RS (Subscriptions + Ereigniskanal)
 und der Voraufnahmen-Prefetch.
 Die OpenAPI-Dokumentation ist vollständig (107 Operationen, jede mit Beschreibung,
 Parametern und Fehlerantworten). Aktuelle Zahlen:
-759 Backend-Tests (96 %), 795 Frontend-Tests, 30 Playwright-Tests im Stack-Lauf,
-154 Checks im Deep-Audit und 225 im Screenshot-Walk — alles in `./ci-local.sh`
+759 Backend-Tests (96 %), 801 Frontend-Tests, 30 Playwright-Tests im Stack-Lauf,
+217 Checks im Deep-Audit und 267 im Screenshot-Walk — alles in `./ci-local.sh`
 verdrahtet.
 
 ## Tests
 
 ```bash
 cd mwl-broker && python -m pytest tests -q        # 759 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/GDT/ATNA/UPS-RS inkl. Subscriptions/Voraufnahmen-Prefetch/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
-cd orthanc-explorer-3-usable && npm run test      # 795 Tests
+cd orthanc-explorer-3-usable && npm run test      # 801 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -277,7 +277,7 @@ npx playwright test --config=e2e/stack/playwright.stack.config.ts
 ./test-stack.sh          # alles; --keep lässt ihn laufen, --down räumt ab
 
 # Coverage: backend 96 % (759 Tests, Schwelle 95 % in pyproject.toml),
-# Broker-UI 97,5 % (795 Tests, Schwellen in vitest.config.ts) — beide brechen den Build bei Rückfall
+# Broker-UI 97,5 % (801 Tests, Schwellen in vitest.config.ts) — beide brechen den Build bei Rückfall
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 cd orthanc-explorer-3-usable && npx vitest run --coverage
 

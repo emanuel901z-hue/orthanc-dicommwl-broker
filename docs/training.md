@@ -31,8 +31,11 @@ die **Form**: Zielgruppen, Ablauf, Übungen mit überprüfbarem Ergebnis.
 | Alarmregeln + Runbook-Zuordnung | [`support-and-sla.md`](support-and-sla.md) §4 | Alarm → Maßnahme |
 | Demo-/Test-Stack | `./build.sh --demo`, `./test-stack.sh` | Übungsplatz (nie produktiv) |
 
-Die elf Seiten mit Hilfetext (ein Test hält diese Liste mit der Oberfläche
-zusammen) — `overview` (Übersicht), `sources` (Quellen), `targets` (Ziele),
+Jede Seite trägt den Knopf **„Was ist das?“** — im Broker-Slice elf Seiten, in der
+OE3-Basis elf weitere (Studien, Studie/Serie/Instanz im Detail, Hochladen,
+Aktivität, Änderungsprotokoll, Remote-Quellen, Einstellungen, Arbeitslisten,
+IID). Ein Test und der Screenshot-Audit halten die Liste mit der Oberfläche
+zusammen — `overview` (Übersicht), `sources` (Quellen), `targets` (Ziele),
 `rules` (Routing-Regeln), `transforms` (Modify-Regeln), `stations`
 (Stationsregeln), `worklist` (lokale Worklist), `spool` (Store-Warteschlange),
 `prefetch` (Voraufnahmen holen), `audit` (Änderungsprotokoll), `settings`
