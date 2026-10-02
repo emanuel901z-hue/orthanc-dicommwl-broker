@@ -239,6 +239,12 @@ Die Oberfläche hat dafür eine eigene Seite: **Voraufnahmen holen** (`/broker/p
 Patient suchen, Vorschau ansehen, dann holen; darunter die UPS-RS-Ereignis-Abonnements.
 Das GDT-Protokoll erscheint im HL7-Nachrichtenprotokoll (`transport: gdt`).
 
+Neben dem Broker-Stack gibt es in der Oberfläche **„An Peer“** (Studie → Aktionen):
+Das schickt eine Studie per HTTP an eine andere Orthanc-Instanz — nicht an ein
+DICOM-Ziel des Brokers. Die Ziele dafür werden unter **Einstellungen → Peers**
+angelegt (Name + URL, optional Anmeldung); der Vorgang steht im Änderungsprotokoll.
+Das ist der Weg für „Bilder ans andere Haus" ohne DICOM-Konfiguration.
+
 Grenzen (z. B. eigener Ereigniskanal statt Kanal-URL, kein angebotenes C-MOVE)
 stehen im [Conformance Statement](docs/dicom-conformance-statement.md) (§9, §9a, §9e).
 

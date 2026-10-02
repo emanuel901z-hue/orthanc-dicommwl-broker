@@ -436,6 +436,15 @@ Workspace betrifft:
   PS3.7). Wer sie verlangt, verliert den Untersuchungsschritt. Der SCP vergibt
   sie und liefert sie im Rückgabe-Dataset der N-CREATE-Antwort zurück
   (pynetdicom nimmt sie von dort in den Response-Command).
+- **Eine Schaltfläche, deren Voraussetzung man in der Oberfläche nicht anlegen
+  kann, ist eine Sackgasse.** „An Peer senden" gab es, die Ziele dafür nicht:
+  Peers liegen hier in der Datenbank (`OrthancPeersInDatabase`), es gab also
+  keine Datei zum Bearbeiten und keinen Weg, einen Peer anzulegen — der Kunde
+  klickte und las „in der Orthanc-Konfigurationsdatei hinterlegen". Regel: wer
+  eine Aktion anbietet, bietet auch den Weg zu ihrer Voraussetzung (oder sagt
+  konkret, wo sie entsteht), und der Hinweis muss **für dieses Deployment**
+  stimmen. Der Screenshot-Audit prüft den Weg jetzt mit
+  (`dialog-peer-add`, `peers-tab`).
 - **Ein Schalter, der nichts tut, ist schlimmer als keiner.** Start-Entscheidungen
   (MLLP-Listener, MPPS-SOP-Klasse) müssen die **Einstellung** lesen
   (`settings_service`), nicht nur den Env-Wert — sonst zeigt die UI einen

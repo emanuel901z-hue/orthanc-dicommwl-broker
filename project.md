@@ -470,6 +470,8 @@ Endpoint und Descriptions für die Kern-Schemas.
   - `pages/BrokerSettingsPage` — Laufzeit-Settings (ENV-Default + Override/Reset);
     deployment-eigene Werte (Spool-Verzeichnis, TLS-Port, Instanzname) werden
     **schreibgeschützt** angezeigt — sie müssen zum Compose-Mapping passen
+  - `features/settings/components/PeersTab` — **Peers** (andere Orthanc-Instanzen)
+    anlegen/ändern/entfernen; das Ziel hinter „An Peer" in einer Studie
   - `pages/PrefetchPage` — **Voraufnahmen holen**: Patienten-ID, Abfrageknoten,
     Ziel, Vorschau (C-FIND) und erst danach „Holen" (C-MOVE); darunter die
     UPS-RS-Ereignis-Abonnements
