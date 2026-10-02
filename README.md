@@ -239,6 +239,13 @@ Die Oberfläche hat dafür eine eigene Seite: **Voraufnahmen holen** (`/broker/p
 Patient suchen, Vorschau ansehen, dann holen; darunter die UPS-RS-Ereignis-Abonnements.
 Das GDT-Protokoll erscheint im HL7-Nachrichtenprotokoll (`transport: gdt`).
 
+Die Studien-Aktionsleiste ist gruppiert (übertragen · ansehen · herunterladen ·
+kennzeichnen · ändern · Datenschutz) — die seltenen Aktionen (DICOM-DIR,
+migrieren, aufteilen, Serie hinzufügen, Link teilen, Orthanc-API, löschen) liegen
+hinter **„Mehr“**. Fehlertexte sind übersetzt: statt „A conflict occurred." steht
+dort „Das kollidiert mit dem, was schon da ist (z. B. gleicher Name)." — zentral
+in `src/lib/errors.ts`, damit alle ~60 Anzeigestellen davon profitieren.
+
 Neben dem Broker-Stack gibt es in der Oberfläche **„An Peer“** (Studie → Aktionen):
 Das schickt eine Studie per HTTP an eine andere Orthanc-Instanz — nicht an ein
 DICOM-Ziel des Brokers. Die Ziele dafür werden unter **Einstellungen → Peers**
@@ -256,7 +263,7 @@ die Schnittstellen-Ausbaustufen GDT/BDT, UPS-RS (Subscriptions + Ereigniskanal)
 und der Voraufnahmen-Prefetch.
 Die OpenAPI-Dokumentation ist vollständig (107 Operationen, jede mit Beschreibung,
 Parametern und Fehlerantworten). Aktuelle Zahlen:
-759 Backend-Tests (96 %), 801 Frontend-Tests, 30 Playwright-Tests im Stack-Lauf,
+759 Backend-Tests (96 %), 802 Frontend-Tests, 30 Playwright-Tests im Stack-Lauf,
 217 Checks im Deep-Audit und 267 im Screenshot-Walk — alles in `./ci-local.sh`
 verdrahtet.
 
@@ -264,7 +271,7 @@ verdrahtet.
 
 ```bash
 cd mwl-broker && python -m pytest tests -q        # 759 Tests (API + DIMSE e2e + MPPS/MLLP/TLS/RBAC/Retention/HL7/GDT/ATNA/UPS-RS inkl. Subscriptions/Voraufnahmen-Prefetch/Auftragskontext/ADT/OMG/Hochverfügbarkeit/Nebenläufigkeit/Betriebsdokumente)
-cd orthanc-explorer-3-usable && npm run test      # 801 Tests
+cd orthanc-explorer-3-usable && npm run test      # 802 Tests
 
 # Browser-E2E gegen den laufenden Stack (Chromium headless, Desktop 1280x800
 # + Mobile 375x812; DOM-Analyse, Console-/Page-Errors, Screenshots):
@@ -277,7 +284,7 @@ npx playwright test --config=e2e/stack/playwright.stack.config.ts
 ./test-stack.sh          # alles; --keep lässt ihn laufen, --down räumt ab
 
 # Coverage: backend 96 % (759 Tests, Schwelle 95 % in pyproject.toml),
-# Broker-UI 97,5 % (801 Tests, Schwellen in vitest.config.ts) — beide brechen den Build bei Rückfall
+# Broker-UI 97,5 % (802 Tests, Schwellen in vitest.config.ts) — beide brechen den Build bei Rückfall
 cd mwl-broker && .venv/bin/pytest tests -q --cov=mwl_broker --cov-report=term-missing
 cd orthanc-explorer-3-usable && npx vitest run --coverage
 

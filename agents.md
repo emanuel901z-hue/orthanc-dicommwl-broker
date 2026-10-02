@@ -436,6 +436,18 @@ Workspace betrifft:
   PS3.7). Wer sie verlangt, verliert den Untersuchungsschritt. Der SCP vergibt
   sie und liefert sie im Rückgabe-Dataset der N-CREATE-Antwort zurück
   (pynetdicom nimmt sie von dort in den Response-Command).
+- **Fehlertexte gehören in die Sprache des Bedieners — und zwar an der Quelle.**
+  Die vorformulierten HTTP-Texte (`src/lib/errors.ts`) sind das, was der Anwender
+  im Toast, im Inline-Hinweis und im Dialog liest; sie werden deshalb **dort**
+  übersetzt (i18next-Kern, englischer Text als Fallback), nicht an ~60 Stellen.
+  Wichtig: den App-Instanz-Import (`@/i18n`) vermeiden — er zieht als Seiteneffekt
+  alle Sprachbündel nach und verändert das Testverhalten.
+- **Seltene Aktionen hinter „Mehr", nicht versteckt.** Die Studien-Aktionsleiste
+  zeigt nur, was im Alltag gebraucht wird; alles andere öffnet einen Dialog mit
+  Beschriftung und Icon je Aktion (DICOM-DIR, migrieren, aufteilen, Serie,
+  Link teilen, Orthanc-API, löschen). Ein Dialog statt eines Aufklapp-Menüs: er
+  erklärt jede Aktion, ist mit dem Finger bedienbar und im Test prüfbar (Radix-
+  Menüs öffnen sich in jsdom nicht).
 - **Jede Seite trägt „Was ist das?".** Der Knopf (`PageHelp`, `helpId` +
   `prefix`) öffnet drei Abschnitte: was die Seite ist, wie man sie bedient, was
   zu tun ist, wenn nichts ankommt. `prefix="broker"` nutzt `broker.help_<id>_*`,
