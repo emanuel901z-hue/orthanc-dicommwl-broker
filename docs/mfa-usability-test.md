@@ -87,3 +87,56 @@ Wichtig: Nach Änderungen am Frontend/Backend muss der Stack **neu gebaut**
 werden — ein `up -d` ohne `--build` fährt sonst die alten Images und der Bericht
 zeigt Fehler, die es im Code nicht mehr gibt (genau das ist beim ersten Lauf
 passiert und hat zwei vermeintliche Befunde erzeugt).
+
+---
+
+## 6. Nachtrag (04.10.2026): Laptop-Breite, TLS-Sackgasse, Prüf-Fehlalarme
+
+Wiederholte Verifikation aus Sicht von MFA/MTRAs — multimodal (Chromium-
+Screenshots + DOM-Messungen) bei **1400×900 (Desktop), 1024×768 (Laptop),
+375×812 (Mobil)** gegen den isolierten Stack.
+
+### 6.1 Befund: Quellentabelle lief bei 1024 px über, sobald etwas nicht stimmte
+
+Gemessen (1024×768, `/oe3/broker/sources`): die Tabelle brauchte **770 px** in
+einem **718 px** breiten Bereich → **+52 px**. Die Spalte *Actions* war
+abgeschnitten („Ac…"), genau dann, wenn eine Quelle einen offenen Circuit
+Breaker oder einen C-ECHO-Fehler zeigte. Ursache: `whitespace-nowrap` an
+`BreakerBadge`/`EchoBadge`; der Fehlertext („association rejected",
+„breaker open · retry in 0s") konnte die Zeile nicht umbrechen. Mit sauberen
+Seed-Daten fiel es nicht auf (718/718) — der Fehler trat erst im Problemfall
+auf, also wenn der Bediener die Aktionen am dringendsten braucht.
+
+**Behoben:** Die Badges brechen jetzt um (`break-words`, Icon und Knopf
+`shrink-0`); die C-ECHO-Spalte schrumpfte von 194 auf 144 px, die Tabelle passt
+wieder (1024: **718/718**). Die Kartenansicht auf dem Handy erbt das.
+
+### 6.2 Befund: TLS-Health-Befunde waren eine Sackgasse
+
+Das Health-Panel verlinkt je Befund in das zuständige Formular. Für die
+TLS-Befunde (`tls_configuration_incomplete`, `tls_file_unusable`,
+`tls_key_mismatch`, `tls_verification_disabled`, `tls_key_world_readable`,
+`tls_certificate_expiring`, `tls_certificate_expired`) gab es **keinen**
+„Fix"-Knopf — der Bediener las die Meldung, konnte aber von dort nicht zur
+Zertifikatsverwaltung (Einstellungen → TLS) springen.
+
+**Behoben:** `BY_CODE` in `HealthPanel` führt die TLS-Codes auf
+`/broker/settings`; ein Test hält es fest.
+
+### 6.3 Befunde in der Prüfumgebung selbst (Fehlalarme, die Arbeit kosteten)
+
+| Prüfung | Beobachtung | Fix |
+|---|---|---|
+| `verify-ui.cjs` – i18n-Rohschlüssel | Dateipfade aus Health-Befunden (`/var/lib/mwl-broker/tls/mwl-broker.crt`) trafen das Muster `broker\.…` → „Rohschlüssel" in allen 9 Sprachen | Lookbehind schließt Pfade (`-`, `/`, Wortzeichen davor) aus |
+| `verify-ui.cjs` – „keine scrollende Tabelle/Karte" | `<input>` mit langem Wert (Pfad/URL) zählt als Overflow — das ist ein Feld, kein Layoutfehler | Formularelemente (`input`/`textarea`/`select`) werden ignoriert |
+| `verify-ui.cjs` – „abgelehnter Wert wurde nicht gespeichert" | verglich mit hartkodiert `'30'`; der Test-Stack hat `BROKER_ECHO_INTERVAL_S=15` | vergleicht mit dem `default` aus `GET /settings` |
+| `broker-config.spec.ts` – Breaker-Szenario | strict-mode-Verletzung, weil mehrere Quellen gleichzeitig übersprungen sein können | `.first()` |
+
+### 6.4 Nachweis (bereitgestellter Stack, `./test-stack.sh --keep`)
+
+| Ebene | Ergebnis |
+|---|---|
+| `test-stack.sh` (Szenarien + Playwright + Backup-Round-Trip + Screenshot-Walk) | **alle Prüfungen grün**, Playwright **55 passed / 0 failed / 5 skipped**, Round-Trip OK, Screenshot-Walk **271/271** |
+| `verify-ui.cjs` (Deep-Audit, DOM + CRUD, Desktop/Laptop/Mobil) | **217/217** (vorher 213/217) |
+| `pytest`/`vitest` (Broker-Slice) | 295 Frontend-Tests grün, inkl. neuem TLS-Deep-Link-Test |
+| Sichtprüfung | Screenshots in `orthanc-explorer-3-usable/e2e/stack/{screenshots,shots}/` |
