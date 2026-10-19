@@ -630,6 +630,16 @@ Workspace betrifft:
   Abfrage, nie das Ergebnis (nur Studien-UID, Datum, Beschreibung). Der
   Audit-Snapshot enthält Knotennamen und Zähler, keine Patientendaten.
 
+- **Die Vorschau fragt ab, was sie anzeigt.** `_identifier_from_preview` muss
+  jedes dargestellte Feld als Return-Key in den C-FIND-Identifier schreiben
+  (leerer Wert = „bitte zurückliefern"). Ein minimaler Identifier bekommt eine
+  minimale Antwort: am Haus-RIS kamen 2 Antworten mit **einem** Attribut
+  (`SpecificCharacterSet`), und die Oberfläche zeigte vier leere Felder
+  („· · ·"), obwohl das RIS alles liefert. `summarize_dataset` lässt leere
+  Felder stillschweigend weg — ein fehlender Wert ist deshalb unsichtbar. Der
+  Live-C-FIND-Pfad ist nicht betroffen: dort wird der Identifier der Modalität
+  durchgereicht. `test_preview_requests_every_field_it_displays` hält es fest.
+
 ## Regeln für das Frontend
 
 - Neuer Broker-Code lebt in `src/features/broker/` + `src/api/broker.ts`.

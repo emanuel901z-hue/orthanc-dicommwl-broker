@@ -1574,6 +1574,32 @@ def test_worklist_preview_can_show_phi_when_switched_on(client):
     assert "patient_name" not in body["items"][0]
 
 
+def test_preview_requests_every_field_it_displays(client):
+    """Medavis answers only what was asked for.
+
+    With a minimal identifier the entries carry nothing but
+    SpecificCharacterSet, and the preview renders empty rows — measured against
+    the house RIS: 2 answers, 1 attribute. Every field the preview shows has to
+    be a return key in the query.
+    """
+    from mwl_broker import simulate
+    from mwl_broker.api import _identifier_from_preview
+    from mwl_broker.schemas import WorklistPreviewIn
+
+    ident = _identifier_from_preview(WorklistPreviewIn())
+    for _, tag in simulate.PHI_FREE_FIELDS:
+        assert getattr(ident, tag) == "", tag
+    sps = ident.ScheduledProcedureStepSequence[0]
+    for _, tag in simulate.PHI_FREE_SPS_FIELDS:
+        assert getattr(sps, tag) == "", tag
+
+    # a filter is still a matching key, not a return key
+    ident = _identifier_from_preview(WorklistPreviewIn(accession="ACC-1", station_aet="CT_01"))
+    assert ident.AccessionNumber == "ACC-1"
+    assert ident.ScheduledProcedureStepSequence[0].ScheduledStationAETitle == "CT_01"
+    assert ident.RequestedProcedureID == "", "the other return keys stay universal"
+
+
 def test_source_query_test_answers_for_one_source(client):
     """'Does this RIS deliver worklists?' — the question a C-ECHO cannot answer."""
     from mwl_broker import cache

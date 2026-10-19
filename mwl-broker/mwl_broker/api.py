@@ -201,15 +201,28 @@ def _parse_since(value: str) -> datetime:
 
 
 def _identifier_from_preview(body) -> Dataset:
-    """Build the C-FIND identifier the preview runs (same fields as a modality)."""
+    """Build the C-FIND identifier the preview runs (same fields as a modality).
+
+    Everything the preview shows is also requested: in C-FIND an empty value
+    means "return this attribute". A minimal identifier gets a minimal answer —
+    Medavis replies with two entries carrying nothing but SpecificCharacterSet
+    when nothing is asked for, and the preview then renders empty rows.
+    """
     identifier = Dataset()
+    for _, tag in simulate.PHI_FREE_FIELDS:
+        setattr(identifier, tag, "")
+    sps = Dataset()
+    for _, tag in simulate.PHI_FREE_SPS_FIELDS:
+        setattr(sps, tag, "")
+    if simulate.show_phi():
+        identifier.PatientName = ""
+        identifier.PatientID = ""
     if getattr(body, "accession", ""):
         identifier.AccessionNumber = body.accession
     if getattr(body, "study_uid", ""):
         identifier.StudyInstanceUID = body.study_uid
     if getattr(body, "patient_id", ""):
         identifier.PatientID = body.patient_id
-    sps = Dataset()
     if getattr(body, "modality", ""):
         sps.Modality = body.modality
     if getattr(body, "scheduled_date", ""):
