@@ -1,0 +1,31 @@
+# Optional HTTP Basic auth for everything the OE3 nginx serves (/oe3/,
+# /broker-api/, /orthanc-proxy/, /ohif/). Without it, anyone who can reach
+# the published port can reconfigure the broker.
+#
+# The nginx config includes /etc/nginx/nginx-auth/*.conf, and this folder is
+# mounted into the container. A fresh clone has no *.conf here, so the stack
+# starts without auth; dropping a *.conf turns it on.
+#
+# To enable on this host:
+#   1. create the password file (the real one is git-ignored):
+#        mkdir -p deploy/nginx-auth
+#        printf 'mwlbroker:%s\n' "$(openssl passwd -apr1 'your-password')" \
+#          > deploy/nginx-auth/.htpasswd
+#        chmod 644 deploy/nginx-auth/.htpasswd
+#      The file must be readable by the nginx worker inside the container,
+#      whose uid/gid do not map to a host group — 640 gives "Permission
+#      denied" and a 500 for authenticated requests. It holds a hash, not
+#      the password.
+#   2. copy this file to deploy/nginx-auth/auth.conf (no .example suffix)
+#   3. docker compose up -d --no-build oe3 && docker compose exec oe3 nginx -s reload
+#
+# Loopback stays exempt so the container healthcheck (wget 127.0.0.1/oe3/)
+# keeps working; `satisfy any` grants access when either rule matches.
+
+satisfy any;
+allow 127.0.0.1;
+allow ::1;
+deny all;
+
+auth_basic "MWL Broker";
+auth_basic_user_file /etc/nginx/nginx-auth/.htpasswd;

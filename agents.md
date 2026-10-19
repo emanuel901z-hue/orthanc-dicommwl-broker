@@ -12,6 +12,9 @@
   (Compose-Profil `viewer`); Regeln siehe unten.
 - `deploy/` — `orthanc/orthanc.json`, `oe3-stack.nginx.conf`, `oe3-config.js`
   (OE3-Runtime-Config), `ohif-config.js` (OHIF-Runtime-Config), `postgres-init.sh`.
+- `deploy/windows/` — Bootstrap für Windows-Hosts (`bootstrap.ps1` für die
+  Windows-Seite, `wsl-provision.sh` für das Innere der Distro). Ablauf und die
+  Betriebsbesonderheiten von WSL: `docs/windows-host.md`.
 - `docker-compose.yml` (Workspace-Root) — Gesamtstack. Die
   `docker-compose.dev.yml` im Frontend-Repo ist nur für reine Frontend-
   Entwicklung gedacht.
@@ -34,6 +37,12 @@
 ./bootstrap.sh              # Wrapper um build.sh (installiert Docker bei Bedarf)
 docker compose up -d --build
 docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d
+
+# Windows-Host (WSL2) — als Administrator, zwei Läufe (Neustart dazwischen).
+# Setzt WSL2 + Docker in einer Ubuntu-Distro auf; Details: docs/windows-host.md
+# (aus einer Windows-PowerShell, nicht aus diesem bash-Block):
+#   powershell -ExecutionPolicy Bypass -File deploy/windows/bootstrap.ps1 -Check
+#   powershell -ExecutionPolicy Bypass -File deploy/windows/bootstrap.ps1
 
 # Broker-Tests (ohne Docker; DIMSE-Tests nutzen ephemere Ports + sqlite)
 cd mwl-broker && python -m pytest tests -q
@@ -280,6 +289,14 @@ Workspace betrifft:
   oe3-nginx-Proxy.
 - Demo-Services (mock-ris, dicom-peer) gehören ausschließlich in
   `docker-compose.demo.yml`, nie in die Basis.
+- **Windows-Hosts laufen über WSL2** (`deploy/windows/bootstrap.ps1`, Ablauf in
+  `docs/windows-host.md`). Dort stehen die Eigenheiten, die man sonst teuer
+  lernt: Windows-`localhost` erreicht die Distro nicht (immer die Host-IP),
+  jede Firewall-Änderung braucht danach `wsl --shutdown`, und die Hyper-V-
+  Firewall für WSL blockt in diesem Build **jeden** Inbound — sie darf nicht
+  aktiviert werden. Die Stack-Ports lassen sich von Windows aus nicht filtern;
+  der Schutz liegt deshalb im Stack (Basic-Auth vor der Oberfläche, AET-Whitelist
+  und DICOM-TLS für die DICOM-Ports).
 
 ## Regeln für den Broker (`mwl-broker/`)
 

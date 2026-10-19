@@ -44,6 +44,22 @@ Port-Kollisionen (wichtig auf Hosts mit anderen Docker-Projekten), baut die
 Images, wartet auf die Erreichbarkeit und zeigt am Ende die Adressen und den
 Smoke-Test-Befehl.
 
+### Windows-Host (WSL2)
+
+Auf einem Windows-11-Host übernimmt `deploy/windows/bootstrap.ps1` dasselbe:
+WSL2 mit mirrored networking, Docker Engine in einer Ubuntu-Distro, Clone,
+Stack, Basic-Auth vor der Oberfläche und Portainer.
+
+```powershell
+# als Administrator, zwei Läufe (die WSL-Features brauchen einen Neustart)
+powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Check   # nur prüfen
+powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
+```
+
+Anleitung und die Betriebsbesonderheiten von WSL (`localhost` erreicht die
+Distro nicht, Firewall-Regeln, Portainer-Grenzen):
+[`docs/windows-host.md`](docs/windows-host.md).
+
 ### Die wichtigsten Optionen
 
 | Aufruf | Wirkung |
@@ -182,6 +198,7 @@ Vollständige Referenz mit fertigem Beispiel:
 | [`docs/interop-tools.md`](docs/interop-tools.md) | Werkzeug-Lückenanalyse: Gazelle-Test-Bed, dcm4che, DVTk, Orthanc-Worklists — was fehlt noch und warum |
 | [`docs/security-and-validation.md`](docs/security-and-validation.md) | Schutzbedarf, Datenfluss, Härtung, **bekannte Grenzen**, Validierungsablauf |
 | [`docs/production-setup.md`](docs/production-setup.md) | Erstinbetriebnahme auf dem Zielhost (`./setup.sh`) |
+| [`docs/windows-host.md`](docs/windows-host.md) | Windows-Host: WSL2-Bootstrap, Betriebsbesonderheiten, Portainer |
 
 Die Support- und Schulungsdokumente sind ebenfalls **an den Code gebunden**
 (`tests/test_support_docs.py`): jeder genannte Alarm muss in den Regeln stehen,

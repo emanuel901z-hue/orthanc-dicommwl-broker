@@ -120,9 +120,9 @@ ask() {   # ask "Frage" "Vorschlag" "Validierungsfunktion"
   if [ "$ASSUME_YES" = 1 ]; then echo "$suggestion"; return 0; fi
   while true; do
     if [ -n "$suggestion" ]; then
-      printf '%s [%s]: ' "$question" "$suggestion"
+      printf '%s [%s]: ' "$question" "$suggestion" >&2
     else
-      printf '%s: ' "$question"
+      printf '%s: ' "$question" >&2
     fi
     read -r answer <"${TTY_IN:-/dev/tty}" || return 1
     [ -z "$answer" ] && answer="$suggestion"
@@ -441,9 +441,9 @@ fi
 # ══ 5. Broker konfigurieren ════════════════════════════════════════════════
 API="http://127.0.0.1:$(env_get BROKER_API_PORT)/api/v1"
 api_ready=0
-if [ "$DRY_RUN" = 0 ] && [ "$SKIP_STACK" = 0 ]; then
+if [ "$DRY_RUN" = 0 ]; then
   for _ in $(seq 1 20); do
-    curl -sf "$API/status" >/dev/null 2>&1 && { api_ready=1; break; }
+    curl -sf --connect-timeout 2 --max-time 3 "$API/status" >/dev/null 2>&1 && { api_ready=1; break; }
     sleep 1
   done
 fi
