@@ -16,7 +16,8 @@ nur.
 | Rechte | PowerShell **als Administrator** |
 | Virtualisierung | im BIOS/UEFI aktiv (VT-x / AMD-V) |
 | Platz | ~30 GB auf `C:` (WSL-VHD + Images; der OHIF-Build braucht mehr) |
-| Netz | Internet für den WSL-Download, die Docker-Pakete und den Clone || RAM | ab 8 GB. Weniger macht den OHIF-Viewer-Build unbrauchbar |
+| Netz | Internet für den WSL-Download, die Docker-Pakete und den Clone |
+| RAM | ab 8 GB. Weniger macht den OHIF-Viewer-Build unbrauchbar |
 
 ## Schnellstart
 
