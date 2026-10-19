@@ -67,7 +67,8 @@ Phasen werden übersprungen, jede Phase ist idempotent.
 | 8 `stack` | `.env` mit starkem Datenbank-Passwort, `./build.sh --health`, `./setup.sh --check` |
 | 9 `ui-auth` | HTTP-Basic-Auth vor die Oberfläche (Benutzer `mwlbroker`) |
 | 10 `portainer` | Portainer CE mit vorab gesetztem Admin-Passwort |
-| 11 `summary` | Adressen, Passwortdateien, offene Punkte |
+| 11 `keep-alive` | Geplante Aufgabe hält eine WSL-Sitzung offen (siehe unten) |
+| 12 `summary` | Adressen, Passwortdateien, offene Punkte |
 
 Warum diese Schritte nötig sind (jeder davon hat uns einmal Zeit gekostet):
 
@@ -83,6 +84,9 @@ Warum diese Schritte nötig sind (jeder davon hat uns einmal Zeit gekostet):
   schon?"-Test 130 s warten statt sofort abzulehnen; `setup.sh --check` bleibt
   an einem gestoppten Stack hängen. Der systemd-Service
   `wsl-127-route-fix.service` räumt die gespiegelte Route weg.
+- **WSL hält den Stack nicht von selbst am Leben** — siehe die erste
+  Betriebsregel. Ohne die Aufgabe aus Phase 11 ist der Stack nur erreichbar,
+  solange jemand WSL benutzt.
 
 ## Nach der Installation
 
@@ -136,9 +140,30 @@ wsl -d Ubuntu-24.04 -u root -- cat /opt/portainer/admin-password
 Noch offen und bewusst manuell (in der Oberfläche): **AET-Whitelist**,
 **Alarmierung** (Webhook; E-Mail braucht eine Brücke), optional **DICOM-TLS**.
 
-## Betrieb auf Windows — die vier Regeln
+## Betrieb auf Windows — die fünf Regeln
 
-**1. `localhost` erreicht die Distro nicht.**
+**1. Ohne offene WSL-Sitzung ist der Stack weg.**
+Das ist die wichtigste Eigenheit und die häufigste Ursache für „die Oberflächen
+sind tot". WSL2 fährt die VM herunter, sobald die letzte WSL-Sitzung endet
+(gemessen: nach unter zwei Minuten), und **nach einem Windows-Neustart startet
+sie überhaupt nicht von selbst**. Die Container haben zwar `restart:
+unless-stopped`, aber ohne laufenden Docker-Daemon nützt das nichts — sie
+starten erst, wenn die VM wieder hochkommt.
+
+Deshalb legt der Bootstrap eine geplante Aufgabe an, die ab der Anmeldung eine
+Sitzung offen hält:
+
+```powershell
+Get-ScheduledTask MWL-Broker-KeepAlive | Select-Object TaskName,State
+Get-Process wsl                      # muss laufen
+```
+
+Fehlt sie, ist der Stack nach einem Neustart erst wieder da, wenn sich jemand
+anmeldet oder WSL benutzt. **Für echten Dauerbetrieb ohne angemeldeten Benutzer
+ist ein Linux-Host die richtige Plattform** — dieser Windows-Weg ist ein
+Arbeitsplatz, kein Server.
+
+**2. `localhost` erreicht die Distro nicht.**
 In diesem Modus liegt der Listener „unterhalb" des Windows-TCP-Stacks. Immer die
 **Host-IP** verwenden. Die per Default auf `127.0.0.1` gebundenen Dienste
 (Broker-API 18081, Orthanc-REST 18042, OHIF 18083) erreicht man administrativ
@@ -148,11 +173,15 @@ nur über die Distro-Shell:
 wsl -d Ubuntu-24.04                      # danach: cd /opt/orthanc-dicommwl-broker
 ```
 
-**2. Nach jeder Firewall-Änderung `wsl --shutdown`.**
+Ein `netsh interface portproxy` auf `127.0.0.1` hilft **nicht**: der Proxy belegt
+denselben Port, den der Container binden will, und die Container starten dann
+nicht mehr (`failed to bind host port 0.0.0.0:18082: address already in use`).
+
+**3. Nach jeder Firewall-Änderung `wsl --shutdown`.**
 Sonst bricht die Weiterleitung, bis die VM neu startet. Das gilt auch, wenn die
 Firewall nur *aktiviert* wird.
 
-**3. Die Hyper-V-Firewall für WSL nicht einschalten.**
+**4. Die Hyper-V-Firewall für WSL nicht einschalten.**
 `Set-NetFirewallProfile -Enabled True` aktiviert sie implizit mit. In diesem
 Build blockt sie dann **jeden** WSL-Inbound — auch explizit erlaubte Ports
 (mit `RemoteAddresses Any`, expliziter VMCreatorId und Default-Allow geprüft).
@@ -164,7 +193,7 @@ Set-NetFirewallHyperVVMSetting -Name '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -E
 wsl --shutdown
 ```
 
-**4. Die Stack-Ports lassen sich von Windows aus nicht filtern.**
+**5. Die Stack-Ports lassen sich von Windows aus nicht filtern.**
 Deshalb liegt der Schutz im Stack selbst: **Basic-Auth** vor der Oberfläche
 (Phase 9), **AET-Whitelist** und **DICOM-TLS** für die DICOM-Ports. Für eine
 grobe Netzbegrenzung bleibt nur die Netzwerkseite (Switch-ACL / eigenes VLAN).
@@ -203,7 +232,10 @@ git submodule update --init      # ohne --remote, sonst reißt der Tag-Pin
 
 ## Bekannte Grenzen
 
-- **Kein Windows-Firewall-Filter für WSL** (siehe Regel 4).
+- **Kein Dauerbetrieb ohne angemeldeten Benutzer.** Der Stack lebt nur, solange
+  eine WSL-Sitzung offen ist (Regel 1). Ein Neustart ohne Login lässt ihn unten;
+  wer ihn 24/7 braucht, gehört auf einen Linux-Host.
+- **Kein Windows-Firewall-Filter für WSL** (siehe Regel 5).
 - **OHIF-Viewer** wird nicht mitgebaut (5–20 min, speicherhungrig). Auf einem
   Host mit 8 GB ist davon abzuraten; das Image lässt sich von einem Build-Host
   per `docker save`/`docker load` übertragen.
@@ -211,8 +243,6 @@ git submodule update --init      # ohne --remote, sonst reißt der Tag-Pin
   `wsl --shutdown` und die `ext4.vhdx` komprimieren.
 - **Der erste Start baut die Images** — der OE3-Build (npm/vite) dauert auf
   einem kleinen Host spürbar lange.
-- **Ein Windows-Neustart** bringt WSL und damit den Stack mit zurück; die
-  Container haben `restart: unless-stopped`.
 
 ## Zurücksetzen
 

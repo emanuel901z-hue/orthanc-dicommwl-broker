@@ -194,7 +194,7 @@ $RerunCommand = "powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`" " +
 # ── Phasen ───────────────────────────────────────────────────────────────────
 
 function Phase-Preflight {
-    Write-Step '1/11  Umgebung prüfen'
+    Write-Step '1/12  Umgebung prüfen'
 
     if (-not (Test-Admin)) { throw 'Bitte in einer PowerShell mit Administratorrechten ausführen.' }
     Write-Ok 'Administratorrechte vorhanden'
@@ -241,7 +241,7 @@ function Phase-Preflight {
 }
 
 function Phase-Features {
-    Write-Step '2/11  WSL-Features aktivieren'
+    Write-Step '2/12  WSL-Features aktivieren'
 
     $changed = $false
     foreach ($feature in 'Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform') {
@@ -267,7 +267,7 @@ function Phase-Features {
 }
 
 function Phase-WslRuntime {
-    Write-Step '3/11  WSL-Laufzeit installieren'
+    Write-Step '3/12  WSL-Laufzeit installieren'
 
     if (Test-WslRuntime) {
         $previous = $ErrorActionPreference
@@ -309,7 +309,7 @@ function Phase-WslRuntime {
 }
 
 function Phase-Distro {
-    Write-Step '4/11  Ubuntu-Distribution einrichten'
+    Write-Step '4/12  Ubuntu-Distribution einrichten'
 
     if (Get-WslDistros | Where-Object { $_ -eq $Distro }) {
         Write-Ok "$Distro ist bereits installiert"
@@ -354,7 +354,7 @@ id "`$U"
 }
 
 function Phase-WslConfig {
-    Write-Step '5/11  WSL-Konfiguration (.wslconfig)'
+    Write-Step '5/12  WSL-Konfiguration (.wslconfig)'
 
     # Mirrored networking is what makes the published ports reachable from the
     # LAN *and* from the Windows desktop; hostAddressLoopback is required for
@@ -394,7 +394,7 @@ hostAddressLoopback=true
 }
 
 function Phase-Repo {
-    Write-Step '6/11  Repository klonen'
+    Write-Step '6/12  Repository klonen'
 
     $parent = ($InstallPath -replace '/[^/]+$', '')
     Invoke-WslCapture -User 'root' -Script "mkdir -p '$parent' && chown $WslUser '$parent'" | Out-Null
@@ -429,7 +429,7 @@ git submodule status
 }
 
 function Phase-Provision {
-    Write-Step '7/11  Docker und Workarounds in WSL einrichten'
+    Write-Step '7/12  Docker und Workarounds in WSL einrichten'
 
     $script = @"
 set -e
@@ -441,7 +441,7 @@ bash '$InstallPath/deploy/windows/wsl-provision.sh'
 }
 
 function Phase-Stack {
-    Write-Step '8/11  Stack bauen und starten'
+    Write-Step '8/12  Stack bauen und starten'
 
     # A fresh clone only has .env.example. Replace the dev password *before*
     # the first start: the Postgres volume is initialised with it.
@@ -479,7 +479,7 @@ fi
 }
 
 function Phase-UiAuth {
-    Write-Step '9/11  Oberfläche mit Passwort schützen'
+    Write-Step '9/12  Oberfläche mit Passwort schützen'
 
     $password = New-Password
     $script = @"
@@ -507,7 +507,7 @@ docker compose up -d --no-build oe3
 }
 
 function Phase-Portainer {
-    Write-Step '10/11  Portainer bereitstellen'
+    Write-Step '10/12  Portainer bereitstellen'
 
     $password = New-Password
     $script = @"
@@ -534,8 +534,32 @@ docker ps --filter name=portainer --format '{{.Names}} {{.Status}}'
     Write-Note 'Passwort: /opt/portainer/admin-password in der WSL-Distro'
 }
 
+function Phase-KeepAlive {
+    Write-Step '11/12  Stack am Leben halten'
+
+    $action = New-ScheduledTaskAction -Execute 'wsl.exe' -Argument "-d $Distro -u root -- tail -f /dev/null"
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+    $principal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\$env:USERNAME" `
+        -LogonType Interactive -RunLevel Highest
+
+    Register-ScheduledTask -TaskName 'MWL-Broker-KeepAlive' -Action $action -Trigger $trigger `
+        -Settings $settings -Principal $principal -Force | Out-Null
+    Start-ScheduledTask -TaskName 'MWL-Broker-KeepAlive'
+    Start-Sleep -Seconds 6
+
+    if (Get-Process wsl -ErrorAction SilentlyContinue) {
+        Write-Ok 'Keep-Alive läuft (offene WSL-Sitzung)'
+    } else {
+        Write-Warn 'Keep-Alive startete nicht — Get-ScheduledTask MWL-Broker-KeepAlive prüfen'
+    }
+    Write-Note 'WSL2 hält den Stack nur bei offener Sitzung; die Aufgabe startet ab der Anmeldung.'
+    Write-Note 'Nach einem Neustart ist der Stack also erst nach dem Login wieder da.'
+}
+
 function Phase-Summary {
-    Write-Step '11/11  Zusammenfassung'
+    Write-Step '12/12  Zusammenfassung'
 
     $script = @"
 cd '$InstallPath' 2>/dev/null || exit 0
@@ -589,6 +613,7 @@ $PhaseTable = @(
     @{ Name = 'stack';       Run = { Phase-Stack } },
     @{ Name = 'ui-auth';     Run = { Phase-UiAuth } },
     @{ Name = 'portainer';   Run = { Phase-Portainer } },
+    @{ Name = 'keep-alive';  Run = { Phase-KeepAlive } },
     @{ Name = 'summary';     Run = { Phase-Summary } }
 )
 

@@ -291,12 +291,16 @@ Workspace betrifft:
   `docker-compose.demo.yml`, nie in die Basis.
 - **Windows-Hosts laufen über WSL2** (`deploy/windows/bootstrap.ps1`, Ablauf in
   `docs/windows-host.md`). Dort stehen die Eigenheiten, die man sonst teuer
-  lernt: Windows-`localhost` erreicht die Distro nicht (immer die Host-IP),
-  jede Firewall-Änderung braucht danach `wsl --shutdown`, und die Hyper-V-
-  Firewall für WSL blockt in diesem Build **jeden** Inbound — sie darf nicht
-  aktiviert werden. Die Stack-Ports lassen sich von Windows aus nicht filtern;
-  der Schutz liegt deshalb im Stack (Basic-Auth vor der Oberfläche, AET-Whitelist
-  und DICOM-TLS für die DICOM-Ports).
+  lernt: **ohne offene WSL-Sitzung fährt die VM herunter und der Stack ist weg**
+  (die Aufgabe `MWL-Broker-KeepAlive` hält sie offen; nach einem Neustart ohne
+  Login bleibt er unten), Windows-`localhost` erreicht die Distro nicht (immer
+  die Host-IP — ein `portproxy` auf 127.0.0.1 belegt den Port des Containers und
+  verhindert dessen Start), jede Firewall-Änderung braucht danach
+  `wsl --shutdown`, und die Hyper-V-Firewall für WSL blockt in diesem Build
+  **jeden** Inbound — sie darf nicht aktiviert werden. Die Stack-Ports lassen
+  sich von Windows aus nicht filtern; der Schutz liegt deshalb im Stack
+  (Basic-Auth vor der Oberfläche, AET-Whitelist und DICOM-TLS für die
+  DICOM-Ports).
 
 ## Regeln für den Broker (`mwl-broker/`)
 
