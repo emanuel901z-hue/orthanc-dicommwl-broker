@@ -236,6 +236,50 @@ Deshalb liegt der Schutz im Stack selbst: **Basic-Auth** vor der Oberfläche
 (Phase 9), **AET-Whitelist** und **DICOM-TLS** für die DICOM-Ports. Für eine
 grobe Netzbegrenzung bleibt nur die Netzwerkseite (Switch-ACL / eigenes VLAN).
 
+## Adresse ändern (neue IP, zweites Netz)
+
+Der Stack hängt an **keiner** Adresse: kein Skript, keine Compose-Datei und
+keine Konfiguration nennt die Host-IP. Alles, was erreichbar sein muss, lauscht
+auf `0.0.0.0` — 11113 (DICOM), 14242 (Orthanc-DICOM), 18082 (Oberfläche),
+9443 (Portainer), 2762 (TLS); die Verwaltungsdienste 18081/18042/18083 bleiben
+bewusst auf `127.0.0.1` und werden über den Proxy erreicht. Die Modalitäten
+adressieren den Broker über den **AET** `MWLBROKER`, nicht über die IP — für sie
+ändert sich nur die Zieladresse.
+
+Vier Punkte bleiben beim Umstellen:
+
+1. **Danach `wsl --shutdown`** (oder neu starten). Das Mirrored-Networking
+   übernimmt die Adressen beim Start der VM; ohne das bleibt der Stack auf der
+   alten Adresse hängen.
+2. **Firewall-Regeln.** Die sechs Regeln `MWL-Broker *` stehen auf
+   `RemoteAddress Any`. Für WSL-Traffic beißen sie ohnehin nicht (Windows
+   filtert ihn nicht, Regel 5) — aber sie sollen ein zweites Netz auch dann
+   nicht aussperren, wenn die Firewall später doch greift.
+3. **DICOM-TLS erst nach der Adressierung einrichten.** Alle endgültigen
+   Adressen gehören in die SAN des Zertifikats, sonst weisen die Modalitäten es
+   ab. `BROKER_TLS_INBOUND_PORT` ist ein Deployment-Wert und nur in der `.env`
+   änderbar, nicht in der Oberfläche.
+4. **Routing zum RIS.** Der Broker geht ausgehend über die Routing-Tabelle des
+   Hosts. Bei zwei Netzen muss die Route zur Quelle (z. B. `MEDAVIS-RIS`,
+   10.0.1.5) über die richtige Schnittstelle gehen — sonst bricht der C-FIND.
+
+Prüfliste nach dem Umstellen, aus **jedem** der beiden Netze:
+
+```bash
+for p in 18082 9443 11113 14242; do
+  (exec 3<>/dev/tcp/<neue-ip>/$p) 2>/dev/null && echo "$p offen" || echo "$p ZU"
+done
+curl -u mwlbroker:<passwort> -o /dev/null -w '%{http_code}\n' http://<neue-ip>:18082/oe3/
+```
+
+Dann in der Oberfläche: **Quellen → C-FIND-Test** (kommt die Arbeitsliste durch?)
+und **Übersicht → Echo-Matrix** (leben die Ziele?).
+
+Eine **zweite** Adresse (zweites Netz, weitere Karte) sollte das
+Mirrored-Networking mitnehmen — verifiziert ist das nicht. Kommt sie nicht
+durch: erst `wsl --shutdown` wiederholen; hilft das nicht, gezielt prüfen, ob
+WSL nur die erste Karte spiegelt.
+
 ## Portainer
 
 Portainer CE deckt den Docker-Teil ab: Container, Images, Volumes, Netze,

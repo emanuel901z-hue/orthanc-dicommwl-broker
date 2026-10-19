@@ -301,7 +301,10 @@ Workspace betrifft:
   **jeden** Inbound — sie darf nicht aktiviert werden. Die Stack-Ports lassen
   sich von Windows aus nicht filtern; der Schutz liegt deshalb im Stack
   (Basic-Auth vor der Oberfläche, AET-Whitelist und DICOM-TLS für die
-  DICOM-Ports).
+  DICOM-Ports). Die Host-IP steckt in **keiner** Konfiguration — beim
+  Adresswechsel (neue IP, zweites Netz) ist `wsl --shutdown` Pflicht, sonst
+  bleibt der Stack auf der alten Adresse; Ablauf und Prüfliste in
+  `docs/windows-host.md`.
 
 ## Regeln für den Broker (`mwl-broker/`)
 
