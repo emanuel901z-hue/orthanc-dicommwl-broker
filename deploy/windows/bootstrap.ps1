@@ -538,24 +538,25 @@ function Phase-KeepAlive {
     Write-Step '11/12  Stack am Leben halten'
 
     $action = New-ScheduledTaskAction -Execute 'wsl.exe' -Argument "-d $Distro -u root -- tail -f /dev/null"
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $trigger = New-ScheduledTaskTrigger -AtStartup
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
     $principal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\$env:USERNAME" `
-        -LogonType Interactive -RunLevel Highest
+        -LogonType S4U -RunLevel Highest
 
     Register-ScheduledTask -TaskName 'MWL-Broker-KeepAlive' -Action $action -Trigger $trigger `
         -Settings $settings -Principal $principal -Force | Out-Null
     Start-ScheduledTask -TaskName 'MWL-Broker-KeepAlive'
     Start-Sleep -Seconds 6
 
-    if (Get-Process wsl -ErrorAction SilentlyContinue) {
-        Write-Ok 'Keep-Alive läuft (offene WSL-Sitzung)'
+    $proc = Get-Process wsl -ErrorAction SilentlyContinue
+    if ($proc) {
+        Write-Ok "Keep-Alive läuft (Sitzung in Session 0 — kein Fenster)"
     } else {
         Write-Warn 'Keep-Alive startete nicht — Get-ScheduledTask MWL-Broker-KeepAlive prüfen'
     }
-    Write-Note 'WSL2 hält den Stack nur bei offener Sitzung; die Aufgabe startet ab der Anmeldung.'
-    Write-Note 'Nach einem Neustart ist der Stack also erst nach dem Login wieder da.'
+    Write-Note 'S4U + AtStartup: läuft ohne Anmeldung und ohne sichtbares Fenster.'
+    Write-Note 'Nach einem Neustart einmal prüfen, ob der Stack vor dem Login erreichbar ist.'
 }
 
 function Phase-Summary {

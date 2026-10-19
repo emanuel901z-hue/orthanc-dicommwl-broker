@@ -150,18 +150,31 @@ sie überhaupt nicht von selbst**. Die Container haben zwar `restart:
 unless-stopped`, aber ohne laufenden Docker-Daemon nützt das nichts — sie
 starten erst, wenn die VM wieder hochkommt.
 
-Deshalb legt der Bootstrap eine geplante Aufgabe an, die ab der Anmeldung eine
-Sitzung offen hält:
+Deshalb legt der Bootstrap eine geplante Aufgabe an, die eine WSL-Sitzung offen
+hält — ohne sichtbares Fenster (sie läuft als S4U in Session 0) und mit Trigger
+`AtStartup`, also ohne Anmeldung:
 
 ```powershell
-Get-ScheduledTask MWL-Broker-KeepAlive | Select-Object TaskName,State
-Get-Process wsl                      # muss laufen
+Get-ScheduledTask MWL-Broker-KeepAlive | Select-Object TaskName,State,@{n='Logon';e={$_.Principal.LogonType}}
+Get-Process wsl | Select-Object Id,SessionId     # SessionId muss 0 sein
 ```
 
-Fehlt sie, ist der Stack nach einem Neustart erst wieder da, wenn sich jemand
-anmeldet oder WSL benutzt. **Für echten Dauerbetrieb ohne angemeldeten Benutzer
-ist ein Linux-Host die richtige Plattform** — dieser Windows-Weg ist ein
-Arbeitsplatz, kein Server.
+Verifiziert: nach 210 s ohne jeden WSL-Aufruf antworten OE3 und Portainer noch
+aus dem LAN, und die VM-Uptime wächst weiter (769 s). Fehlt die Aufgabe, ist der
+Stack nach einem Neustart erst wieder da, wenn jemand WSL benutzt.
+
+Eine frühere Fassung lief mit Trigger `AtLogOn` und `Interactive` — das zeigte
+eine dauerhaft offene WSL-Konsole auf dem Desktop und half nach einem Neustart
+ohne Login nicht. Ein `Unregister-ScheduledTask` beendet übrigens laufende
+Instanzen **nicht**; nach einem Wechsel bleiben Waisen-Prozesse zurück:
+`Get-Process wsl | Stop-Process -Force`, dann die Aufgabe neu starten.
+
+**Nicht verifiziert** ist, ob die Aufgabe auch ohne angemeldeten Benutzer
+startet: S4U lädt das Benutzerprofil möglicherweise nicht, und die WSL-Distro
+ist pro Benutzer registriert. Nach dem nächsten Neustart einmal von einem
+anderen Rechner prüfen, ob die Oberfläche **vor** dem Login erreichbar ist.
+Falls nicht, bleibt nur `-LogonType Password` (verlangt das Windows-Passwort in
+der Aufgabe) oder ein Linux-Host.
 
 **2. `localhost` erreicht die Distro nicht.**
 In diesem Modus liegt der Listener „unterhalb" des Windows-TCP-Stacks. Immer die
@@ -232,9 +245,10 @@ git submodule update --init      # ohne --remote, sonst reißt der Tag-Pin
 
 ## Bekannte Grenzen
 
-- **Kein Dauerbetrieb ohne angemeldeten Benutzer.** Der Stack lebt nur, solange
-  eine WSL-Sitzung offen ist (Regel 1). Ein Neustart ohne Login lässt ihn unten;
-  wer ihn 24/7 braucht, gehört auf einen Linux-Host.
+- **Der Stack lebt nur mit offener WSL-Sitzung.** Die Aufgabe
+  `MWL-Broker-KeepAlive` hält sie (Regel 1). Ob sie auch ohne angemeldeten
+  Benutzer startet, ist nicht verifiziert — und für echten 24/7-Betrieb mit
+  angemeldeten Modalitäten bleibt ein Linux-Host die richtige Plattform.
 - **Kein Windows-Firewall-Filter für WSL** (siehe Regel 5).
 - **OHIF-Viewer** wird nicht mitgebaut (5–20 min, speicherhungrig). Auf einem
   Host mit 8 GB ist davon abzuraten; das Image lässt sich von einem Build-Host
