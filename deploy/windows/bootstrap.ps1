@@ -25,6 +25,11 @@
 .PARAMETER SkipPortainer
     Do not install Portainer.
 
+.PARAMETER NoViewer
+    Do not put the OHIF viewer into the base stack. By default the bootstrap
+    sets COMPOSE_PROFILES=viewer, so ./build.sh builds and starts it — that
+    adds 5-20 minutes (and a lot of RAM) to the first build.
+
 .PARAMETER AutoReboot
     Reboot without asking when the WSL features require it.
 
@@ -50,6 +55,7 @@ param(
     [switch] $SkipStack,
     [switch] $NoUiAuth,
     [switch] $SkipPortainer,
+    [switch] $NoViewer,
     [switch] $AutoReboot,
     [switch] $Reset
 )
@@ -440,6 +446,7 @@ function Phase-Stack {
     # A fresh clone only has .env.example. Replace the dev password *before*
     # the first start: the Postgres volume is initialised with it.
     $password = New-Password
+    $viewerFlag = if ($NoViewer) { '0' } else { '1' }
     $script = @"
 set -e
 cd '$InstallPath'
@@ -451,11 +458,19 @@ if grep -q '^POSTGRES_PASSWORD=dev$' .env; then
 else
   echo '  Datenbank-Passwort war schon gesetzt'
 fi
+if [ '$viewerFlag' = '1' ]; then
+  if grep -q '^COMPOSE_PROFILES=' .env; then
+    sed -i 's|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=viewer|' .env
+  else
+    printf '\nCOMPOSE_PROFILES=viewer\n' >> .env
+  fi
+  echo '  OHIF-Viewer läuft mit (COMPOSE_PROFILES=viewer)'
+fi
 "@
     Invoke-WslCapture -User $WslUser -Script $script | Out-Null
     Write-Ok 'Konfiguration vorbereitet (.env, starkes Datenbank-Passwort)'
 
-    Write-Note 'baue die Images und starte den Stack — beim ersten Mal dauert das (OE3-Build) …'
+    Write-Note 'baue die Images und starte den Stack — beim ersten Mal dauert das (OE3- und ggf. OHIF-Build) …'
     Invoke-WslStream -User $WslUser -Script "cd '$InstallPath' && ./build.sh --health"
 
     Write-Note 'Konfigurations-Check …'

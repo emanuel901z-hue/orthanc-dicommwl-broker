@@ -49,6 +49,7 @@ Phasen werden übersprungen, jede Phase ist idempotent.
 | `-Check` | — | nur prüfen, nichts ändern |
 | `-SkipStack` | — | Umgebung vorbereiten, Stack nicht bauen/starten |
 | `-NoUiAuth` / `-SkipPortainer` | — | Basic-Auth bzw. Portainer weglassen |
+| `-NoViewer` | — | OHIF-Viewer **nicht** in den Basis-Stack aufnehmen (siehe unten) |
 | `-AutoReboot` | — | beim nötigen Neustart nicht nachfragen |
 | `-Reset` | — | Zustandsdatei löschen, alle Phasen erneut |
 
@@ -111,6 +112,19 @@ docker compose --profile viewer up -d --no-build ohif
 `--no-build` nutzt ein vorhandenes Image; ohne die Option wird der Viewer neu
 gebaut (5–20 min, speicherhungrig). Ein `docker compose up -d` **ohne** Profil
 entfernt ihn nicht, ein `docker compose down` nimmt ihn aber mit.
+
+Damit der Viewer **immer** mitläuft, genügt eine Zeile in der `.env` — dann ist
+das Profil dauerhaft aktiv und `./build.sh` baut und startet ihn mit:
+
+```bash
+printf '\nCOMPOSE_PROFILES=viewer\n' >> /opt/orthanc-dicommwl-broker/.env
+```
+
+Das ist bewusst eine Einstellung **der Anlage** und keine Änderung am Compose:
+`ci-local.sh` und `test-stack.sh` fahren mit `.env.test` und bleiben dadurch
+schnell. Zu bedenken ist der erste Lauf: solange kein Build-Cache existiert
+(`docker system df` → `Build Cache 0B`), baut `./build.sh` den Viewer einmal
+vollständig. Danach greift der Cache.
 
 Passwörter liegen in der Distro (root, 600):
 
