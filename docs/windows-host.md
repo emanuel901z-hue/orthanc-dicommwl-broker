@@ -16,8 +16,7 @@ nur.
 | Rechte | PowerShell **als Administrator** |
 | Virtualisierung | im BIOS/UEFI aktiv (VT-x / AMD-V) |
 | Platz | ~30 GB auf `C:` (WSL-VHD + Images; der OHIF-Build braucht mehr) |
-| Netz | Internet für den WSL-Download, die Docker-Pakete und den Clone |
-| RAM | ab 8 GB. Weniger macht den OHIF-Viewer-Build unbrauchbar |
+| Netz | Internet für den WSL-Download, die Docker-Pakete und den Clone || RAM | ab 8 GB. Weniger macht den OHIF-Viewer-Build unbrauchbar |
 
 ## Schnellstart
 
@@ -35,6 +34,33 @@ Das Skript braucht **zwei Läufe**: Die WSL-Features erfordern einen Neustart.
 Es sagt am Ende jedes Laufs, mit welcher Zeile es weitergeht; bereits erledigte
 Phasen werden übersprungen, jede Phase ist idempotent.
 
+### Images vorbereiten statt bauen (`-UseExistingImages`)
+
+`./build.sh` baut **immer** — der OE3-Build dauert 5–20 min und braucht RAM. Wer
+die Images auf einem Build-Host vorbereitet und überträgt, startet den Stack mit
+`-UseExistingImages` daraus:
+
+```bash
+# Build-Host
+docker save postgres:16-alpine orthancteam/orthanc:latest-full \
+  mwl-broker-mwl-broker:latest mwl-broker-oe3:latest mwl-broker-ohif:latest | gzip > images.tgz
+
+# Zielhost, in der Distro
+gunzip -c images.tgz | docker load
+```
+
+Der Schalter prüft, dass alle benötigten Images vorhanden sind (inklusive
+`mwl-broker-ohif`, wenn `COMPOSE_PROFILES` den Viewer einschaltet) und startet
+dann mit `docker compose up -d --no-build`.
+
+**Ein komplett internetfreier Aufbau ist damit nicht möglich.** Die Phasen 3
+(WSL-MSI), 4 (Ubuntu-Distro), 6 (Clone) und 7 (Docker-Pakete) holen weiterhin
+aus dem Netz — das wäre ein eigener Ausbaustand (MSI, Rootfs und debs
+mittransportieren). Der Preflight warnt, wenn GitHub, Docker oder `aka.ms`
+nicht erreichbar sind. Für den Offline-Fall dieser Anlage wurden Repository
+(als Tarball, ohne `.env`, `node_modules`, `.venv`) und Images übertragen und
+der Stack von Hand mit `docker compose up -d --no-build` gestartet.
+
 ## Parameter
 
 | Parameter | Default | Wirkung |
@@ -50,6 +76,7 @@ Phasen werden übersprungen, jede Phase ist idempotent.
 | `-SkipStack` | — | Umgebung vorbereiten, Stack nicht bauen/starten |
 | `-NoUiAuth` / `-SkipPortainer` | — | Basic-Auth bzw. Portainer weglassen |
 | `-NoViewer` | — | OHIF-Viewer **nicht** in den Basis-Stack aufnehmen (siehe unten) |
+| `-UseExistingImages` | — | Stack aus bereits geladenen Images starten statt bauen (siehe unten) |
 | `-AutoReboot` | — | beim nötigen Neustart nicht nachfragen |
 | `-Reset` | — | Zustandsdatei löschen, alle Phasen erneut |
 
@@ -67,8 +94,9 @@ Phasen werden übersprungen, jede Phase ist idempotent.
 | 8 `stack` | `.env` mit starkem Datenbank-Passwort, `./build.sh --health`, `./setup.sh --check` |
 | 9 `ui-auth` | HTTP-Basic-Auth vor die Oberfläche (Benutzer `mwlbroker`) |
 | 10 `portainer` | Portainer CE mit vorab gesetztem Admin-Passwort |
-| 11 `keep-alive` | Geplante Aufgabe hält eine WSL-Sitzung offen (siehe unten) |
-| 12 `summary` | Adressen, Passwortdateien, offene Punkte |
+| 11 `network` | Hyper-V-Firewall für WSL ausschalten, WSL neu starten |
+| 12 `keep-alive` | Geplante Aufgabe hält eine WSL-Sitzung offen (siehe unten) |
+| 13 `summary` | Adressen, Selbstprüfung der Ports, offene Punkte |
 
 Warum diese Schritte nötig sind (jeder davon hat uns einmal Zeit gekostet):
 

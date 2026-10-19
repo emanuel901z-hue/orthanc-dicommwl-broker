@@ -33,6 +33,13 @@
 .PARAMETER AutoReboot
     Reboot without asking when the WSL features require it.
 
+.PARAMETER UseExistingImages
+    Start the stack from images that are already loaded instead of building
+    them. For installations without internet: the base images, pip and npm all
+    come from the network, so ./build.sh cannot run there. Prepare the repo and
+    the images on a build host, transfer them, and run the bootstrap with this
+    switch.
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1 -Check
 
@@ -57,7 +64,8 @@ param(
     [switch] $SkipPortainer,
     [switch] $NoViewer,
     [switch] $AutoReboot,
-    [switch] $Reset
+    [switch] $Reset,
+    [switch] $UseExistingImages
 )
 
 $ErrorActionPreference = 'Stop'
@@ -194,7 +202,7 @@ $RerunCommand = "powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`" " +
 # ── Phasen ───────────────────────────────────────────────────────────────────
 
 function Phase-Preflight {
-    Write-Step '1/12  Umgebung prüfen'
+    Write-Step '1/13  Umgebung prüfen'
 
     if (-not (Test-Admin)) { throw 'Bitte in einer PowerShell mit Administratorrechten ausführen.' }
     Write-Ok 'Administratorrechte vorhanden'
@@ -241,7 +249,7 @@ function Phase-Preflight {
 }
 
 function Phase-Features {
-    Write-Step '2/12  WSL-Features aktivieren'
+    Write-Step '2/13  WSL-Features aktivieren'
 
     $changed = $false
     foreach ($feature in 'Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform') {
@@ -267,7 +275,7 @@ function Phase-Features {
 }
 
 function Phase-WslRuntime {
-    Write-Step '3/12  WSL-Laufzeit installieren'
+    Write-Step '3/13  WSL-Laufzeit installieren'
 
     if (Test-WslRuntime) {
         $previous = $ErrorActionPreference
@@ -309,7 +317,7 @@ function Phase-WslRuntime {
 }
 
 function Phase-Distro {
-    Write-Step '4/12  Ubuntu-Distribution einrichten'
+    Write-Step '4/13  Ubuntu-Distribution einrichten'
 
     if (Get-WslDistros | Where-Object { $_ -eq $Distro }) {
         Write-Ok "$Distro ist bereits installiert"
@@ -354,7 +362,7 @@ id "`$U"
 }
 
 function Phase-WslConfig {
-    Write-Step '5/12  WSL-Konfiguration (.wslconfig)'
+    Write-Step '5/13  WSL-Konfiguration (.wslconfig)'
 
     # Mirrored networking is what makes the published ports reachable from the
     # LAN *and* from the Windows desktop; hostAddressLoopback is required for
@@ -394,7 +402,7 @@ hostAddressLoopback=true
 }
 
 function Phase-Repo {
-    Write-Step '6/12  Repository klonen'
+    Write-Step '6/13  Repository klonen'
 
     $parent = ($InstallPath -replace '/[^/]+$', '')
     Invoke-WslCapture -User 'root' -Script "mkdir -p '$parent' && chown $WslUser '$parent'" | Out-Null
@@ -429,7 +437,7 @@ git submodule status
 }
 
 function Phase-Provision {
-    Write-Step '7/12  Docker und Workarounds in WSL einrichten'
+    Write-Step '7/13  Docker und Workarounds in WSL einrichten'
 
     $script = @"
 set -e
@@ -441,7 +449,7 @@ bash '$InstallPath/deploy/windows/wsl-provision.sh'
 }
 
 function Phase-Stack {
-    Write-Step '8/12  Stack bauen und starten'
+    Write-Step '8/13  Stack bauen und starten'
 
     # A fresh clone only has .env.example. Replace the dev password *before*
     # the first start: the Postgres volume is initialised with it.
@@ -470,8 +478,23 @@ fi
     Invoke-WslCapture -User $WslUser -Script $script | Out-Null
     Write-Ok 'Konfiguration vorbereitet (.env, starkes Datenbank-Passwort)'
 
-    Write-Note 'baue die Images und starte den Stack — beim ersten Mal dauert das (OE3- und ggf. OHIF-Build) …'
-    Invoke-WslStream -User $WslUser -Script "cd '$InstallPath' && ./build.sh --health"
+    if ($UseExistingImages) {
+        Write-Note 'starte den Stack aus den vorhandenen Images (kein Build) …'
+        Invoke-WslStream -User $WslUser -Script @"
+set -e
+cd '$InstallPath'
+imgs="postgres:16-alpine orthancteam/orthanc:latest-full mwl-broker-mwl-broker:latest mwl-broker-oe3:latest"
+if grep -q '^COMPOSE_PROFILES=' .env 2>/dev/null; then imgs="`$imgs mwl-broker-ohif:latest"; fi
+for img in `$imgs; do
+  docker image inspect `$img >/dev/null 2>&1 || { echo "  FEHLT: `$img — Image uebertragen oder ohne -UseExistingImages bauen"; exit 1; }
+done
+docker compose up -d --no-build
+docker compose ps --format '{{.Service}}  {{.Status}}'
+"@
+    } else {
+        Write-Note 'baue die Images und starte den Stack — beim ersten Mal dauert das (OE3- und ggf. OHIF-Build) …'
+        Invoke-WslStream -User $WslUser -Script "cd '$InstallPath' && ./build.sh --health"
+    }
 
     Write-Note 'Konfigurations-Check …'
     Invoke-WslStream -User $WslUser -AllowFail -Script "cd '$InstallPath' && ./setup.sh --check"
@@ -479,7 +502,7 @@ fi
 }
 
 function Phase-UiAuth {
-    Write-Step '9/12  Oberfläche mit Passwort schützen'
+    Write-Step '9/13  Oberfläche mit Passwort schützen'
 
     $password = New-Password
     $script = @"
@@ -507,7 +530,7 @@ docker compose up -d --no-build oe3
 }
 
 function Phase-Portainer {
-    Write-Step '10/12  Portainer bereitstellen'
+    Write-Step '10/13  Portainer bereitstellen'
 
     $password = New-Password
     $script = @"
@@ -534,8 +557,39 @@ docker ps --filter name=portainer --format '{{.Names}} {{.Status}}'
     Write-Note 'Passwort: /opt/portainer/admin-password in der WSL-Distro'
 }
 
+function Phase-Network {
+    Write-Step '11/13  Netzwerk und Firewall'
+
+    $vmId = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
+
+    $profiles = Get-NetFirewallProfile | ForEach-Object { "$($_.Name)=$($_.Enabled)" }
+    Write-Note "Windows-Firewall: $($profiles -join '  ')"
+    Write-Note 'Sie schützt den Windows-Host; WSL-Traffic filtert sie nicht (gemessen).'
+
+    $hyper = Get-NetFirewallHyperVVMSetting -Name $vmId -PolicyStore ActiveStore -ErrorAction SilentlyContinue
+    if ($hyper -and $hyper.Enabled) {
+        Set-NetFirewallHyperVVMSetting -Name $vmId -Enabled False
+        Write-Ok 'Hyper-V-Firewall für WSL abgeschaltet'
+        Write-Note 'Sie blockt sonst JEDEN Inbound — auch Ports mit ausdrücklicher Allow-Regel'
+        Write-Note '(geprüft mit RemoteAddresses Any und expliziter VMCreatorId).'
+        Write-Note 'starte WSL neu, damit die Weiterleitung frisch aufgebaut wird …'
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { & wsl.exe --shutdown; Start-Sleep -Seconds 4 } finally { $ErrorActionPreference = $previous }
+        if (Get-ScheduledTask -TaskName 'MWL-Broker-KeepAlive' -ErrorAction SilentlyContinue) {
+            Start-ScheduledTask -TaskName 'MWL-Broker-KeepAlive'
+            Start-Sleep -Seconds 6
+        }
+        Write-Ok 'WSL neu gestartet'
+    } else {
+        Write-Ok 'Hyper-V-Firewall für WSL ist nicht aktiv (so soll es sein)'
+    }
+    Write-Note 'Der Schutz liegt deshalb im Stack: Basic-Auth vor der Oberfläche,'
+    Write-Note 'AET-Whitelist und DICOM-TLS für die DICOM-Ports.'
+}
+
 function Phase-KeepAlive {
-    Write-Step '11/12  Stack am Leben halten'
+    Write-Step '12/13  Stack am Leben halten'
 
     $action = New-ScheduledTaskAction -Execute 'wsl.exe' -Argument "-d $Distro -u root -- tail -f /dev/null"
     $trigger = New-ScheduledTaskTrigger -AtStartup
@@ -560,7 +614,7 @@ function Phase-KeepAlive {
 }
 
 function Phase-Summary {
-    Write-Step '12/12  Zusammenfassung'
+    Write-Step '13/13  Zusammenfassung'
 
     $script = @"
 cd '$InstallPath' 2>/dev/null || exit 0
@@ -589,6 +643,16 @@ grep -E '^(OE3_PORT|BROKER_DICOM_PORT|BROKER_AET|ORTHANC_DICOM_PORT|ORTHANC_AET)
     Write-Note "                (ohne die UID bleibt der Viewer leer — showStudyList ist aus)"
 
     Write-Host ''
+    Write-Host '  Selbstprüfung (über die Host-Adresse, nicht localhost)' -ForegroundColor Cyan
+    foreach ($port in 18082, 9443, 11113, 14242) {
+        if (Test-TcpPort -Target $ip -Port $port -TimeoutMs 4000) {
+            Write-Ok "Port $port erreichbar"
+        } else {
+            Write-Warn "Port $port NICHT erreichbar — Firewall und Weiterleitung prüfen"
+        }
+    }
+
+    Write-Host ''
     Write-Host '  Noch offen (in der Oberfläche)' -ForegroundColor Cyan
     Write-Note 'AET-Whitelist    Übersicht → Konfigurations-Check, sonst darf jedes Gerät zugreifen'
     Write-Note 'Alarmierung      Einstellungen → Webhook (Slack/Teams-kompatibel; E-Mail braucht eine Brücke)'
@@ -614,6 +678,7 @@ $PhaseTable = @(
     @{ Name = 'stack';       Run = { Phase-Stack } },
     @{ Name = 'ui-auth';     Run = { Phase-UiAuth } },
     @{ Name = 'portainer';   Run = { Phase-Portainer } },
+    @{ Name = 'network';     Run = { Phase-Network } },
     @{ Name = 'keep-alive';  Run = { Phase-KeepAlive } },
     @{ Name = 'summary';     Run = { Phase-Summary } }
 )

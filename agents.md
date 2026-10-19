@@ -298,7 +298,9 @@ Workspace betrifft:
   die Host-IP — ein `portproxy` auf 127.0.0.1 belegt den Port des Containers und
   verhindert dessen Start), jede Firewall-Änderung braucht danach
   `wsl --shutdown`, und die Hyper-V-Firewall für WSL blockt in diesem Build
-  **jeden** Inbound — sie darf nicht aktiviert werden. Die Stack-Ports lassen
+  **jeden** Inbound — sie darf nicht aktiviert werden (der Bootstrap schaltet
+  sie in Phase 11 ab und startet WSL neu; ohne das ist der Stack auf einem
+  frischen Windows, dessen Firewall an ist, aus dem LAN nicht erreichbar). Die Stack-Ports lassen
   sich von Windows aus nicht filtern; der Schutz liegt deshalb im Stack
   (Basic-Auth vor der Oberfläche, AET-Whitelist und DICOM-TLS für die
   DICOM-Ports). Die Host-IP steckt in **keiner** Konfiguration — beim
