@@ -545,6 +545,8 @@ grep -E '^(OE3_PORT|BROKER_DICOM_PORT|BROKER_AET|ORTHANC_DICOM_PORT|ORTHANC_AET)
     Write-Note "DICOM           AET MWLBROKER, Port 11113 — hierauf zeigen die Modalitäten"
     Write-Note "Orthanc DICOM   AET ORTHANC,   Port 14242"
     Write-Note "Broker-API      nur aus der WSL-Shell: http://127.0.0.1:18081/docs"
+    Write-Note "OHIF-Viewer     http://${ip}:18082/ohif/viewer?StudyInstanceUIDs=<UID>"
+    Write-Note "                (ohne die UID bleibt der Viewer leer — showStudyList ist aus)"
 
     Write-Host ''
     Write-Host '  Noch offen (in der Oberfläche)' -ForegroundColor Cyan

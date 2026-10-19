@@ -344,7 +344,7 @@ RUN echo "// Service Worker deaktiviert (HTTP-Kontext)" > /usr/share/nginx/html/
 
 # Custom CSS: Thin scrollbar fuer die SidePanel-Tab-Grid.
 COPY ohif-viewer/custom-styles.css /usr/share/nginx/html/custom-styles.css
-RUN sed -i 's|</head>|<link rel="stylesheet" href="/custom-styles.css"></head>|' /usr/share/nginx/html/index.html
+RUN sed -i 's|</head>|<link rel="stylesheet" href="/ohif/custom-styles.css"></head>|' /usr/share/nginx/html/index.html
 
 # Clipboard-Polyfill: Die Clipboard-API (navigator.clipboard) ist nur in
 # sicheren Kontexten (HTTPS/localhost) verfuegbar. Im RIS-Einsatz wird OHIF

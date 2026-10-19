@@ -91,7 +91,26 @@ Portainer       https://<host-ip>:9443
 DICOM           AET MWLBROKER, Port 11113   ← hierauf zeigen die Modalitäten
 Orthanc DICOM   AET ORTHANC,   Port 14242
 Broker-API      nur aus der Distro: http://127.0.0.1:18081/docs
+OHIF-Viewer     http://<host-ip>:18082/ohif/viewer?StudyInstanceUIDs=<UID>
 ```
+
+**Der Viewer braucht `?StudyInstanceUIDs=<UID>`.** Ohne den Parameter bleibt die
+Seite leer — `showStudyList: false` in `deploy/ohif-config.js` schaltet die
+eigene Studienliste des Viewers ab, weil die Studienliste in OE3 lebt. Wer den
+Viewer direkt aufruft, muss die UID also mitgeben (mehrere komma-getrennt).
+Der Weg über die Oberfläche — *Studien* → Studie → **In OHIF öffnen** — baut
+genau diese URL selbst.
+
+Die Viewer-Adresse erscheint nur, wenn der Viewer läuft (Profil `viewer`):
+
+```bash
+cd /opt/orthanc-dicommwl-broker
+docker compose --profile viewer up -d --no-build ohif
+```
+
+`--no-build` nutzt ein vorhandenes Image; ohne die Option wird der Viewer neu
+gebaut (5–20 min, speicherhungrig). Ein `docker compose up -d` **ohne** Profil
+entfernt ihn nicht, ein `docker compose down` nimmt ihn aber mit.
 
 Passwörter liegen in der Distro (root, 600):
 
