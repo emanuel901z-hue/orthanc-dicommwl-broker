@@ -95,8 +95,33 @@ Oberfläche      http://<host-ip>:18082/oe3/      Benutzer mwlbroker
 Portainer       https://<host-ip>:9443
 DICOM           AET MWLBROKER, Port 11113   ← hierauf zeigen die Modalitäten
 Orthanc DICOM   AET ORTHANC,   Port 14242
-Broker-API      nur aus der Distro: http://127.0.0.1:18081/docs
+Broker-API      http://<host-ip>:18082/broker-api/docs   (Swagger, hinter dem Passwort)
+                direkt nur aus der Distro: http://127.0.0.1:18081/docs
 OHIF-Viewer     http://<host-ip>:18082/ohif/viewer?StudyInstanceUIDs=<UID>
+```
+
+**Warum `http://<host-ip>:18081` nicht geht — und das Absicht ist.** Die Broker-API
+bindet bewusst nur auf `127.0.0.1` **innerhalb** der Distro (`BROKER_API_BIND`),
+damit sie nicht ungeschützt im LAN steht; und Windows-`localhost` erreicht die
+Distro ohnehin nicht (Regel 2). Erreichbar ist sie über den OE3-Proxy, und der
+verlangt das Passwort:
+
+```text
+http://<host-ip>:18082/broker-api/docs          Swagger UI (107 Operationen)
+http://<host-ip>:18082/broker-api/redoc         ReDoc
+http://<host-ip>:18082/broker-api/openapi.json  die Spezifikation
+```
+
+Die Swagger-Seite verweist intern auf `/openapi.json` (absoluter Pfad). Damit
+das die Spezifikation liefert und nicht die SPA-Startseite, hat die
+nginx-Konfiguration eine eigene Location `location = /openapi.json`. Ohne sie
+lädt die Seite, bleibt aber leer — „Failed to load API definition".
+
+Wer die API wirklich direkt braucht (Skripte auf dem Host), geht über die
+Distro-Shell:
+
+```powershell
+wsl -d Ubuntu-24.04 -- curl -s http://127.0.0.1:18081/api/v1/status
 ```
 
 **Der Viewer braucht `?StudyInstanceUIDs=<UID>`.** Ohne den Parameter bleibt die

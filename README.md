@@ -237,7 +237,8 @@ Die Vollständigkeitsprüfung der API (Routen ↔ UI-Aufrufe ↔ Tests ↔ Doku,
 inklusive Live-Belegen und offenen Befunden) steht in
 [`docs/api-completeness-audit.md`](docs/api-completeness-audit.md).
 
-Swagger UI: `http://<broker>:8081/docs` · ReDoc: `/redoc` ·
+Swagger UI: `http://127.0.0.1:18081/docs` (bzw. über den OE3-Proxy
+`http://<host>:18082/broker-api/docs`, hinter dem Passwort) · ReDoc: `/redoc` ·
 Spezifikation: `/openapi.json` — jede Operation mit Beschreibung, dokumentierten
 Parametern und Fehlerantworten (der Vertrag wird per Test erzwungen).
 
